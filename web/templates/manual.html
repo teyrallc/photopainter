@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}PhotoPainter - 使用手冊{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-book"></i> 使用手冊</h2>
+
+<div class="row">
+    <div class="col-lg-3 mb-4">
+        <div class="list-group sticky-top" style="top: 80px;">
+            <a href="#hardware" class="list-group-item list-group-item-action">硬體需求</a>
+            <a href="#assembly" class="list-group-item list-group-item-action">組裝說明</a>
+            <a href="#install" class="list-group-item list-group-item-action">軟體安裝</a>
+            <a href="#usage-web" class="list-group-item list-group-item-action">Web 控制台</a>
+            <a href="#usage-cli" class="list-group-item list-group-item-action">命令列使用</a>
+            <a href="#cron" class="list-group-item list-group-item-action">自動排程</a>
+            <a href="#buttons" class="list-group-item list-group-item-action">按鍵控制</a>
+            <a href="#api" class="list-group-item list-group-item-action">API 文件</a>
+            <a href="#troubleshooting" class="list-group-item list-group-item-action">故障排除</a>
+        </div>
+    </div>
+
+    <div class="col-lg-9">
+        <!-- Hardware -->
+        <section id="hardware" class="mb-5">
+            <h3>硬體需求</h3>
+            <table class="table table-bordered">
+                <tbody>
+                    <tr><td><strong>主控板</strong></td><td>Raspberry Pi Zero 2 W</td></tr>
+                    <tr><td><strong>顯示器</strong></td><td>Waveshare 7.3 吋 6 色電子紙 (800 x 480)</td></tr>
+                    <tr><td><strong>記憶卡</strong></td><td>32GB 以上 microSD 卡 (建議 64GB)</td></tr>
+                    <tr><td><strong>電源</strong></td><td>5V/2A micro USB 電源供應器</td></tr>
+                    <tr><td><strong>散熱</strong></td><td>建議加裝散熱片 (AI 生成時溫度可達 70°C)</td></tr>
+                    <tr><td><strong>顯示色彩</strong></td><td>黑、白、綠、藍、紅、黃、橘 (7 色)</td></tr>
+                    <tr><td><strong>解析度</strong></td><td>800 x 480 像素</td></tr>
+                    <tr><td><strong>刷新時間</strong></td><td>約 12 秒</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Assembly -->
+        <section id="assembly" class="mb-5">
+            <h3>組裝說明</h3>
+            <ol>
+                <li>將 microSD 卡燒錄 Raspbian Bullseye Lite 系統</li>
+                <li>設定 WiFi 及啟用 SSH（透過 <code>raspi-config</code>）</li>
+                <li>將 Raspberry Pi Zero 2 插入 Waveshare PhotoPainter 背板</li>
+                <li>確認電子紙排線連接正確</li>
+                <li>接上電源啟動</li>
+            </ol>
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                SPI 介面必須啟用！請執行 <code>sudo raspi-config</code> → Interface Options → SPI → Enable
+            </div>
+        </section>
+
+        <!-- Installation -->
+        <section id="install" class="mb-5">
+            <h3>軟體安裝</h3>
+            <h5>一鍵安裝</h5>
+            <pre class="bg-dark text-light p-3 rounded"><code># 下載專案
+git clone https://github.com/teyrallc/photopainter.git
+cd photopainter
+
+# 執行安裝腳本（需要數小時）
+bash scripts/install.sh</code></pre>
+
+            <h5>安裝內容</h5>
+            <ul>
+                <li>系統套件：cmake, python3, git, OpenCV 等</li>
+                <li>Python 虛擬環境及所有套件</li>
+                <li>OnnxStream 框架編譯（Stable Diffusion 推理引擎）</li>
+                <li>Stable Diffusion XL Turbo 模型下載（約 8GB）</li>
+            </ul>
+
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle"></i>
+                安裝過程需要數小時（主要是模型下載和編譯）。請確保網路穩定。
+            </div>
+        </section>
+
+        <!-- Web Usage -->
+        <section id="usage-web" class="mb-5">
+            <h3>Web 控制台</h3>
+            <h5>啟動 Web 伺服器</h5>
+            <pre class="bg-dark text-light p-3 rounded"><code># 啟動 Web 介面
+cd photopainter
+source venv/bin/activate
+python web/app.py</code></pre>
+            <p>啟動後，在同一網路的裝置上開啟瀏覽器，輸入：</p>
+            <pre class="bg-dark text-light p-3 rounded"><code>http://&lt;你的Pi的IP&gt;:5000</code></pre>
+
+            <h5>功能說明</h5>
+            <table class="table table-bordered">
+                <thead><tr><th>頁面</th><th>功能</th></tr></thead>
+                <tbody>
+                    <tr><td><strong>控制台</strong></td><td>顯示器狀態、快速操作、最近圖片</td></tr>
+                    <tr><td><strong>上傳圖片</strong></td><td>拖曳上傳、預覽原圖及電子紙效果、一鍵顯示</td></tr>
+                    <tr><td><strong>AI 生成</strong></td><td>選擇提示詞模板或自訂、設定參數、即時進度</td></tr>
+                    <tr><td><strong>圖庫</strong></td><td>瀏覽所有圖片、預覽/顯示/刪除</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- CLI Usage -->
+        <section id="usage-cli" class="mb-5">
+            <h3>命令列使用</h3>
+            <h5>生成圖片</h5>
+            <pre class="bg-dark text-light p-3 rounded"><code># 使用隨機提示詞生成
+python src/generate_picture.py output/
+
+# 使用自訂提示詞
+python src/generate_picture.py output/ --prompt "a beautiful sunset as an oil painting"
+
+# 使用風景模板
+python src/generate_picture.py output/ --prompts prompts/landscapes.json
+
+# 指定 seed 和步數
+python src/generate_picture.py output/ --seed 42 --steps 8</code></pre>
+
+            <h5>顯示圖片</h5>
+            <pre class="bg-dark text-light p-3 rounded"><code># 顯示到電子紙
+python src/display_picture.py output/output.png
+
+# 智慧裁切並顯示
+python src/display_picture.py some_photo.jpg
+
+# 模擬模式（不需要電子紙硬體）
+python src/display_picture.py image.png -s -o preview.png
+
+# 產生 7 色量化預覽
+python src/display_picture.py image.png -s -q -o preview.png</code></pre>
+        </section>
+
+        <!-- Cron -->
+        <section id="cron" class="mb-5">
+            <h3>自動排程</h3>
+            <p>使用 crontab 設定定時生成並顯示：</p>
+            <pre class="bg-dark text-light p-3 rounded"><code># 編輯排程
+crontab -e
+
+# 每天早上 8 點生成新圖片並顯示
+0 8 * * * cd /home/pi/photopainter && venv/bin/python src/generate_picture.py output/ && venv/bin/python src/display_picture.py output/output.png
+
+# 每 6 小時生成一次
+0 */6 * * * cd /home/pi/photopainter && venv/bin/python src/generate_picture.py output/ && venv/bin/python src/display_picture.py output/output.png
+
+# 開機時自動啟動 Web 介面
+@reboot cd /home/pi/photopainter && venv/bin/python web/app.py &</code></pre>
+        </section>
+
+        <!-- Buttons -->
+        <section id="buttons" class="mb-5">
+            <h3>按鍵控制</h3>
+            <pre class="bg-dark text-light p-3 rounded"><code># 啟動按鍵控制器
+python src/display_buttons.py</code></pre>
+            <table class="table table-bordered">
+                <thead><tr><th>按鍵</th><th>GPIO</th><th>功能</th></tr></thead>
+                <tbody>
+                    <tr><td><strong>A</strong></td><td>GPIO 5</td><td>顯示最新圖片</td></tr>
+                    <tr><td><strong>B</strong></td><td>GPIO 6</td><td>上一張圖片</td></tr>
+                    <tr><td><strong>C</strong></td><td>GPIO 16</td><td>下一張圖片</td></tr>
+                    <tr><td><strong>D</strong></td><td>GPIO 24</td><td>關機</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- API -->
+        <section id="api" class="mb-5">
+            <h3>API 文件</h3>
+            <p>Web 介面提供 RESTful API，可用於整合其他系統：</p>
+            <table class="table table-bordered table-sm">
+                <thead>
+                    <tr><th>方法</th><th>路徑</th><th>說明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>POST</code></td><td><code>/api/upload</code></td><td>上傳圖片 (multipart/form-data, field: file)</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/display</code></td><td>顯示圖片 (JSON: {"filename": "..."})</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/preview/&lt;filename&gt;</code></td><td>取得 7 色量化預覽圖</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/generate</code></td><td>開始 AI 生成 (JSON: {"prompt", "prompt_file", "seed", "steps"})</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/generate/status</code></td><td>查詢生成進度</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/images</code></td><td>列出所有圖片</td></tr>
+                    <tr><td><code>DELETE</code></td><td><code>/api/images/&lt;filename&gt;</code></td><td>刪除圖片</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/clear</code></td><td>清除螢幕</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/sleep</code></td><td>螢幕休眠</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/status</code></td><td>系統狀態</td></tr>
+                </tbody>
+            </table>
+
+            <h5>API 範例</h5>
+            <pre class="bg-dark text-light p-3 rounded"><code># 上傳圖片
+curl -F "file=@photo.jpg" http://pi:5000/api/upload
+
+# 顯示圖片到電子紙
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"filename": "photo.jpg"}' http://pi:5000/api/display
+
+# 開始 AI 生成
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"prompt": "a sunset", "steps": 5}' http://pi:5000/api/generate
+
+# 查詢生成狀態
+curl http://pi:5000/api/generate/status</code></pre>
+        </section>
+
+        <!-- Troubleshooting -->
+        <section id="troubleshooting" class="mb-5">
+            <h3>故障排除</h3>
+            <div class="accordion" id="troubleshootAccordion">
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#t1">
+                            電子紙無法顯示
+                        </button>
+                    </h2>
+                    <div id="t1" class="accordion-collapse collapse">
+                        <div class="accordion-body">
+                            <ol>
+                                <li>確認 SPI 已啟用：<code>sudo raspi-config</code> → Interface Options → SPI</li>
+                                <li>檢查排線連接是否牢固</li>
+                                <li>確認使用正確的 GPIO 腳位</li>
+                                <li>測試：<code>python -c "from lib.waveshare_epd import epd7in3f; e=epd7in3f.EPD(); e.init(); e.Clear(); e.sleep()"</code></li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#t2">
+                            AI 生成失敗
+                        </button>
+                    </h2>
+                    <div id="t2" class="accordion-collapse collapse">
+                        <div class="accordion-body">
+                            <ol>
+                                <li>確認 OnnxStream 已成功編譯：<code>ls OnnxStream/src/build/sd</code></li>
+                                <li>確認模型已下載：<code>ls models/stable-diffusion-xl-turbo-1.0-anyshape-onnxstream/</code></li>
+                                <li>確認 swap 空間足夠：<code>free -h</code>（建議 1024MB swap）</li>
+                                <li>確認記憶卡剩餘空間：<code>df -h</code></li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#t3">
+                            Web 介面無法存取
+                        </button>
+                    </h2>
+                    <div id="t3" class="accordion-collapse collapse">
+                        <div class="accordion-body">
+                            <ol>
+                                <li>確認伺服器已啟動：<code>python web/app.py</code></li>
+                                <li>確認 Pi 的 IP 位址：<code>hostname -I</code></li>
+                                <li>確認防火牆允許 port 5000</li>
+                                <li>嘗試本機存取：<code>curl http://localhost:5000</code></li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#t4">
+                            溫度過高
+                        </button>
+                    </h2>
+                    <div id="t4" class="accordion-collapse collapse">
+                        <div class="accordion-body">
+                            <ul>
+                                <li>AI 生成時溫度可達 70°C，屬正常現象</li>
+                                <li>建議加裝散熱片</li>
+                                <li>監控溫度：<code>vcgencmd measure_temp</code></li>
+                                <li>若超過 80°C，請檢查散熱或減少生成頻率</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

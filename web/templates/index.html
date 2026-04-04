@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}PhotoPainter - 控制台{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-house"></i> 控制台</h2>
+
+<div class="row g-4">
+    <!-- Display Status -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-display"></i> 顯示器狀態
+            </div>
+            <div class="card-body">
+                <p><strong>狀態：</strong>
+                    <span class="badge bg-{{ 'success' if display_state.status == 'idle' else 'warning' }}">
+                        {{ display_state.status }}
+                    </span>
+                </p>
+                <p><strong>目前顯示：</strong> {{ display_state.current_image or '無' }}</p>
+                <p><strong>最後更新：</strong> {{ display_state.last_update or '尚未更新' }}</p>
+                <p><strong>圖片總數：</strong> {{ total_images }}</p>
+
+                <div class="d-flex gap-2 mt-3">
+                    <button class="btn btn-outline-warning btn-sm" onclick="clearDisplay()">
+                        <i class="bi bi-eraser"></i> 清除螢幕
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="sleepDisplay()">
+                        <i class="bi bi-moon"></i> 休眠
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-lightning"></i> 快速操作
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="/upload" class="btn btn-outline-primary">
+                        <i class="bi bi-upload"></i> 上傳新圖片
+                    </a>
+                    <a href="/generate" class="btn btn-outline-success">
+                        <i class="bi bi-magic"></i> AI 生成新圖片
+                    </a>
+                    <a href="/gallery" class="btn btn-outline-info">
+                        <i class="bi bi-images"></i> 瀏覽圖庫 ({{ total_images }} 張)
+                    </a>
+                </div>
+
+                {% if generation_state.running %}
+                <div class="alert alert-info mt-3 mb-0">
+                    <i class="bi bi-hourglass-split"></i> AI 正在生成中...
+                    <br><small>{{ generation_state.prompt }}</small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Images -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-clock-history"></i> 最近圖片
+            </div>
+            <div class="card-body">
+                {% if images %}
+                <div class="row g-3">
+                    {% for img in images %}
+                    <div class="col-6 col-md-4 col-lg-2">
+                        <div class="card h-100">
+                            <img src="/output/{{ img.filename }}" class="card-img-top"
+                                 alt="{{ img.filename }}" style="height: 120px; object-fit: cover;">
+                            <div class="card-body p-2">
+                                <small class="text-muted d-block text-truncate">{{ img.filename }}</small>
+                                <button class="btn btn-sm btn-primary mt-1 w-100"
+                                        onclick="displayImage('{{ img.filename }}')">
+                                    <i class="bi bi-display"></i> 顯示
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">尚無圖片。請上傳或生成新圖片。</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

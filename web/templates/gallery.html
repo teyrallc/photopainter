@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}PhotoPainter - 圖庫{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-images"></i> 圖庫 ({{ images|length }} 張)</h2>
+
+{% if images %}
+<div class="row g-3" id="gallery-grid">
+    {% for img in images %}
+    <div class="col-6 col-md-4 col-lg-3" id="img-card-{{ loop.index }}">
+        <div class="card h-100">
+            <img src="/output/{{ img.filename }}" class="card-img-top gallery-img"
+                 alt="{{ img.filename }}"
+                 data-filename="{{ img.filename }}"
+                 onclick="openPreview('{{ img.filename }}')"
+                 style="height: 180px; object-fit: cover; cursor: pointer;">
+            <div class="card-body p-2">
+                <small class="text-muted d-block text-truncate" title="{{ img.filename }}">
+                    {{ img.filename }}
+                </small>
+                <small class="text-muted">
+                    {{ (img.size / 1024) | round(1) }} KB
+                </small>
+                <div class="d-flex gap-1 mt-2">
+                    <button class="btn btn-sm btn-primary flex-fill"
+                            onclick="displayImage('{{ img.filename }}')">
+                        <i class="bi bi-display"></i> 顯示
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger"
+                            onclick="deleteImage('{{ img.filename }}', 'img-card-{{ loop.index }}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-5">
+    <i class="bi bi-images display-1 text-muted"></i>
+    <p class="mt-3 text-muted">圖庫是空的</p>
+    <a href="/upload" class="btn btn-primary me-2">
+        <i class="bi bi-upload"></i> 上傳圖片
+    </a>
+    <a href="/generate" class="btn btn-success">
+        <i class="bi bi-magic"></i> AI 生成
+    </a>
+</div>
+{% endif %}
+
+<!-- Preview Modal -->
+<div class="modal fade" id="previewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="previewModalTitle">圖片預覽</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs mb-3">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-original">
+                            原始圖片
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-epaper">
+                            電子紙效果
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="tab-original">
+                        <div class="epaper-frame">
+                            <img id="modal-original" class="img-fluid" alt="Original">
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="tab-epaper">
+                        <div class="epaper-frame">
+                            <img id="modal-epaper" class="img-fluid" alt="E-paper preview">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="modal-display-btn">
+                    <i class="bi bi-display"></i> 顯示到電子紙
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">關閉</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPreviewFile = null;
+
+function openPreview(filename) {
+    currentPreviewFile = filename;
+    document.getElementById('previewModalTitle').textContent = filename;
+    document.getElementById('modal-original').src = '/output/' + filename;
+    document.getElementById('modal-epaper').src = '/api/preview/' + filename;
+    document.getElementById('modal-display-btn').onclick = () => displayImage(filename);
+
+    const modal = new bootstrap.Modal(document.getElementById('previewModal'));
+    modal.show();
+}
+
+function deleteImage(filename, cardId) {
+    if (!confirm(`確定要刪除 ${filename} 嗎？`)) return;
+
+    fetch(`/api/images/${filename}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById(cardId).remove();
+                showToast('已刪除 ' + filename, 'success');
+            } else {
+                showToast(data.error, 'danger');
+            }
+        });
+}
+</script>
+{% endblock %}

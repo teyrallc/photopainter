@@ -1,0 +1,7 @@
+Flask==3.0.0
+opencv_contrib_python
+Pillow
+numpy
+spidev
+gpiozero
+RPi.GPIO
