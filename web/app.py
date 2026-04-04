@@ -439,7 +439,135 @@ def api_status():
             "prompt": generation_state["prompt"],
         },
         "total_images": len(get_image_list()),
+        "system": get_system_info(),
     })
+
+
+# ── System / Remote Management API ─────────────────────────────────────────
+
+def get_system_info():
+    """Collect Raspberry Pi system information."""
+    info = {
+        "hostname": "",
+        "ip_addresses": [],
+        "cpu_temp": None,
+        "mem_total_mb": None,
+        "mem_available_mb": None,
+        "disk_free_gb": None,
+        "uptime": None,
+        "git_version": None,
+    }
+
+    try:
+        info["hostname"] = subprocess.check_output(
+            ["hostname"], text=True, timeout=5
+        ).strip()
+    except Exception:
+        pass
+
+    try:
+        output = subprocess.check_output(
+            ["hostname", "-I"], text=True, timeout=5
+        ).strip()
+        info["ip_addresses"] = output.split()
+    except Exception:
+        pass
+
+    # CPU temperature
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            info["cpu_temp"] = round(int(f.read().strip()) / 1000.0, 1)
+    except Exception:
+        pass
+
+    # Memory
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    info["mem_total_mb"] = int(line.split()[1]) // 1024
+                elif line.startswith("MemAvailable:"):
+                    info["mem_available_mb"] = int(line.split()[1]) // 1024
+    except Exception:
+        pass
+
+    # Disk
+    try:
+        stat = os.statvfs(PROJECT_DIR)
+        info["disk_free_gb"] = round((stat.f_bavail * stat.f_frsize) / (1024**3), 1)
+    except Exception:
+        pass
+
+    # Uptime
+    try:
+        with open("/proc/uptime") as f:
+            uptime_secs = int(float(f.read().split()[0]))
+            hours, remainder = divmod(uptime_secs, 3600)
+            minutes, secs = divmod(remainder, 60)
+            info["uptime"] = f"{hours}h {minutes}m {secs}s"
+    except Exception:
+        pass
+
+    # Git version
+    try:
+        info["git_version"] = subprocess.check_output(
+            ["git", "-C", PROJECT_DIR, "log", "--oneline", "-1"],
+            text=True, timeout=5
+        ).strip()
+    except Exception:
+        pass
+
+    return info
+
+
+@app.route('/api/system/info')
+def api_system_info():
+    """Get detailed system information."""
+    return jsonify(get_system_info())
+
+
+@app.route('/api/system/update', methods=['POST'])
+def api_system_update():
+    """Pull latest code from git and restart service."""
+    update_script = os.path.join(PROJECT_DIR, "scripts", "update.sh")
+    if not os.path.exists(update_script):
+        return jsonify({"error": "Update script not found"}), 500
+
+    try:
+        result = subprocess.run(
+            ["bash", update_script],
+            capture_output=True, text=True, timeout=300,
+            cwd=PROJECT_DIR
+        )
+        return jsonify({
+            "success": result.returncode == 0,
+            "output": result.stdout,
+            "error": result.stderr if result.returncode != 0 else None,
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Update timed out"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/system/reboot', methods=['POST'])
+def api_system_reboot():
+    """Reboot the Raspberry Pi."""
+    try:
+        subprocess.Popen(["sudo", "reboot"])
+        return jsonify({"success": True, "message": "Rebooting..."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/system/shutdown', methods=['POST'])
+def api_system_shutdown():
+    """Shutdown the Raspberry Pi."""
+    try:
+        subprocess.Popen(["sudo", "shutdown", "-h", "now"])
+        return jsonify({"success": True, "message": "Shutting down..."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/output/<filename>')
@@ -449,9 +577,19 @@ def serve_image(filename):
 
 
 if __name__ == '__main__':
+    # Get local IP for display
+    ip = "localhost"
+    try:
+        output = subprocess.check_output(["hostname", "-I"], text=True, timeout=5).strip()
+        if output:
+            ip = output.split()[0]
+    except Exception:
+        pass
+
     print("=" * 60)
     print("  PhotoPainter Web Control Interface")
     print(f"  Output directory: {OUTPUT_DIR}")
-    print(f"  Open http://<your-pi-ip>:5000 in your browser")
+    print(f"  Local access:  http://localhost:5000")
+    print(f"  Network access: http://{ip}:5000")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000, debug=False)

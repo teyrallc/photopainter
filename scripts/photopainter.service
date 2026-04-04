@@ -1,0 +1,21 @@
+[Unit]
+Description=PhotoPainter Web Control Interface
+Documentation=https://github.com/teyrallc/photopainter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/pi/photopainter
+ExecStart=/home/pi/photopainter/venv/bin/python /home/pi/photopainter/web/app.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

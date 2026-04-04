@@ -98,33 +98,69 @@ fi
 
 # ── Step 7: Create output directory ─────────────────────────────────
 echo ""
-echo "[7/7] Final setup..."
+echo "[7/8] Creating output directory..."
 cd "$INSTALL_DIR"
 mkdir -p output
+
+# ── Step 8: Install systemd service ────────────────────────────────
+echo ""
+echo "[8/8] Setting up systemd service for auto-start..."
+
+# Create service file with correct paths
+SERVICE_FILE="/etc/systemd/system/photopainter.service"
+sudo bash -c "cat > $SERVICE_FILE" << SVCEOF
+[Unit]
+Description=PhotoPainter Web Control Interface
+Documentation=https://github.com/teyrallc/photopainter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/web/app.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable photopainter
+sudo systemctl start photopainter
+
+echo "Service installed and started."
+
+# Get IP address for display
+PI_IP=$(hostname -I | awk '{print $1}')
 
 echo ""
 echo "============================================"
 echo "  Installation Complete!"
 echo "============================================"
 echo ""
-echo "Usage:"
+echo "  Web 介面已啟動並設為開機自動執行！"
 echo ""
-echo "  1. Start Web Interface:"
-echo "     cd $INSTALL_DIR"
-echo "     source venv/bin/activate"
-echo "     python web/app.py"
-echo "     # Open http://<your-pi-ip>:5000"
+echo "  從任何裝置存取："
+echo "    http://${PI_IP}:5000"
 echo ""
-echo "  2. Generate AI image (CLI):"
-echo "     python src/generate_picture.py output/"
+echo "  服務管理："
+echo "    sudo systemctl status photopainter   # 查看狀態"
+echo "    sudo systemctl restart photopainter  # 重啟服務"
+echo "    sudo systemctl stop photopainter     # 停止服務"
+echo "    journalctl -u photopainter -f        # 查看日誌"
 echo ""
-echo "  3. Display image (CLI):"
-echo "     python src/display_picture.py output/output.png"
+echo "  遠端更新程式："
+echo "    bash scripts/update.sh               # SSH 更新"
+echo "    或在 Web 控制台點擊「遠端更新程式」   # Web 更新"
 echo ""
-echo "  4. Button controller:"
-echo "     python src/display_buttons.py"
-echo ""
-echo "  5. Auto-start on boot (optional):"
-echo "     crontab -e"
-echo "     Add: @reboot cd $INSTALL_DIR && venv/bin/python web/app.py &"
+echo "  命令列使用（可選）："
+echo "    source venv/bin/activate"
+echo "    python src/generate_picture.py output/    # AI 生成"
+echo "    python src/display_picture.py output/output.png  # 顯示圖片"
 echo ""
