@@ -2,7 +2,7 @@
 """
 Display an image on the Waveshare 7.3" 6-color e-paper display.
 Adapted from PaperPiAI (https://github.com/dylski/PaperPiAI)
-Uses Waveshare epd7in3f driver instead of Inky.
+Uses Waveshare epd7in3e driver instead of Inky.
 """
 
 import argparse
@@ -90,7 +90,7 @@ def crop(image, disp_w, disp_h, intelligent=True):
 
 def display_on_epaper(image):
     """Display a CV2 image on the Waveshare 7.3" e-paper display."""
-    from waveshare_epd import epd7in3f
+    from waveshare_epd import epd7in3e
 
     # Rotate if portrait
     if image.shape[0] > image.shape[1]:
@@ -103,7 +103,7 @@ def display_on_epaper(image):
     pil_image = Image.fromarray(image)
 
     # Initialize display
-    epd = epd7in3f.EPD()
+    epd = epd7in3e.EPD()
     print("Initializing e-paper display...")
     epd.init()
 

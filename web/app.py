@@ -58,15 +58,15 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'gif'}
 EPD_WIDTH = 800
 EPD_HEIGHT = 480
 
-# 7-color palette for e-paper simulation
+# 6-color palette for e-paper simulation (epd7in3e panel)
 EPAPER_PALETTE = (
-    0, 0, 0,        # Black
-    255, 255, 255,   # White
-    0, 255, 0,       # Green
-    0, 0, 255,       # Blue
-    255, 0, 0,       # Red
-    255, 255, 0,     # Yellow
-    255, 128, 0,     # Orange
+    0, 0, 0,        # Black   (index 0)
+    255, 255, 255,   # White   (index 1)
+    255, 255, 0,     # Yellow  (index 2)
+    255, 0, 0,       # Red     (index 3)
+    0, 0, 0,         # (unused, index 4)
+    0, 0, 255,       # Blue    (index 5)
+    0, 255, 0,       # Green   (index 6)
 ) + (0, 0, 0) * 249
 
 
@@ -144,12 +144,12 @@ def display_image_on_epaper(image_path):
     logger.info(f"Displaying image: {image_path}")
 
     try:
-        from waveshare_epd import epd7in3f
+        from waveshare_epd import epd7in3e
 
         img = Image.open(image_path).convert("RGB")
         img = img.resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
 
-        epd = epd7in3f.EPD()
+        epd = epd7in3e.EPD()
         logger.info("EPD init...")
         epd.init()
 
@@ -175,9 +175,9 @@ def display_test_pattern():
     """Send a test pattern to e-paper to verify hardware."""
     logger.info("Sending test pattern...")
     try:
-        from waveshare_epd import epd7in3f
+        from waveshare_epd import epd7in3e
 
-        epd = epd7in3f.EPD()
+        epd = epd7in3e.EPD()
         epd.init()
 
         # Create test image with color bars
@@ -447,8 +447,8 @@ def api_clear():
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
     try:
-        from waveshare_epd import epd7in3f
-        epd = epd7in3f.EPD()
+        from waveshare_epd import epd7in3e
+        epd = epd7in3e.EPD()
         epd.init()
         epd.Clear()
         epd.sleep()
@@ -464,8 +464,8 @@ def api_clear():
 @app.route('/api/sleep', methods=['POST'])
 def api_sleep():
     try:
-        from waveshare_epd import epd7in3f
-        epd = epd7in3f.EPD()
+        from waveshare_epd import epd7in3e
+        epd = epd7in3e.EPD()
         epd.init()
         epd.sleep()
         display_state["status"] = "sleeping"

@@ -105,7 +105,7 @@ journalctl -u vignette -f          # 日誌 / Logs
 ```
 photopainter/
 ├── lib/waveshare_epd/           # Waveshare e-paper driver
-│   ├── epd7in3f.py              # 7.3" 6-color display driver
+│   ├── epd7in3e.py              # 7.3" 6-color display driver (E model)
 │   └── epdconfig.py             # SPI/GPIO hardware config
 ├── src/
 │   ├── display_picture.py       # Image processing & display (CLI)

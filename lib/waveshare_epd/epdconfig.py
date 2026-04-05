@@ -39,12 +39,12 @@ logger = logging.getLogger(__name__)
 
 
 class RaspberryPi:
-    # Pin definition
+    # Pin definition (PhotoPainter board uses PWR=27, not default 18)
     RST_PIN  = 17
     DC_PIN   = 25
     CS_PIN   = 8
     BUSY_PIN = 24
-    PWR_PIN  = 18
+    PWR_PIN  = 27
     MOSI_PIN = 10
     SCLK_PIN = 11
 
