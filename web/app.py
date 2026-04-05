@@ -73,6 +73,69 @@ def handle_exception(e):
 
 display_lock = threading.Lock()
 
+# ── WiFi AP Hotspot Management ────────────────────────────────────────────
+
+AP_SSID = "Vignette-Setup"
+AP_PASSWORD = "vignette123"
+AP_CONN_NAME = "Vignette-Hotspot"
+
+
+def start_ap_hotspot():
+    """Start WiFi Access Point so phones can connect and configure WiFi.
+    Uses nmcli to create a hotspot on wlan0."""
+    logger.info(f"Starting AP hotspot: {AP_SSID}")
+    try:
+        # Remove old hotspot connection if exists
+        subprocess.run(
+            ["nmcli", "connection", "delete", AP_CONN_NAME],
+            capture_output=True, text=True, timeout=10)
+        # Create and activate hotspot
+        result = subprocess.run(
+            ["nmcli", "device", "wifi", "hotspot",
+             "ifname", "wlan0",
+             "con-name", AP_CONN_NAME,
+             "ssid", AP_SSID,
+             "password", AP_PASSWORD],
+            capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            logger.info(f"AP hotspot started: SSID={AP_SSID}, Pass={AP_PASSWORD}")
+            return True
+        else:
+            logger.error(f"Failed to start hotspot: {result.stderr}")
+            return False
+    except Exception as e:
+        logger.error(f"Hotspot start error: {e}")
+        return False
+
+
+def stop_ap_hotspot():
+    """Stop the WiFi AP hotspot."""
+    logger.info("Stopping AP hotspot")
+    try:
+        subprocess.run(
+            ["nmcli", "connection", "down", AP_CONN_NAME],
+            capture_output=True, text=True, timeout=10)
+        subprocess.run(
+            ["nmcli", "connection", "delete", AP_CONN_NAME],
+            capture_output=True, text=True, timeout=10)
+        logger.info("AP hotspot stopped")
+    except Exception as e:
+        logger.error(f"Hotspot stop error: {e}")
+
+
+def is_ap_active():
+    """Check if the AP hotspot is currently running."""
+    try:
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"],
+            capture_output=True, text=True, timeout=5)
+        for line in result.stdout.strip().split('\n'):
+            if AP_CONN_NAME in line:
+                return True
+    except Exception:
+        pass
+    return False
+
 display_state = {
     "current_image": None,
     "last_update": None,
@@ -419,6 +482,8 @@ def api_reset():
     """Reset all settings to factory defaults (simulates first-time QR setup)."""
     config.reset()
     logger.info("System reset to factory defaults")
+    # Start AP hotspot for WiFi configuration
+    start_ap_hotspot()
     # Display QR setup on e-paper
     if display_lock.acquire(blocking=False):
         try:
@@ -763,6 +828,7 @@ def api_widget_set():
 @app.route('/api/wifi/status')
 def api_wifi_status():
     """Get current WiFi connection status."""
+    ap_active = is_ap_active()
     try:
         result = subprocess.run(
             ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"],
@@ -771,11 +837,13 @@ def api_wifi_status():
             parts = line.split(':')
             if len(parts) >= 3 and parts[0] == 'yes':
                 return jsonify({"connected": True, "ssid": parts[1],
-                                "signal": parts[2] + '%', "ip": _get_ip()})
-        return jsonify({"connected": False})
+                                "signal": parts[2] + '%', "ip": _get_ip(),
+                                "ap_active": ap_active})
+        return jsonify({"connected": False, "ap_active": ap_active,
+                        "ap_ssid": AP_SSID if ap_active else None})
     except Exception as e:
         logger.error(f"WiFi status error: {e}")
-        return jsonify({"connected": False, "error": str(e)})
+        return jsonify({"connected": False, "ap_active": ap_active, "error": str(e)})
 
 
 @app.route('/api/wifi/scan')
@@ -802,22 +870,37 @@ def api_wifi_scan():
 
 @app.route('/api/wifi/connect', methods=['POST'])
 def api_wifi_connect():
-    """Connect to a WiFi network."""
+    """Connect to a WiFi network. Stops AP hotspot first if active."""
     data = request.get_json() or {}
     ssid = data.get("ssid", "").strip()
     password = data.get("password", "").strip()
     if not ssid:
         return jsonify({"error": "SSID is required"}), 400
     try:
+        # Stop AP hotspot before connecting (can't do both on single wlan0)
+        if is_ap_active():
+            stop_ap_hotspot()
+            time.sleep(2)  # Give wlan0 time to release AP mode
+
         cmd = ["nmcli", "dev", "wifi", "connect", ssid]
         if password:
             cmd += ["password", password]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
-            return jsonify({"success": True, "message": f"Connected to {ssid}"})
-        return jsonify({"success": False, "error": result.stderr.strip() or "Connection failed"})
+            logger.info(f"WiFi connected to {ssid}")
+            return jsonify({"success": True, "message": f"Connected to {ssid}",
+                            "ip": _get_ip()})
+        else:
+            # Connection failed - restart AP if we were in setup mode
+            err = result.stderr.strip() or "Connection failed"
+            logger.error(f"WiFi connect failed: {err}")
+            if not config.is_setup_complete:
+                start_ap_hotspot()
+            return jsonify({"success": False, "error": err})
     except Exception as e:
         logger.error(f"WiFi connect error: {e}")
+        if not config.is_setup_complete:
+            start_ap_hotspot()
         return jsonify({"success": False, "error": str(e)})
 
 
@@ -975,9 +1058,10 @@ if __name__ == '__main__':
     print(f"  Network: http://{ip}:5000")
     print("=" * 60)
 
-    # On first boot, display QR setup
+    # On first boot, start AP hotspot and display QR setup
     if not config.is_setup_complete:
-        logger.info("First boot - displaying QR setup code")
+        logger.info("First boot - starting AP hotspot and displaying QR setup")
+        start_ap_hotspot()
         try:
             display_qr_setup()
         except Exception as e:

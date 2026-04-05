@@ -5,6 +5,17 @@
 <h2 class="mb-4"><i class="bi bi-wifi"></i> {{ t.wifi_config }}</h2>
 
 <div class="row g-4">
+    <!-- AP Hotspot Status -->
+    <div class="col-12" id="ap-status-card" style="display:none;">
+        <div class="alert alert-info d-flex align-items-center">
+            <i class="bi bi-broadcast display-6 me-3"></i>
+            <div>
+                <strong>Vignette Hotspot Active</strong><br>
+                <span id="ap-info"></span>
+            </div>
+        </div>
+    </div>
+
     <!-- Current Connection -->
     <div class="col-md-6">
         <div class="card">
@@ -32,7 +43,7 @@
                     <label class="form-label">{{ t.password }}</label>
                     <input type="password" class="form-control" id="wifi-pass" placeholder="WiFi password">
                 </div>
-                <button class="btn btn-primary" onclick="connectWifi()">
+                <button class="btn btn-primary" onclick="connectWifi()" id="connect-btn">
                     <i class="bi bi-wifi"></i> {{ t.connect }}
                 </button>
                 <div id="connect-result" class="mt-2"></div>
@@ -72,6 +83,18 @@
 function loadWifiStatus() {
     fetch('/api/wifi/status').then(r => r.json()).then(d => {
         const div = document.getElementById('wifi-status');
+        const apCard = document.getElementById('ap-status-card');
+
+        // Show AP hotspot info if active
+        if (d.ap_active) {
+            apCard.style.display = 'block';
+            document.getElementById('ap-info').innerHTML =
+                'SSID: <strong>Vignette-Setup</strong> | Password: <strong>vignette123</strong><br>' +
+                '<small class="text-muted">Connect your phone to this network, then select your home WiFi below.</small>';
+        } else {
+            apCard.style.display = 'none';
+        }
+
         if (d.connected) {
             div.innerHTML = `
                 <p><strong>SSID:</strong> ${d.ssid}</p>
@@ -96,10 +119,14 @@ function scanWifi() {
         }
         let html = '<div class="list-group">';
         for (const net of d.networks) {
+            const escaped = net.ssid.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             html += `<button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
-                       onclick="document.getElementById('wifi-ssid').value='${net.ssid}'">
+                       onclick="document.getElementById('wifi-ssid').value='${escaped}'">
                 <span><i class="bi bi-wifi"></i> ${net.ssid}</span>
-                <span class="badge bg-secondary">${net.signal}</span>
+                <span>
+                    <span class="badge bg-secondary">${net.signal}</span>
+                    <span class="badge bg-outline-secondary">${net.security || ''}</span>
+                </span>
             </button>`;
         }
         html += '</div>';
@@ -114,22 +141,33 @@ function connectWifi() {
     const pass = document.getElementById('wifi-pass').value;
     if (!ssid) { showToast('Enter network name', 'warning'); return; }
 
+    const btn = document.getElementById('connect-btn');
     const div = document.getElementById('connect-result');
-    div.innerHTML = '<span class="text-info">{{ t.connecting }}</span>';
+    btn.disabled = true;
+    div.innerHTML = '<span class="text-info">{{ t.connecting }}<br><small>This may take 15-30 seconds. If you lose connection, the hotspot will restart.</small></span>';
 
     fetch('/api/wifi/connect', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ssid, password: pass})
     }).then(r => r.json()).then(d => {
+        btn.disabled = false;
         if (d.success) {
-            div.innerHTML = '<span class="text-success">{{ t.connected }}!</span>';
+            div.innerHTML = `<span class="text-success">{{ t.connected }}! IP: ${d.ip || '...'}</span>`;
             showToast('WiFi connected!', 'success');
-            setTimeout(loadWifiStatus, 2000);
+            setTimeout(loadWifiStatus, 3000);
+            // If new IP is different, offer to redirect
+            if (d.ip && d.ip !== window.location.hostname) {
+                div.innerHTML += `<br><a href="http://${d.ip}:5000/wifi" class="btn btn-sm btn-outline-primary mt-2">
+                    <i class="bi bi-box-arrow-up-right"></i> Open on new IP: ${d.ip}</a>`;
+            }
         } else {
             div.innerHTML = `<span class="text-danger">${d.error}</span>`;
         }
-    }).catch(e => { div.innerHTML = `<span class="text-danger">${e}</span>`; });
+    }).catch(e => {
+        btn.disabled = false;
+        div.innerHTML = `<span class="text-danger">${e}<br><small>If hotspot restarted, reconnect to Vignette-Setup and try again.</small></span>`;
+    });
 }
 
 loadWifiStatus();
