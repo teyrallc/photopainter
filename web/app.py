@@ -82,26 +82,43 @@ AP_CONN_NAME = "Vignette-Hotspot"
 
 def start_ap_hotspot():
     """Start WiFi Access Point so phones can connect and configure WiFi.
-    Uses nmcli to create a hotspot on wlan0."""
+    Uses nmcli to create a hotspot on wlan0 with explicit security settings."""
     logger.info(f"Starting AP hotspot: {AP_SSID}")
     try:
         # Remove old hotspot connection if exists
         subprocess.run(
             ["nmcli", "connection", "delete", AP_CONN_NAME],
             capture_output=True, text=True, timeout=10)
-        # Create and activate hotspot
+
+        # Create connection profile with explicit settings
+        result = subprocess.run([
+            "nmcli", "connection", "add",
+            "type", "wifi",
+            "ifname", "wlan0",
+            "con-name", AP_CONN_NAME,
+            "autoconnect", "no",
+            "ssid", AP_SSID,
+            "mode", "ap",
+            "ipv4.method", "shared",
+            "ipv4.addresses", "192.168.4.1/24",
+            "wifi-sec.key-mgmt", "wpa-psk",
+            "wifi-sec.psk", AP_PASSWORD,
+        ], capture_output=True, text=True, timeout=15)
+
+        if result.returncode != 0:
+            logger.error(f"Failed to create hotspot profile: {result.stderr}")
+            return False
+
+        # Activate the connection
         result = subprocess.run(
-            ["nmcli", "device", "wifi", "hotspot",
-             "ifname", "wlan0",
-             "con-name", AP_CONN_NAME,
-             "ssid", AP_SSID,
-             "password", AP_PASSWORD],
+            ["nmcli", "connection", "up", AP_CONN_NAME],
             capture_output=True, text=True, timeout=15)
+
         if result.returncode == 0:
             logger.info(f"AP hotspot started: SSID={AP_SSID}, Pass={AP_PASSWORD}")
             return True
         else:
-            logger.error(f"Failed to start hotspot: {result.stderr}")
+            logger.error(f"Failed to activate hotspot: {result.stderr}")
             return False
     except Exception as e:
         logger.error(f"Hotspot start error: {e}")
