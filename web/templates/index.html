@@ -222,38 +222,39 @@
 {% block scripts %}
 <script>
 function switchPage(page) {
+    // Deselect all, highlight the clicked one immediately
+    document.querySelectorAll('[onclick^="switchPage"]').forEach(btn => {
+        btn.className = btn.className.replace(/\bbtn-primary\b/, 'btn-outline-primary');
+    });
+    const clicked = document.querySelector(`[onclick="switchPage('${page}')"]`);
+    if (clicked) clicked.className = clicked.className.replace('btn-outline-primary', 'btn-primary');
+
     fetch('/api/page/switch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({page: page})
     }).then(r => r.json()).then(d => {
         if (d.success) {
-            // Update UI without reloading or triggering e-paper
-            document.querySelectorAll('[onclick^="switchPage"]').forEach(btn => {
-                btn.className = btn.className.replace(/btn-primary\b/, 'btn-outline-primary');
-            });
-            event.target.closest('button').className =
-                event.target.closest('button').className.replace('btn-outline-primary', 'btn-primary');
-            const badge = document.getElementById('current-page-badge');
-            badge.textContent = '{{ t.current }}: ' + d.page.toUpperCase();
+            document.getElementById('current-page-badge').textContent =
+                '{{ t.current }}: ' + d.page.toUpperCase();
         } else { showToast(d.error, 'danger'); }
     }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 function setWidget(mode) {
+    // Deselect all, highlight the clicked one immediately
+    document.querySelectorAll('[onclick^="setWidget"]').forEach(btn => {
+        btn.className = btn.className.replace(/\bbtn-info\b/, 'btn-outline-info');
+    });
+    const clicked = document.querySelector(`[onclick="setWidget('${mode}')"]`);
+    if (clicked) clicked.className = clicked.className.replace('btn-outline-info', 'btn-info');
+
     fetch('/api/widget/set', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({mode: mode})
     }).then(r => r.json()).then(d => {
-        if (d.success) {
-            // Update UI without reloading or triggering e-paper
-            document.querySelectorAll('[onclick^="setWidget"]').forEach(btn => {
-                btn.className = btn.className.replace(/btn-info\b/, 'btn-outline-info');
-            });
-            event.target.closest('button').className =
-                event.target.closest('button').className.replace('btn-outline-info', 'btn-info');
-        } else showToast(d.error, 'danger');
+        if (!d.success) showToast(d.error, 'danger');
     });
 }
 
