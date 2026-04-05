@@ -1,14 +1,63 @@
 {% extends "base.html" %}
-{% block title %}PhotoPainter - 控制台{% endblock %}
+{% block title %}Vignette - 控制台{% endblock %}
 
 {% block content %}
 <h2 class="mb-4"><i class="bi bi-house"></i> 控制台</h2>
 
 <div class="row g-4">
-    <!-- Display Status -->
+    <!-- Photo Navigation -->
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-primary text-white">
+                <i class="bi bi-camera"></i> 照片控制
+            </div>
+            <div class="card-body text-center">
+                <div id="photo-preview" class="mb-3">
+                    {% if photo_state.current_image %}
+                    <div class="epaper-frame">
+                        <img src="/output/{{ photo_state.current_image }}" class="img-fluid rounded"
+                             alt="Current" style="max-height: 200px; object-fit: contain;">
+                    </div>
+                    <p class="mt-2 mb-0">
+                        <strong>{{ photo_state.current_image }}</strong>
+                    </p>
+                    {% else %}
+                    <p class="text-muted mb-0">尚未顯示任何照片</p>
+                    {% endif %}
+                </div>
+
+                <div id="photo-nav-info" class="mb-3">
+                    <span class="badge bg-secondary">
+                        第 <span id="photo-index">{{ photo_state.current_index + 1 if photo_state.current_index >= 0 else '-' }}</span>
+                        / <span id="photo-total">{{ photo_state.total }}</span> 張
+                    </span>
+                </div>
+
+                <div class="d-flex justify-content-center gap-2 mb-3">
+                    <button class="btn btn-outline-primary" onclick="photoPrev()" title="上一張">
+                        <i class="bi bi-chevron-left"></i> 上一張
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="photoNext()" title="下一張">
+                        下一張 <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+
+                <div class="d-flex justify-content-center gap-2">
+                    <button class="btn btn-outline-success btn-sm" onclick="photoLatest()">
+                        <i class="bi bi-camera"></i> 最新照片
+                    </button>
+                    <button class="btn btn-outline-info btn-sm" onclick="displayTest()">
+                        <i class="bi bi-grid-3x3"></i> 測試圖案
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Display Status & Quick Actions -->
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">
                 <i class="bi bi-display"></i> 顯示器狀態
             </div>
             <div class="card-body">
@@ -19,7 +68,7 @@
                 </p>
                 <p><strong>目前顯示：</strong> {{ display_state.current_image or '無' }}</p>
                 <p><strong>最後更新：</strong> {{ display_state.last_update or '尚未更新' }}</p>
-                <p><strong>圖片總數：</strong> {{ total_images }}</p>
+                <p class="mb-0"><strong>圖片總數：</strong> {{ total_images }}</p>
 
                 <div class="d-flex gap-2 mt-3">
                     <button class="btn btn-outline-warning btn-sm" onclick="clearDisplay()">
@@ -31,12 +80,9 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Quick Actions -->
-    <div class="col-md-6">
         <div class="card">
-            <div class="card-header bg-success text-white">
+            <div class="card-header bg-dark text-white">
                 <i class="bi bi-lightning"></i> 快速操作
             </div>
             <div class="card-body">
@@ -44,20 +90,10 @@
                     <a href="/upload" class="btn btn-outline-primary">
                         <i class="bi bi-upload"></i> 上傳新圖片
                     </a>
-                    <a href="/generate" class="btn btn-outline-success">
-                        <i class="bi bi-magic"></i> AI 生成新圖片
-                    </a>
                     <a href="/gallery" class="btn btn-outline-info">
                         <i class="bi bi-images"></i> 瀏覽圖庫 ({{ total_images }} 張)
                     </a>
                 </div>
-
-                {% if generation_state.running %}
-                <div class="alert alert-info mt-3 mb-0">
-                    <i class="bi bi-hourglass-split"></i> AI 正在生成中...
-                    <br><small>{{ generation_state.prompt }}</small>
-                </div>
-                {% endif %}
             </div>
         </div>
     </div>

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-PhotoPainter Web Control Interface
+Vignette - H System Smart Display Web Control Interface
 Flask web application for controlling the Waveshare 7.3" e-paper display.
 """
 
 import io
-import json
+import logging
 import os
 import subprocess
 import sys
@@ -14,16 +14,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import (Flask, jsonify, redirect, render_template, request,
-                   send_file, send_from_directory, url_for)
-from PIL import Image
+from flask import (Flask, jsonify, render_template, request,
+                   send_file, send_from_directory)
+from PIL import Image, ImageDraw, ImageFont
 
 # Project paths
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_DIR, "output")
-PROMPTS_DIR = os.path.join(PROJECT_DIR, "prompts")
 LIB_DIR = os.path.join(PROJECT_DIR, "lib")
-SRC_DIR = os.path.join(PROJECT_DIR, "src")
 
 # Add lib to path for waveshare_epd
 sys.path.insert(0, LIB_DIR)
@@ -31,26 +29,29 @@ sys.path.insert(0, LIB_DIR)
 # Ensure output directory exists
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# Logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger("vignette")
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
 # Display lock - only one display operation at a time
 display_lock = threading.Lock()
 
-# Generation state
-generation_state = {
-    "running": False,
-    "progress": "",
-    "prompt": "",
-    "start_time": None,
-    "error": None,
-}
-
 # Display state
 display_state = {
     "current_image": None,
     "last_update": None,
-    "status": "idle",  # idle, displaying, sleeping
+    "status": "idle",  # idle, displaying, error
+}
+
+# Photo navigation state
+photo_state = {
+    "current_index": -1,  # -1 = latest
+    "current_image": None,
+    "total": 0,
 }
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'gif'}
@@ -87,33 +88,21 @@ def get_image_list():
                 "modified_ts": stat.st_mtime,
             })
     images.sort(key=lambda x: x["modified_ts"], reverse=True)
+    photo_state["total"] = len(images)
     return images
-
-
-def get_prompt_files():
-    """Get list of available prompt files."""
-    prompts = []
-    for f in Path(PROMPTS_DIR).glob("*.json"):
-        prompts.append(f.stem)
-    return sorted(prompts)
 
 
 def quantize_to_epaper(image_path):
     """Quantize an image to 7-color e-paper palette, return as PNG bytes."""
     img = Image.open(image_path).convert("RGB")
-
-    # Resize to display dimensions
     img = img.resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
 
-    # Create palette image
     pal_image = Image.new("P", (1, 1))
     pal_image.putpalette(EPAPER_PALETTE)
 
-    # Quantize with dithering
     img_quantized = img.quantize(palette=pal_image)
     img_rgb = img_quantized.convert("RGB")
 
-    # Save to bytes
     buf = io.BytesIO()
     img_rgb.save(buf, format='PNG')
     buf.seek(0)
@@ -121,14 +110,13 @@ def quantize_to_epaper(image_path):
 
 
 def process_upload(file_storage):
-    """Process an uploaded image: save original and create display-ready version."""
+    """Process an uploaded image: save and create display-ready version."""
     from werkzeug.utils import secure_filename
 
     filename = secure_filename(file_storage.filename)
     if not filename:
         filename = f"upload_{int(time.time())}.png"
 
-    # Ensure unique filename
     base, ext = os.path.splitext(filename)
     filepath = os.path.join(OUTPUT_DIR, filename)
     counter = 1
@@ -137,10 +125,9 @@ def process_upload(file_storage):
         filepath = os.path.join(OUTPUT_DIR, filename)
         counter += 1
 
-    # Save original
     file_storage.save(filepath)
 
-    # Create display-ready version (resized to 800x480)
+    # Resize to display dimensions
     img = Image.open(filepath).convert("RGB")
     img_resized = img.resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
     img_resized.save(filepath)
@@ -148,93 +135,125 @@ def process_upload(file_storage):
     return filename
 
 
+# ── E-Paper Display Functions ──────────────────────────────────────────────
+
 def display_image_on_epaper(image_path):
-    """Display image on e-paper using display_picture.py."""
+    """Display image on e-paper using direct driver import."""
     display_state["status"] = "displaying"
     display_state["current_image"] = os.path.basename(image_path)
+    logger.info(f"Displaying image: {image_path}")
 
     try:
-        venv_python = os.path.join(PROJECT_DIR, "venv", "bin", "python")
-        python = venv_python if os.path.exists(venv_python) else sys.executable
-        display_script = os.path.join(SRC_DIR, "display_picture.py")
+        from waveshare_epd import epd7in3f
 
-        result = subprocess.run(
-            [python, display_script, "-r", image_path],
-            capture_output=True, text=True, timeout=120
-        )
+        img = Image.open(image_path).convert("RGB")
+        img = img.resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
 
-        if result.returncode != 0:
-            display_state["status"] = "error"
-            return False, result.stderr
-    except FileNotFoundError:
-        # Hardware not available, try direct driver
-        try:
-            from waveshare_epd import epd7in3f
-            epd = epd7in3f.EPD()
-            epd.init()
-            img = Image.open(image_path).convert("RGB")
-            img = img.resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
-            buf = epd.getbuffer(img)
-            epd.display(buf)
-            epd.sleep()
-        except Exception as e:
-            display_state["status"] = "error"
-            return False, str(e)
+        epd = epd7in3f.EPD()
+        logger.info("EPD init...")
+        epd.init()
+
+        logger.info("Sending image buffer...")
+        buf = epd.getbuffer(img)
+        epd.display(buf)
+
+        logger.info("EPD sleep...")
+        epd.sleep()
+
+        display_state["status"] = "idle"
+        display_state["last_update"] = datetime.now().isoformat()
+        logger.info("Display update complete!")
+        return True, "OK"
+
     except Exception as e:
+        logger.error(f"Display failed: {e}", exc_info=True)
         display_state["status"] = "error"
         return False, str(e)
 
-    display_state["status"] = "idle"
-    display_state["last_update"] = datetime.now().isoformat()
-    return True, "OK"
 
-
-def run_generation(prompt, prompt_file, seed, steps):
-    """Run image generation in background thread."""
-    generation_state["running"] = True
-    generation_state["error"] = None
-    generation_state["start_time"] = time.time()
-
+def display_test_pattern():
+    """Send a test pattern to e-paper to verify hardware."""
+    logger.info("Sending test pattern...")
     try:
-        venv_python = os.path.join(PROJECT_DIR, "venv", "bin", "python")
-        python = venv_python if os.path.exists(venv_python) else sys.executable
-        gen_script = os.path.join(SRC_DIR, "generate_picture.py")
+        from waveshare_epd import epd7in3f
 
-        cmd = [python, gen_script, OUTPUT_DIR, "--steps", str(steps)]
+        epd = epd7in3f.EPD()
+        epd.init()
 
-        if prompt:
-            cmd.extend(["--prompt", prompt])
-            generation_state["prompt"] = prompt
-        elif prompt_file:
-            cmd.extend(["--prompts", os.path.join(PROMPTS_DIR, f"{prompt_file}.json")])
-            generation_state["prompt"] = f"[random from {prompt_file}]"
+        # Create test image with color bars
+        img = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+        draw = ImageDraw.Draw(img)
 
-        if seed:
-            cmd.extend(["--seed", str(seed)])
+        colors = [
+            ((0, 0, 0), "Black"),
+            ((255, 255, 255), "White"),
+            ((0, 255, 0), "Green"),
+            ((0, 0, 255), "Blue"),
+            ((255, 0, 0), "Red"),
+            ((255, 255, 0), "Yellow"),
+            ((255, 128, 0), "Orange"),
+        ]
+        bar_width = EPD_WIDTH // len(colors)
+        for i, (color, name) in enumerate(colors):
+            x0 = i * bar_width
+            x1 = (i + 1) * bar_width
+            draw.rectangle([x0, 0, x1, EPD_HEIGHT], fill=color)
+            text_color = (255, 255, 255) if color in [(0, 0, 0), (0, 0, 255)] else (0, 0, 0)
+            draw.text((x0 + 10, EPD_HEIGHT // 2), name, fill=text_color)
 
-        generation_state["progress"] = "Starting generation..."
+        # Add header
+        draw.rectangle([0, 0, EPD_WIDTH, 40], fill=(0, 0, 0))
+        draw.text((10, 10), "Vignette - E-Paper Test Pattern", fill=(255, 255, 255))
 
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=3600  # 1 hour timeout
-        )
+        buf = epd.getbuffer(img)
+        epd.display(buf)
+        epd.sleep()
 
-        if result.returncode == 0:
-            generation_state["progress"] = "Complete!"
-        else:
-            generation_state["error"] = result.stderr or "Generation failed"
-            generation_state["progress"] = "Failed"
+        display_state["status"] = "idle"
+        display_state["current_image"] = "[test pattern]"
+        display_state["last_update"] = datetime.now().isoformat()
+        logger.info("Test pattern displayed!")
+        return True, "OK"
 
-    except subprocess.TimeoutExpired:
-        generation_state["error"] = "Generation timed out (1 hour limit)"
-        generation_state["progress"] = "Timed out"
     except Exception as e:
-        generation_state["error"] = str(e)
-        generation_state["progress"] = "Error"
-    finally:
-        generation_state["running"] = False
+        logger.error(f"Test pattern failed: {e}", exc_info=True)
+        return False, str(e)
 
 
-# ── Routes ──────────────────────────────────────────────────────────────────
+# ── Photo Navigation ──────────────────────────────────────────────────────
+
+def navigate_photo(direction):
+    """Navigate to next/prev/latest photo and display it."""
+    images = get_image_list()
+    if not images:
+        return False, "No images available"
+
+    total = len(images)
+
+    if direction == "latest":
+        photo_state["current_index"] = 0
+    elif direction == "next":
+        idx = photo_state["current_index"]
+        photo_state["current_index"] = (idx + 1) % total if idx >= 0 else 1 % total
+    elif direction == "prev":
+        idx = photo_state["current_index"]
+        photo_state["current_index"] = (idx - 1) % total if idx > 0 else total - 1
+    elif isinstance(direction, int):
+        if 0 <= direction < total:
+            photo_state["current_index"] = direction
+        else:
+            return False, f"Index out of range (0-{total-1})"
+
+    idx = photo_state["current_index"]
+    image = images[idx]
+    photo_state["current_image"] = image["filename"]
+    photo_state["total"] = total
+
+    filepath = os.path.join(OUTPUT_DIR, image["filename"])
+    return display_image_on_epaper(filepath)
+
+
+# ── Page Routes ────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
@@ -243,43 +262,30 @@ def index():
     return render_template('index.html',
                            images=images[:5],
                            display_state=display_state,
-                           generation_state=generation_state,
+                           photo_state=photo_state,
                            total_images=len(images))
 
 
 @app.route('/upload')
 def upload_page():
-    """Upload page."""
     return render_template('upload.html')
-
-
-@app.route('/generate')
-def generate_page():
-    """AI generation page."""
-    prompt_files = get_prompt_files()
-    return render_template('generate.html',
-                           prompt_files=prompt_files,
-                           generation_state=generation_state)
 
 
 @app.route('/gallery')
 def gallery_page():
-    """Image gallery page."""
     images = get_image_list()
     return render_template('gallery.html', images=images)
 
 
 @app.route('/manual')
 def manual_page():
-    """Usage manual page."""
     return render_template('manual.html')
 
 
-# ── API Routes ──────────────────────────────────────────────────────────────
+# ── API: Image Management ─────────────────────────────────────────────────
 
 @app.route('/api/upload', methods=['POST'])
 def api_upload():
-    """Handle image upload."""
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
@@ -291,16 +297,13 @@ def api_upload():
         return jsonify({"error": "File type not allowed. Use: png, jpg, jpeg, bmp, gif"}), 400
 
     filename = process_upload(file)
-    return jsonify({
-        "success": True,
-        "filename": filename,
-        "message": f"Image uploaded: {filename}"
-    })
+    return jsonify({"success": True, "filename": filename,
+                    "message": f"Image uploaded: {filename}"})
 
 
 @app.route('/api/display', methods=['POST'])
 def api_display():
-    """Display an image on e-paper."""
+    """Display a specific image on e-paper."""
     data = request.get_json() or {}
     filename = data.get('filename') or request.form.get('filename')
 
@@ -317,6 +320,13 @@ def api_display():
     try:
         success, msg = display_image_on_epaper(filepath)
         if success:
+            # Update photo state to match
+            images = get_image_list()
+            for i, img in enumerate(images):
+                if img["filename"] == filename:
+                    photo_state["current_index"] = i
+                    photo_state["current_image"] = filename
+                    break
             return jsonify({"success": True, "message": "Image displayed"})
         else:
             return jsonify({"error": f"Display failed: {msg}"}), 500
@@ -326,7 +336,6 @@ def api_display():
 
 @app.route('/api/preview/<filename>')
 def api_preview(filename):
-    """Return 7-color quantized preview of an image."""
     filepath = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
@@ -336,56 +345,13 @@ def api_preview(filename):
                      download_name=f"preview_{filename}")
 
 
-@app.route('/api/generate', methods=['POST'])
-def api_generate():
-    """Start AI image generation."""
-    if generation_state["running"]:
-        return jsonify({"error": "Generation already in progress"}), 409
-
-    data = request.get_json() or {}
-    prompt = data.get('prompt', '')
-    prompt_file = data.get('prompt_file', 'flowers')
-    seed = data.get('seed', '')
-    steps = data.get('steps', 5)
-
-    thread = threading.Thread(
-        target=run_generation,
-        args=(prompt, prompt_file, seed, steps),
-        daemon=True
-    )
-    thread.start()
-
-    return jsonify({
-        "success": True,
-        "message": "Generation started"
-    })
-
-
-@app.route('/api/generate/status')
-def api_generate_status():
-    """Get generation status."""
-    elapsed = None
-    if generation_state["start_time"]:
-        elapsed = int(time.time() - generation_state["start_time"])
-
-    return jsonify({
-        "running": generation_state["running"],
-        "progress": generation_state["progress"],
-        "prompt": generation_state["prompt"],
-        "elapsed_seconds": elapsed,
-        "error": generation_state["error"],
-    })
-
-
 @app.route('/api/images')
 def api_images():
-    """List all images."""
     return jsonify(get_image_list())
 
 
 @app.route('/api/images/<filename>', methods=['DELETE'])
 def api_delete_image(filename):
-    """Delete an image."""
     filepath = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
@@ -394,12 +360,92 @@ def api_delete_image(filename):
     return jsonify({"success": True, "message": f"Deleted {filename}"})
 
 
-@app.route('/api/clear', methods=['POST'])
-def api_clear():
-    """Clear the e-paper display."""
+# ── API: Photo Navigation (virtual buttons) ───────────────────────────────
+
+@app.route('/api/photo/current')
+def api_photo_current():
+    """Get current photo info and navigation state."""
+    images = get_image_list()
+    photo_state["total"] = len(images)
+    return jsonify({
+        "index": photo_state["current_index"],
+        "filename": photo_state["current_image"],
+        "total": photo_state["total"],
+    })
+
+
+@app.route('/api/photo/next', methods=['POST'])
+def api_photo_next():
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
+    try:
+        success, msg = navigate_photo("next")
+        if success:
+            return jsonify({"success": True, "photo": photo_state})
+        return jsonify({"error": msg}), 500
+    finally:
+        display_lock.release()
 
+
+@app.route('/api/photo/prev', methods=['POST'])
+def api_photo_prev():
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
+    try:
+        success, msg = navigate_photo("prev")
+        if success:
+            return jsonify({"success": True, "photo": photo_state})
+        return jsonify({"error": msg}), 500
+    finally:
+        display_lock.release()
+
+
+@app.route('/api/photo/latest', methods=['POST'])
+def api_photo_latest():
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
+    try:
+        success, msg = navigate_photo("latest")
+        if success:
+            return jsonify({"success": True, "photo": photo_state})
+        return jsonify({"error": msg}), 500
+    finally:
+        display_lock.release()
+
+
+@app.route('/api/photo/goto/<int:idx>', methods=['POST'])
+def api_photo_goto(idx):
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
+    try:
+        success, msg = navigate_photo(idx)
+        if success:
+            return jsonify({"success": True, "photo": photo_state})
+        return jsonify({"error": msg}), 500
+    finally:
+        display_lock.release()
+
+
+# ── API: Display Control ──────────────────────────────────────────────────
+
+@app.route('/api/display/test', methods=['POST'])
+def api_display_test():
+    """Send test pattern to e-paper."""
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
+    try:
+        success, msg = display_test_pattern()
+        if success:
+            return jsonify({"success": True, "message": "Test pattern displayed"})
+        return jsonify({"error": f"Test failed: {msg}"}), 500
+    finally:
+        display_lock.release()
+
+
+@app.route('/api/clear', methods=['POST'])
+def api_clear():
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
     try:
         from waveshare_epd import epd7in3f
         epd = epd7in3f.EPD()
@@ -417,7 +463,6 @@ def api_clear():
 
 @app.route('/api/sleep', methods=['POST'])
 def api_sleep():
-    """Put display to sleep."""
     try:
         from waveshare_epd import epd7in3f
         epd = epd7in3f.EPD()
@@ -429,58 +474,40 @@ def api_sleep():
         return jsonify({"error": f"Sleep failed: {e}"}), 500
 
 
+# ── API: System Status & Management ───────────────────────────────────────
+
 @app.route('/api/status')
 def api_status():
-    """Get system status."""
     return jsonify({
         "display": display_state,
-        "generation": {
-            "running": generation_state["running"],
-            "prompt": generation_state["prompt"],
-        },
+        "photo": photo_state,
         "total_images": len(get_image_list()),
         "system": get_system_info(),
     })
 
 
-# ── System / Remote Management API ─────────────────────────────────────────
-
 def get_system_info():
-    """Collect Raspberry Pi system information."""
     info = {
-        "hostname": "",
-        "ip_addresses": [],
-        "cpu_temp": None,
-        "mem_total_mb": None,
-        "mem_available_mb": None,
-        "disk_free_gb": None,
-        "uptime": None,
-        "git_version": None,
+        "hostname": "", "ip_addresses": [], "cpu_temp": None,
+        "mem_total_mb": None, "mem_available_mb": None,
+        "disk_free_gb": None, "uptime": None, "git_version": None,
     }
-
     try:
         info["hostname"] = subprocess.check_output(
-            ["hostname"], text=True, timeout=5
-        ).strip()
+            ["hostname"], text=True, timeout=5).strip()
     except Exception:
         pass
-
     try:
         output = subprocess.check_output(
-            ["hostname", "-I"], text=True, timeout=5
-        ).strip()
+            ["hostname", "-I"], text=True, timeout=5).strip()
         info["ip_addresses"] = output.split()
     except Exception:
         pass
-
-    # CPU temperature
     try:
         with open("/sys/class/thermal/thermal_zone0/temp") as f:
             info["cpu_temp"] = round(int(f.read().strip()) / 1000.0, 1)
     except Exception:
         pass
-
-    # Memory
     try:
         with open("/proc/meminfo") as f:
             for line in f:
@@ -490,55 +517,42 @@ def get_system_info():
                     info["mem_available_mb"] = int(line.split()[1]) // 1024
     except Exception:
         pass
-
-    # Disk
     try:
         stat = os.statvfs(PROJECT_DIR)
         info["disk_free_gb"] = round((stat.f_bavail * stat.f_frsize) / (1024**3), 1)
     except Exception:
         pass
-
-    # Uptime
     try:
         with open("/proc/uptime") as f:
-            uptime_secs = int(float(f.read().split()[0]))
-            hours, remainder = divmod(uptime_secs, 3600)
-            minutes, secs = divmod(remainder, 60)
-            info["uptime"] = f"{hours}h {minutes}m {secs}s"
+            secs = int(float(f.read().split()[0]))
+            h, r = divmod(secs, 3600)
+            m, s = divmod(r, 60)
+            info["uptime"] = f"{h}h {m}m {s}s"
     except Exception:
         pass
-
-    # Git version
     try:
         info["git_version"] = subprocess.check_output(
             ["git", "-C", PROJECT_DIR, "log", "--oneline", "-1"],
-            text=True, timeout=5
-        ).strip()
+            text=True, timeout=5).strip()
     except Exception:
         pass
-
     return info
 
 
 @app.route('/api/system/info')
 def api_system_info():
-    """Get detailed system information."""
     return jsonify(get_system_info())
 
 
 @app.route('/api/system/update', methods=['POST'])
 def api_system_update():
-    """Pull latest code from git and restart service."""
     update_script = os.path.join(PROJECT_DIR, "scripts", "update.sh")
     if not os.path.exists(update_script):
         return jsonify({"error": "Update script not found"}), 500
-
     try:
         result = subprocess.run(
             ["bash", update_script],
-            capture_output=True, text=True, timeout=300,
-            cwd=PROJECT_DIR
-        )
+            capture_output=True, text=True, timeout=300, cwd=PROJECT_DIR)
         return jsonify({
             "success": result.returncode == 0,
             "output": result.stdout,
@@ -552,7 +566,6 @@ def api_system_update():
 
 @app.route('/api/system/reboot', methods=['POST'])
 def api_system_reboot():
-    """Reboot the Raspberry Pi."""
     try:
         subprocess.Popen(["sudo", "reboot"])
         return jsonify({"success": True, "message": "Rebooting..."})
@@ -562,7 +575,6 @@ def api_system_reboot():
 
 @app.route('/api/system/shutdown', methods=['POST'])
 def api_system_shutdown():
-    """Shutdown the Raspberry Pi."""
     try:
         subprocess.Popen(["sudo", "shutdown", "-h", "now"])
         return jsonify({"success": True, "message": "Shutting down..."})
@@ -572,24 +584,23 @@ def api_system_shutdown():
 
 @app.route('/output/<filename>')
 def serve_image(filename):
-    """Serve images from output directory."""
     return send_from_directory(OUTPUT_DIR, filename)
 
 
 if __name__ == '__main__':
-    # Get local IP for display
     ip = "localhost"
     try:
-        output = subprocess.check_output(["hostname", "-I"], text=True, timeout=5).strip()
+        output = subprocess.check_output(
+            ["hostname", "-I"], text=True, timeout=5).strip()
         if output:
             ip = output.split()[0]
     except Exception:
         pass
 
     print("=" * 60)
-    print("  PhotoPainter Web Control Interface")
+    print("  Vignette - H System Smart Display")
     print(f"  Output directory: {OUTPUT_DIR}")
-    print(f"  Local access:  http://localhost:5000")
-    print(f"  Network access: http://{ip}:5000")
+    print(f"  Local:   http://localhost:5000")
+    print(f"  Network: http://{ip}:5000")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000, debug=False)

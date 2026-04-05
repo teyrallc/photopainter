@@ -1,5 +1,5 @@
 #!/bin/bash
-# PhotoPainter Remote Update Script
+# Vignette Remote Update Script
 # Pulls latest code from git and restarts the service.
 #
 # Usage:
@@ -12,7 +12,7 @@ INSTALL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$INSTALL_DIR"
 
 echo "============================================"
-echo "  PhotoPainter - Remote Update"
+echo "  Vignette - Remote Update"
 echo "============================================"
 
 # Step 1: Pull latest code
@@ -27,12 +27,12 @@ if [ -f "venv/bin/pip" ]; then
 fi
 
 # Step 3: Restart service
-echo "[3/3] Restarting PhotoPainter service..."
-if systemctl is-active --quiet photopainter; then
-    sudo systemctl restart photopainter
+echo "[3/3] Restarting Vignette service..."
+if systemctl is-active --quiet vignette; then
+    sudo systemctl restart vignette
     echo "Service restarted."
 else
-    echo "Service not running. Start with: sudo systemctl start photopainter"
+    echo "Service not running. Start with: sudo systemctl start vignette"
 fi
 
 echo ""

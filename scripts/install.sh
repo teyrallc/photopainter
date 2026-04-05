@@ -1,5 +1,5 @@
 #!/bin/bash
-# PhotoPainter Installation Script
+# Vignette Installation Script
 # For Raspberry Pi Zero 2 W with Waveshare 7.3" e-paper display
 #
 # Usage: bash scripts/install.sh
@@ -9,7 +9,7 @@ set -e
 
 INSTALL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 echo "============================================"
-echo "  PhotoPainter Installation"
+echo "  Vignette Installation"
 echo "  Install directory: $INSTALL_DIR"
 echo "============================================"
 
@@ -107,10 +107,10 @@ echo ""
 echo "[8/8] Setting up systemd service for auto-start..."
 
 # Create service file with correct paths
-SERVICE_FILE="/etc/systemd/system/photopainter.service"
+SERVICE_FILE="/etc/systemd/system/vignette.service"
 sudo bash -c "cat > $SERVICE_FILE" << SVCEOF
 [Unit]
-Description=PhotoPainter Web Control Interface
+Description=Vignette - H System Smart Display Web Interface
 Documentation=https://github.com/teyrallc/photopainter
 After=network-online.target
 Wants=network-online.target
@@ -131,8 +131,8 @@ WantedBy=multi-user.target
 SVCEOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable photopainter
-sudo systemctl start photopainter
+sudo systemctl enable vignette
+sudo systemctl start vignette
 
 echo "Service installed and started."
 
@@ -144,16 +144,16 @@ echo "============================================"
 echo "  Installation Complete!"
 echo "============================================"
 echo ""
-echo "  Web 介面已啟動並設為開機自動執行！"
+echo "  Vignette Web 介面已啟動並設為開機自動執行！"
 echo ""
 echo "  從任何裝置存取："
 echo "    http://${PI_IP}:5000"
 echo ""
 echo "  服務管理："
-echo "    sudo systemctl status photopainter   # 查看狀態"
-echo "    sudo systemctl restart photopainter  # 重啟服務"
-echo "    sudo systemctl stop photopainter     # 停止服務"
-echo "    journalctl -u photopainter -f        # 查看日誌"
+echo "    sudo systemctl status vignette   # 查看狀態"
+echo "    sudo systemctl restart vignette  # 重啟服務"
+echo "    sudo systemctl stop vignette     # 停止服務"
+echo "    journalctl -u vignette -f        # 查看日誌"
 echo ""
 echo "  遠端更新程式："
 echo "    bash scripts/update.sh               # SSH 更新"

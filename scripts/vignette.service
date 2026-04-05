@@ -1,5 +1,5 @@
 [Unit]
-Description=PhotoPainter Web Control Interface
+Description=Vignette - H System Smart Display Web Interface
 Documentation=https://github.com/teyrallc/photopainter
 After=network-online.target
 Wants=network-online.target

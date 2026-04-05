@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}PhotoPainter - 圖庫{% endblock %}
+{% block title %}Vignette - 圖庫{% endblock %}
 
 {% block content %}
 <h2 class="mb-4"><i class="bi bi-images"></i> 圖庫 ({{ images|length }} 張)</h2>
@@ -42,9 +42,6 @@
     <p class="mt-3 text-muted">圖庫是空的</p>
     <a href="/upload" class="btn btn-primary me-2">
         <i class="bi bi-upload"></i> 上傳圖片
-    </a>
-    <a href="/generate" class="btn btn-success">
-        <i class="bi bi-magic"></i> AI 生成
     </a>
 </div>
 {% endif %}

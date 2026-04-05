@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GPIO button controller for PhotoPainter.
+GPIO button controller for Vignette.
 Monitors 4 buttons to navigate through generated images.
 Adapted from PaperPiAI (https://github.com/dylski/PaperPiAI)
 
@@ -65,13 +65,13 @@ def main():
     lines = {}
     for pin in BUTTONS:
         line = chip.get_line(pin)
-        line.request(consumer="photopainter", type=gpiod.LINE_REQ_EV_FALLING_EDGE)
+        line.request(consumer="vignette", type=gpiod.LINE_REQ_EV_FALLING_EDGE)
         lines[pin] = line
 
     current_index = -1  # -1 means newest
     images = get_image_list()
 
-    print("PhotoPainter Button Controller")
+    print("Vignette Button Controller")
     print(f"Found {len(images)} images in {OUTPUT_DIR}")
     print("Buttons: A=Newest  B=Previous  C=Next  D=Shutdown")
     print("Waiting for button press...")
