@@ -6,75 +6,72 @@
     <div class="col-md-8 col-lg-6">
         <div class="text-center mb-4">
             <h2><i class="bi bi-display"></i> Vignette Setup</h2>
-            <p class="text-muted">H System Smart Display - First Time Setup</p>
+            <p class="text-muted">{{ t.first_time_setup }}</p>
         </div>
 
         <div class="card">
             <div class="card-body">
                 <form id="setup-form">
-                    <h5 class="mb-3"><i class="bi bi-cloud-sun"></i> Weather Settings</h5>
+                    <h5 class="mb-3"><i class="bi bi-cloud-sun"></i> {{ t.weather_settings }}</h5>
 
                     <div class="mb-3">
-                        <label class="form-label">OpenWeatherMap API Key</label>
+                        <label class="form-label">{{ t.api_key }}</label>
                         <input type="text" class="form-control" id="weather_api_key"
-                               value="{{ config.weather_api_key }}"
-                               placeholder="Get free key at openweathermap.org">
+                               value="{{ config.weather_api_key }}">
                         <div class="form-text">
-                            <a href="https://openweathermap.org/api" target="_blank">Get a free API key</a> (optional)
+                            <a href="https://openweathermap.org/api" target="_blank">{{ t.weather_hint }}</a>
                         </div>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">City / Location</label>
+                        <label class="form-label">{{ t.city }}</label>
                         <input type="text" class="form-control" id="weather_city"
                                value="{{ config.weather_city }}"
-                               placeholder="e.g., Taipei, Tokyo, New York">
+                               placeholder="{{ t.city_placeholder }}">
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Temperature Unit</label>
+                        <label class="form-label">{{ t.units }}</label>
                         <select class="form-select" id="weather_units">
-                            <option value="metric" {% if config.weather_units == 'metric' %}selected{% endif %}>Celsius (°C)</option>
-                            <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>Fahrenheit (°F)</option>
+                            <option value="metric" {% if config.weather_units == 'metric' %}selected{% endif %}>{{ t.celsius }}</option>
+                            <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
                         </select>
                     </div>
 
                     <hr>
-                    <h5 class="mb-3"><i class="bi bi-calendar3"></i> Calendar Settings</h5>
+                    <h5 class="mb-3"><i class="bi bi-calendar3"></i> {{ t.calendar_settings }}</h5>
 
                     <div class="mb-3">
-                        <label class="form-label">iCal URL (Google Calendar)</label>
+                        <label class="form-label">{{ t.ical_url }}</label>
                         <input type="url" class="form-control" id="calendar_ical_url"
                                value="{{ config.calendar_ical_url }}"
-                               placeholder="https://calendar.google.com/calendar/ical/...">
-                        <div class="form-text">
-                            Google Calendar: Settings &rarr; Calendar &rarr; Secret address in iCal format (optional)
-                        </div>
+                               placeholder="{{ t.ical_placeholder }}">
+                        <div class="form-text">{{ t.ical_hint }}</div>
                     </div>
 
                     <hr>
-                    <h5 class="mb-3"><i class="bi bi-display"></i> Default Page</h5>
+                    <h5 class="mb-3"><i class="bi bi-display"></i> {{ t.default_page }}</h5>
 
                     <div class="mb-4">
                         <div class="btn-group w-100" role="group">
                             <input type="radio" class="btn-check" name="page" id="page-home" value="home">
                             <label class="btn btn-outline-primary" for="page-home">
-                                <i class="bi bi-house"></i> Home
+                                <i class="bi bi-house"></i> {{ t.home }}
                             </label>
                             <input type="radio" class="btn-check" name="page" id="page-widget" value="widget">
                             <label class="btn btn-outline-primary" for="page-widget">
-                                <i class="bi bi-grid"></i> Widget
+                                <i class="bi bi-grid"></i> {{ t.widget }}
                             </label>
                             <input type="radio" class="btn-check" name="page" id="page-photo" value="photo" checked>
                             <label class="btn btn-outline-primary" for="page-photo">
-                                <i class="bi bi-camera"></i> Photo
+                                <i class="bi bi-camera"></i> {{ t.photo }}
                             </label>
                         </div>
                     </div>
 
                     <div class="d-grid">
                         <button type="submit" class="btn btn-primary btn-lg">
-                            <i class="bi bi-check-circle"></i> Complete Setup
+                            <i class="bi bi-check-circle"></i> {{ t.complete_setup }}
                         </button>
                     </div>
                 </form>
@@ -82,7 +79,7 @@
         </div>
 
         <div class="text-center mt-3">
-            <small class="text-muted">All settings can be changed later in Settings page</small>
+            <small class="text-muted">{{ t.settings_changeable }}</small>
         </div>
     </div>
 </div>
@@ -109,10 +106,10 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
     .then(r => r.json())
     .then(result => {
         if (result.success) {
-            showToast('Setup complete!', 'success');
+            showToast('OK', 'success');
             setTimeout(() => window.location.href = '/', 1000);
         } else {
-            showToast('Setup failed: ' + (result.error || ''), 'danger');
+            showToast(result.error || 'Failed', 'danger');
         }
     })
     .catch(err => showToast('Error: ' + err, 'danger'));

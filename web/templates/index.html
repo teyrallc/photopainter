@@ -1,48 +1,53 @@
 {% extends "base.html" %}
-{% block title %}Vignette - Dashboard{% endblock %}
+{% block title %}Vignette - {{ t.dashboard }}{% endblock %}
 
 {% block content %}
-<h2 class="mb-4"><i class="bi bi-house"></i> Dashboard</h2>
+<h2 class="mb-4"><i class="bi bi-house"></i> {{ t.dashboard }}</h2>
 
 <div class="row g-4">
     <!-- Page Control (Virtual Buttons) -->
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-primary text-white">
-                <i class="bi bi-display"></i> Display Page / 顯示頁面
+                <i class="bi bi-display"></i> {{ t.display_page }}
             </div>
             <div class="card-body">
                 <div class="d-flex justify-content-center gap-2 mb-3">
                     <button class="btn btn-{{ 'primary' if config.current_page == 'home' else 'outline-primary' }}"
                             onclick="switchPage('home')">
-                        <i class="bi bi-house"></i> Home
+                        <i class="bi bi-house"></i> {{ t.home }}
                     </button>
                     <button class="btn btn-{{ 'primary' if config.current_page == 'widget' else 'outline-primary' }}"
                             onclick="switchPage('widget')">
-                        <i class="bi bi-grid"></i> Widget
+                        <i class="bi bi-grid"></i> {{ t.widget }}
                     </button>
                     <button class="btn btn-{{ 'primary' if config.current_page == 'photo' else 'outline-primary' }}"
                             onclick="switchPage('photo')">
-                        <i class="bi bi-camera"></i> Photo
+                        <i class="bi bi-camera"></i> {{ t.photo }}
                     </button>
                 </div>
 
                 <div class="text-center mb-3">
                     <span class="badge bg-secondary" id="current-page-badge">
-                        Current: {{ config.current_page | upper }}
+                        {{ t.current }}: {{ config.current_page | upper }}
                         {% if config.current_page == 'widget' %}
                         ({{ config.widget_mode }})
                         {% endif %}
                     </span>
                 </div>
 
-                <!-- Widget toggle (visible when on Widget page) -->
+                <!-- Widget mode buttons -->
                 <div class="d-flex justify-content-center gap-2 mb-3">
-                    <button class="btn btn-outline-info btn-sm" onclick="toggleWidget()">
-                        <i class="bi bi-arrow-repeat"></i> Toggle Widget (Weather/Calendar)
+                    <button class="btn btn-sm btn-{{ 'info' if config.widget_mode == 'weather' else 'outline-info' }}"
+                            onclick="setWidget('weather')">
+                        <i class="bi bi-cloud-sun"></i> {{ t.weather }}
+                    </button>
+                    <button class="btn btn-sm btn-{{ 'info' if config.widget_mode == 'calendar' else 'outline-info' }}"
+                            onclick="setWidget('calendar')">
+                        <i class="bi bi-calendar3"></i> {{ t.calendar }}
                     </button>
                     <button class="btn btn-outline-success btn-sm" onclick="refreshPage()">
-                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                        <i class="bi bi-arrow-clockwise"></i> {{ t.refresh }}
                     </button>
                 </div>
             </div>
@@ -53,7 +58,7 @@
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-success text-white">
-                <i class="bi bi-camera"></i> Photo Control / 照片控制
+                <i class="bi bi-camera"></i> {{ t.photo_control }}
             </div>
             <div class="card-body text-center">
                 <div id="photo-preview" class="mb-3">
@@ -64,7 +69,7 @@
                     </div>
                     <p class="mt-2 mb-0 small"><strong>{{ photo_state.current_image }}</strong></p>
                     {% else %}
-                    <p class="text-muted mb-0">No photo displayed</p>
+                    <p class="text-muted mb-0">{{ t.no_photo }}</p>
                     {% endif %}
                 </div>
 
@@ -77,18 +82,18 @@
 
                 <div class="d-flex justify-content-center gap-2 mb-2">
                     <button class="btn btn-outline-primary" onclick="photoPrev()">
-                        <i class="bi bi-chevron-left"></i> Prev
+                        <i class="bi bi-chevron-left"></i> {{ t.prev }}
                     </button>
                     <button class="btn btn-outline-primary" onclick="photoNext()">
-                        Next <i class="bi bi-chevron-right"></i>
+                        {{ t.next }} <i class="bi bi-chevron-right"></i>
                     </button>
                 </div>
                 <div class="d-flex justify-content-center gap-2">
                     <button class="btn btn-outline-success btn-sm" onclick="photoLatest()">
-                        <i class="bi bi-camera"></i> Latest
+                        <i class="bi bi-camera"></i> {{ t.latest }}
                     </button>
                     <button class="btn btn-outline-info btn-sm" onclick="displayTest()">
-                        <i class="bi bi-grid-3x3"></i> Test Pattern
+                        <i class="bi bi-grid-3x3"></i> {{ t.test_pattern }}
                     </button>
                 </div>
             </div>
@@ -99,23 +104,23 @@
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-dark text-white">
-                <i class="bi bi-info-circle"></i> Display Status / 顯示器狀態
+                <i class="bi bi-info-circle"></i> {{ t.display_status }}
             </div>
             <div class="card-body">
-                <p><strong>Status:</strong>
+                <p><strong>{{ t.status }}:</strong>
                     <span class="badge bg-{{ 'success' if display_state.status == 'idle' else 'warning' }}">
                         {{ display_state.status }}
                     </span>
                 </p>
-                <p><strong>Showing:</strong> {{ display_state.current_image or 'None' }}</p>
-                <p><strong>Last update:</strong> {{ display_state.last_update or 'Never' }}</p>
-                <p class="mb-0"><strong>Total images:</strong> {{ total_images }}</p>
+                <p><strong>{{ t.showing }}:</strong> {{ display_state.current_image or 'None' }}</p>
+                <p><strong>{{ t.last_update }}:</strong> {{ display_state.last_update or 'Never' }}</p>
+                <p class="mb-0"><strong>{{ t.total_images }}:</strong> {{ total_images }}</p>
                 <div class="d-flex gap-2 mt-3">
                     <button class="btn btn-outline-warning btn-sm" onclick="clearDisplay()">
-                        <i class="bi bi-eraser"></i> Clear
+                        <i class="bi bi-eraser"></i> {{ t.clear }}
                     </button>
                     <button class="btn btn-outline-secondary btn-sm" onclick="sleepDisplay()">
-                        <i class="bi bi-moon"></i> Sleep
+                        <i class="bi bi-moon"></i> {{ t.sleep }}
                     </button>
                 </div>
             </div>
@@ -126,18 +131,18 @@
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-secondary text-white">
-                <i class="bi bi-lightning"></i> Quick Actions
+                <i class="bi bi-lightning"></i> {{ t.quick_actions }}
             </div>
             <div class="card-body">
                 <div class="d-grid gap-2">
                     <a href="/upload" class="btn btn-outline-primary">
-                        <i class="bi bi-upload"></i> Upload Photo
+                        <i class="bi bi-upload"></i> {{ t.upload }}
                     </a>
                     <a href="/gallery" class="btn btn-outline-info">
-                        <i class="bi bi-images"></i> Gallery ({{ total_images }})
+                        <i class="bi bi-images"></i> {{ t.gallery }} ({{ total_images }})
                     </a>
                     <a href="/settings" class="btn btn-outline-dark">
-                        <i class="bi bi-gear"></i> Settings
+                        <i class="bi bi-gear"></i> {{ t.settings }}
                     </a>
                 </div>
             </div>
@@ -147,25 +152,25 @@
     <!-- System Info -->
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header"><i class="bi bi-cpu"></i> System Info</div>
-            <div class="card-body" id="system-info"><p class="text-muted">Loading...</p></div>
+            <div class="card-header"><i class="bi bi-cpu"></i> {{ t.system_info }}</div>
+            <div class="card-body" id="system-info"><p class="text-muted">{{ t.loading }}</p></div>
         </div>
     </div>
 
     <!-- Remote Management -->
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header"><i class="bi bi-gear"></i> Remote Management</div>
+            <div class="card-header"><i class="bi bi-gear"></i> {{ t.remote_mgmt }}</div>
             <div class="card-body">
                 <div class="d-grid gap-2">
                     <button class="btn btn-outline-primary" onclick="systemUpdate()">
-                        <i class="bi bi-arrow-repeat"></i> Update / 更新程式
+                        <i class="bi bi-arrow-repeat"></i> {{ t.update_software }}
                     </button>
                     <button class="btn btn-outline-warning" onclick="systemReboot()">
-                        <i class="bi bi-arrow-clockwise"></i> Reboot / 重啟
+                        <i class="bi bi-arrow-clockwise"></i> {{ t.reboot }}
                     </button>
                     <button class="btn btn-outline-danger" onclick="systemShutdown()">
-                        <i class="bi bi-power"></i> Shutdown / 關機
+                        <i class="bi bi-power"></i> {{ t.shutdown }}
                     </button>
                 </div>
                 <div id="update-output" class="mt-3 d-none">
@@ -178,7 +183,7 @@
     <!-- Recent Images -->
     <div class="col-12">
         <div class="card">
-            <div class="card-header"><i class="bi bi-clock-history"></i> Recent Photos</div>
+            <div class="card-header"><i class="bi bi-clock-history"></i> {{ t.recent_photos }}</div>
             <div class="card-body">
                 {% if images %}
                 <div class="row g-3">
@@ -191,7 +196,7 @@
                                 <small class="text-muted d-block text-truncate">{{ img.filename }}</small>
                                 <button class="btn btn-sm btn-primary mt-1 w-100"
                                         onclick="displayImage('{{ img.filename }}')">
-                                    <i class="bi bi-display"></i> Display
+                                    <i class="bi bi-display"></i> {{ t.display }}
                                 </button>
                             </div>
                         </div>
@@ -199,7 +204,7 @@
                     {% endfor %}
                 </div>
                 {% else %}
-                <p class="text-muted mb-0">No photos yet. Upload one!</p>
+                <p class="text-muted mb-0">{{ t.no_photos_yet }}</p>
                 {% endif %}
             </div>
         </div>
@@ -210,30 +215,35 @@
 {% block scripts %}
 <script>
 function switchPage(page) {
-    showToast('Switching to ' + page + ' page...', 'info');
     fetch('/api/page/switch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({page: page})
     }).then(r => r.json()).then(d => {
         if (d.success) {
-            showToast('Switched to ' + d.page, 'success');
-            document.getElementById('current-page-badge').textContent = 'Current: ' + d.page.toUpperCase();
+            showToast('{{ t.switch_to }} ' + d.page, 'success');
+            location.reload();
         } else { showToast(d.error, 'danger'); }
     }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 
-function toggleWidget() {
-    fetch('/api/widget/toggle', {method: 'POST'}).then(r => r.json()).then(d => {
-        if (d.success) showToast('Widget: ' + d.widget_mode, 'success');
-        else showToast(d.error, 'danger');
+function setWidget(mode) {
+    fetch('/api/widget/set', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: mode})
+    }).then(r => r.json()).then(d => {
+        if (d.success) {
+            showToast(d.widget_mode, 'success');
+            location.reload();
+        } else showToast(d.error, 'danger');
     });
 }
 
 function refreshPage() {
-    showToast('Refreshing page...', 'info');
+    showToast('{{ t.refresh }}...', 'info');
     fetch('/api/page/refresh', {method: 'POST'}).then(r => r.json()).then(d => {
-        if (d.success) showToast('Page refreshed', 'success');
+        if (d.success) showToast('OK', 'success');
         else showToast(d.error, 'danger');
     });
 }
@@ -243,12 +253,12 @@ function loadSystemInfo() {
         const div = document.getElementById('system-info');
         const tc = info.cpu_temp > 70 ? 'danger' : (info.cpu_temp > 55 ? 'warning' : 'success');
         div.innerHTML = `<table class="table table-sm mb-0">
-            <tr><td><i class="bi bi-pc-display"></i> Host</td><td>${info.hostname || '-'}</td></tr>
-            <tr><td><i class="bi bi-wifi"></i> IP</td><td>${(info.ip_addresses || []).join(', ') || '-'}</td></tr>
-            <tr><td><i class="bi bi-thermometer-half"></i> Temp</td><td><span class="badge bg-${tc}">${info.cpu_temp ? info.cpu_temp + '°C' : '-'}</span></td></tr>
-            <tr><td><i class="bi bi-memory"></i> RAM</td><td>${info.mem_available_mb || '-'} / ${info.mem_total_mb || '-'} MB</td></tr>
-            <tr><td><i class="bi bi-hdd"></i> Disk</td><td>${info.disk_free_gb ? info.disk_free_gb + ' GB' : '-'}</td></tr>
-            <tr><td><i class="bi bi-clock"></i> Uptime</td><td>${info.uptime || '-'}</td></tr>
+            <tr><td><i class="bi bi-pc-display"></i> {{ t.host }}</td><td>${info.hostname || '-'}</td></tr>
+            <tr><td><i class="bi bi-wifi"></i> {{ t.ip }}</td><td>${(info.ip_addresses || []).join(', ') || '-'}</td></tr>
+            <tr><td><i class="bi bi-thermometer-half"></i> {{ t.temp }}</td><td><span class="badge bg-${tc}">${info.cpu_temp ? info.cpu_temp + '°C' : '-'}</span></td></tr>
+            <tr><td><i class="bi bi-memory"></i> {{ t.ram }}</td><td>${info.mem_available_mb || '-'} / ${info.mem_total_mb || '-'} MB</td></tr>
+            <tr><td><i class="bi bi-hdd"></i> {{ t.disk }}</td><td>${info.disk_free_gb ? info.disk_free_gb + ' GB' : '-'}</td></tr>
+            <tr><td><i class="bi bi-clock"></i> {{ t.uptime }}</td><td>${info.uptime || '-'}</td></tr>
         </table>`;
     }).catch(() => {
         document.getElementById('system-info').innerHTML = '<p class="text-danger mb-0">Failed to load</p>';
@@ -256,23 +266,23 @@ function loadSystemInfo() {
 }
 
 function systemUpdate() {
-    if (!confirm('Update software?')) return;
+    if (!confirm('{{ t.confirm_update }}')) return;
     const out = document.getElementById('update-output');
     out.classList.remove('d-none');
-    out.querySelector('pre').textContent = 'Updating...\n';
+    out.querySelector('pre').textContent = '{{ t.loading }}\n';
     fetch('/api/system/update', {method:'POST'}).then(r=>r.json()).then(d => {
         out.querySelector('pre').textContent = d.output || d.error || 'Done';
-        if (d.success) { showToast('Updated! Reloading in 5s...', 'success'); setTimeout(()=>location.reload(), 5000); }
-        else showToast('Update failed', 'danger');
+        if (d.success) { showToast('OK', 'success'); setTimeout(()=>location.reload(), 5000); }
+        else showToast('Failed', 'danger');
     });
 }
 function systemReboot() {
-    if (!confirm('Reboot Pi?')) return;
+    if (!confirm('{{ t.confirm_reboot }}')) return;
     fetch('/api/system/reboot', {method:'POST'});
-    showToast('Rebooting... wait 30s then refresh.', 'info');
+    showToast('Rebooting...', 'info');
 }
 function systemShutdown() {
-    if (!confirm('Shutdown Pi? Need manual power cycle to restart.')) return;
+    if (!confirm('{{ t.confirm_shutdown }}')) return;
     fetch('/api/system/shutdown', {method:'POST'});
     showToast('Shutting down...', 'warning');
 }

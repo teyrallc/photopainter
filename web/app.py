@@ -17,8 +17,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import (Flask, jsonify, redirect, render_template, request,
-                   send_file, send_from_directory, url_for)
+from flask import (Flask, jsonify, make_response, redirect, render_template,
+                   request, send_file, send_from_directory, url_for)
 from PIL import Image, ImageDraw, ImageFont
 
 # Pillow compatibility
@@ -46,12 +46,20 @@ logger = logging.getLogger("vignette")
 from services.config import Config
 from services.weather import fetch_weather
 from services.calendar_svc import fetch_calendar_events, get_today_info
+from services.i18n import get_translations
 from services import renderer
 
 config = Config(CONFIG_PATH)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+
+@app.context_processor
+def inject_globals():
+    """Inject translation strings and language into all templates."""
+    lang = request.cookies.get("lang", config.get("lang", "en"))
+    return {"t": get_translations(lang), "current_lang": lang}
 
 
 @app.errorhandler(Exception)
@@ -340,6 +348,11 @@ def settings_page():
 @app.route('/manual')
 def manual_page():
     return render_template('manual.html')
+
+
+@app.route('/wifi')
+def wifi_page():
+    return render_template('wifi.html', config=config.to_dict())
 
 
 # ── API: Setup & Config ──────────────────────────────────────────────────
@@ -674,6 +687,109 @@ def api_sleep():
         return jsonify({"success": True, "message": "Display sleeping"})
     except Exception as e:
         return jsonify({"error": f"Sleep failed: {e}"}), 500
+
+
+# ── API: Language ────────────────────────────────────────────────────────
+
+@app.route('/api/lang', methods=['POST'])
+def api_lang():
+    """Toggle language between en and zh."""
+    data = request.get_json() or {}
+    lang = data.get("lang", "en")
+    if lang not in ("en", "zh"):
+        lang = "en"
+    config.set("lang", lang)
+    resp = make_response(jsonify({"success": True, "lang": lang}))
+    resp.set_cookie("lang", lang, max_age=365 * 24 * 3600)
+    return resp
+
+
+# ── API: Widget Mode Set ─────────────────────────────────────────────────
+
+@app.route('/api/widget/set', methods=['POST'])
+def api_widget_set():
+    """Set widget mode to a specific value (weather or calendar)."""
+    data = request.get_json() or {}
+    mode = data.get("mode")
+    if mode not in ("weather", "calendar"):
+        return jsonify({"error": "Invalid mode. Use weather or calendar"}), 400
+    config.set("widget_mode", mode)
+
+    if config.get("current_page") == "widget":
+        if not display_lock.acquire(blocking=False):
+            return jsonify({"error": "Display is busy"}), 503
+        try:
+            success, msg = display_current_page()
+            if success:
+                return jsonify({"success": True, "widget_mode": mode})
+            return jsonify({"error": msg}), 500
+        finally:
+            display_lock.release()
+
+    return jsonify({"success": True, "widget_mode": mode})
+
+
+# ── API: WiFi Management ─────────────────────────────────────────────────
+
+@app.route('/api/wifi/status')
+def api_wifi_status():
+    """Get current WiFi connection status."""
+    try:
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"],
+            capture_output=True, text=True, timeout=10)
+        for line in result.stdout.strip().split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 3 and parts[0] == 'yes':
+                return jsonify({"connected": True, "ssid": parts[1],
+                                "signal": parts[2] + '%', "ip": _get_ip()})
+        return jsonify({"connected": False})
+    except Exception as e:
+        logger.error(f"WiFi status error: {e}")
+        return jsonify({"connected": False, "error": str(e)})
+
+
+@app.route('/api/wifi/scan')
+def api_wifi_scan():
+    """Scan for available WiFi networks."""
+    try:
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
+            capture_output=True, text=True, timeout=30)
+        networks = []
+        seen = set()
+        for line in result.stdout.strip().split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 3 and parts[0] and parts[0] not in seen:
+                seen.add(parts[0])
+                networks.append({"ssid": parts[0], "signal": parts[1] + '%',
+                                 "security": parts[2]})
+        networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
+        return jsonify({"networks": networks})
+    except Exception as e:
+        logger.error(f"WiFi scan error: {e}")
+        return jsonify({"networks": [], "error": str(e)})
+
+
+@app.route('/api/wifi/connect', methods=['POST'])
+def api_wifi_connect():
+    """Connect to a WiFi network."""
+    data = request.get_json() or {}
+    ssid = data.get("ssid", "").strip()
+    password = data.get("password", "").strip()
+    if not ssid:
+        return jsonify({"error": "SSID is required"}), 400
+    try:
+        cmd = ["nmcli", "dev", "wifi", "connect", ssid]
+        if password:
+            cmd += ["password", password]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return jsonify({"success": True, "message": f"Connected to {ssid}"})
+        return jsonify({"success": False, "error": result.stderr.strip() or "Connection failed"})
+    except Exception as e:
+        logger.error(f"WiFi connect error: {e}")
+        return jsonify({"success": False, "error": str(e)})
 
 
 # ── API: System ──────────────────────────────────────────────────────────

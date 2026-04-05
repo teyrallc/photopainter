@@ -121,19 +121,18 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
 
 
 def render_qr_setup(ip_address, port=5000):
-    """Render QR code setup page on e-paper."""
+    """Render QR code WiFi setup page on e-paper."""
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    url = f"http://{ip_address}:{port}/setup"
+    url = f"http://{ip_address}:{port}/wifi"
 
-    # Title
     font_title = _get_font(32)
     font_body = _get_font(20)
     font_small = _get_font(16)
 
     draw.text((EPD_W // 2, 30), "Vignette", fill=BLACK, font=font_title, anchor="mt")
-    draw.text((EPD_W // 2, 70), "H System Smart Display", fill=BLUE, font=font_body, anchor="mt")
+    draw.text((EPD_W // 2, 70), "Scan to configure WiFi", fill=BLUE, font=font_body, anchor="mt")
 
     # QR Code
     try:
@@ -143,29 +142,20 @@ def render_qr_setup(ip_address, port=5000):
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-        # Center QR code
         qr_x = (EPD_W - qr_img.width) // 2
         qr_y = 110
         img.paste(qr_img, (qr_x, qr_y))
-
         qr_bottom = qr_y + qr_img.height + 15
     except ImportError:
-        # No qrcode library - show URL text instead
-        draw.text((EPD_W // 2, 200), "QR Code library not installed",
+        draw.text((EPD_W // 2, 200), "pip install qrcode[pil]",
                   fill=RED, font=font_body, anchor="mm")
-        draw.text((EPD_W // 2, 240), "pip install qrcode[pil]",
-                  fill=BLACK, font=font_small, anchor="mm")
-        qr_bottom = 280
+        qr_bottom = 240
 
-    # Instructions
     draw.text((EPD_W // 2, qr_bottom),
-              "Scan QR Code to set up", fill=BLACK, font=font_body, anchor="mt")
-    draw.text((EPD_W // 2, qr_bottom + 30),
-              f"or visit: {url}", fill=BLUE, font=font_small, anchor="mt")
+              f"Visit: {url}", fill=BLACK, font=font_small, anchor="mt")
 
-    # Footer
     draw.text((EPD_W // 2, EPD_H - 20),
-              "© 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
+              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
 
     return img
 
@@ -196,15 +186,15 @@ def _lanczos():
 def _draw_calendar_panel(draw, x, y, w, h, events):
     """Draw calendar in a panel region."""
     now = datetime.now()
-    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+    weekdays_en = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
     font_date = _get_font(36)
     font_day = _get_font(18)
     font_event = _get_font(14)
 
-    # Date header
-    date_str = f"{now.month}月{now.day}日"
-    day_str = f"星期{weekdays[now.weekday()]}"
+    # Date header (English)
+    date_str = now.strftime("%b %d")
+    day_str = weekdays_en[now.weekday()]
     draw.text((x + w // 2, y + 20), date_str, fill=BLACK, font=font_date, anchor="mt")
     draw.text((x + w // 2, y + 62), day_str, fill=RED if now.weekday() >= 5 else BLUE,
               font=font_day, anchor="mt")
@@ -281,7 +271,7 @@ def _draw_weather_panel(draw, x, y, w, h, weather):
     draw.text((x + w // 2, y + 80), desc, fill=BLACK, font=font_desc, anchor="mt")
 
     # Details row
-    details = f"H:{weather['temp_max']}° L:{weather['temp_min']}°  Humidity:{weather['humidity']}%"
+    details = f"H:{weather['temp_max']}°  L:{weather['temp_min']}°  Hum:{weather['humidity']}%"
     draw.text((x + w // 2, y + 108), details, fill=BLACK, font=font_detail, anchor="mt")
 
     # Forecast
@@ -358,7 +348,7 @@ def _draw_weather_fullscreen(draw, weather):
 def _draw_calendar_fullscreen(draw, events):
     """Draw full-screen calendar view."""
     now = datetime.now()
-    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+    weekdays_en = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
     font_header = _get_font(28)
     font_date = _get_font(48)
@@ -367,12 +357,12 @@ def _draw_calendar_fullscreen(draw, events):
 
     # Header bar
     draw.rectangle([0, 0, EPD_W, 50], fill=RED)
-    month_str = f"{now.year}年{now.month}月"
+    month_str = now.strftime("%B %Y")
     draw.text((EPD_W // 2, 25), month_str, fill=WHITE, font=font_header, anchor="mm")
 
     # Today's date (big)
     date_str = f"{now.day}"
-    day_str = f"星期{weekdays[now.weekday()]}"
+    day_str = weekdays_en[now.weekday()]
     draw.text((EPD_W // 2, 90), date_str, fill=BLACK, font=_get_font(64), anchor="mt")
     draw.text((EPD_W // 2, 160), day_str, fill=RED if now.weekday() >= 5 else BLUE,
               font=font_header, anchor="mt")

@@ -1,196 +1,158 @@
 {% extends "base.html" %}
-{% block title %}Vignette - 使用手冊 / User Manual{% endblock %}
+{% block title %}Vignette - {{ t.manual }}{% endblock %}
 
 {% block content %}
-<h2 class="mb-4"><i class="bi bi-book"></i> 使用手冊 / User Manual</h2>
+<h2 class="mb-4"><i class="bi bi-book"></i> {{ t.manual }}</h2>
 
 <div class="row">
     <div class="col-lg-3 mb-4">
         <div class="list-group sticky-top" style="top: 80px;">
-            <a href="#hardware" class="list-group-item list-group-item-action">硬體需求 / Hardware</a>
-            <a href="#assembly" class="list-group-item list-group-item-action">組裝說明 / Assembly</a>
-            <a href="#install" class="list-group-item list-group-item-action">軟體安裝 / Installation</a>
-            <a href="#usage-web" class="list-group-item list-group-item-action">Web 控制台 / Web Console</a>
-            <a href="#photo-nav" class="list-group-item list-group-item-action">照片導航 / Photo Navigation</a>
-            <a href="#api" class="list-group-item list-group-item-action">API 文件 / API Reference</a>
-            <a href="#service" class="list-group-item list-group-item-action">服務管理 / Service Management</a>
-            <a href="#troubleshooting" class="list-group-item list-group-item-action">故障排除 / Troubleshooting</a>
+            <a href="#hardware" class="list-group-item list-group-item-action">{{ t.hardware_req }}</a>
+            <a href="#assembly" class="list-group-item list-group-item-action">{{ t.assembly_guide }}</a>
+            <a href="#install" class="list-group-item list-group-item-action">{{ t.installation }}</a>
+            <a href="#usage-web" class="list-group-item list-group-item-action">{{ t.web_console }}</a>
+            <a href="#photo-nav" class="list-group-item list-group-item-action">{{ t.photo_navigation }}</a>
+            <a href="#api" class="list-group-item list-group-item-action">{{ t.api_reference }}</a>
+            <a href="#service" class="list-group-item list-group-item-action">{{ t.service_mgmt }}</a>
+            <a href="#troubleshooting" class="list-group-item list-group-item-action">{{ t.troubleshooting }}</a>
         </div>
     </div>
 
     <div class="col-lg-9">
         <!-- Hardware -->
         <section id="hardware" class="mb-5">
-            <h3>硬體需求 / Hardware Requirements</h3>
+            <h3>{{ t.hardware_req }}</h3>
             <table class="table table-bordered">
                 <tbody>
-                    <tr><td><strong>主控板 / Board</strong></td><td>Raspberry Pi Zero 2 W</td></tr>
-                    <tr><td><strong>背板 / Carrier</strong></td><td>Waveshare RPi Zero PhotoPainter Board</td></tr>
-                    <tr><td><strong>顯示器 / Display</strong></td><td>Waveshare 7.3" 6-color e-paper (800 x 480)</td></tr>
-                    <tr><td><strong>電池 / Battery</strong></td><td>3.7V 1500mAh Li-Po</td></tr>
-                    <tr><td><strong>記憶卡 / Storage</strong></td><td>32GB+ microSD (64GB recommended)</td></tr>
-                    <tr><td><strong>顯示色彩 / Colors</strong></td><td>Black, White, Green, Blue, Red, Yellow, Orange (7 colors)</td></tr>
-                    <tr><td><strong>解析度 / Resolution</strong></td><td>800 x 480 pixels</td></tr>
-                    <tr><td><strong>刷新時間 / Refresh</strong></td><td>~12 seconds</td></tr>
+                    <tr><td><strong>Board</strong></td><td>Raspberry Pi Zero 2 W</td></tr>
+                    <tr><td><strong>Carrier</strong></td><td>Waveshare RPi Zero PhotoPainter Board</td></tr>
+                    <tr><td><strong>Display</strong></td><td>Waveshare 7.3" 6-color e-paper (800 x 480)</td></tr>
+                    <tr><td><strong>Battery</strong></td><td>3.7V 1500mAh Li-Po</td></tr>
+                    <tr><td><strong>Storage</strong></td><td>32GB+ microSD (64GB recommended)</td></tr>
+                    <tr><td><strong>Colors</strong></td><td>Black, White, Green, Blue, Red, Yellow (6 colors)</td></tr>
+                    <tr><td><strong>Resolution</strong></td><td>800 x 480 pixels</td></tr>
+                    <tr><td><strong>Refresh</strong></td><td>~12 seconds</td></tr>
                 </tbody>
             </table>
         </section>
 
         <!-- Assembly -->
         <section id="assembly" class="mb-5">
-            <h3>組裝說明 / Assembly</h3>
+            <h3>{{ t.assembly_guide }}</h3>
             <ol>
-                <li>燒錄 Raspbian Bullseye Lite 到 microSD 卡 / Flash Raspbian Bullseye Lite to microSD</li>
-                <li>設定 WiFi 及啟用 SSH / Configure WiFi and enable SSH via <code>raspi-config</code></li>
-                <li>將 Pi Zero 2 W 插入 PhotoPainter 背板 / Insert Pi Zero 2 W into the PhotoPainter carrier board</li>
-                <li>確認電子紙排線連接正確 / Verify e-paper ribbon cable connection</li>
-                <li>接上電源啟動 / Power on</li>
+                <li>Flash Raspbian Bookworm Lite to microSD</li>
+                <li>Configure WiFi and enable SSH via <code>raspi-config</code></li>
+                <li>Insert Pi Zero 2 W into the PhotoPainter carrier board</li>
+                <li>Verify e-paper ribbon cable connection</li>
+                <li>Power on</li>
             </ol>
             <div class="alert alert-info">
                 <i class="bi bi-info-circle"></i>
-                SPI 必須啟用！/ SPI must be enabled!<br>
+                SPI must be enabled!<br>
                 <code>sudo raspi-config</code> &rarr; Interface Options &rarr; SPI &rarr; Enable
             </div>
         </section>
 
         <!-- Installation -->
         <section id="install" class="mb-5">
-            <h3>軟體安裝 / Installation</h3>
-            <h5>一鍵安裝 / One-command Install</h5>
+            <h3>{{ t.installation }}</h3>
             <pre class="bg-dark text-light p-3 rounded"><code>git clone https://github.com/teyrallc/photopainter.git
 cd photopainter
 bash scripts/install.sh</code></pre>
-
-            <h5>安裝內容 / What Gets Installed</h5>
-            <ul>
-                <li>系統套件 / System packages: cmake, python3, git, OpenCV, etc.</li>
-                <li>Python 虛擬環境及依賴 / Python virtual environment and dependencies</li>
-                <li>systemd 服務（開機自動啟動） / systemd service (auto-start on boot)</li>
-            </ul>
         </section>
 
         <!-- Web Usage -->
         <section id="usage-web" class="mb-5">
-            <h3>Web 控制台 / Web Console</h3>
-            <p>安裝完成後，Web 介面會自動啟動。/ After installation, the web interface starts automatically.</p>
-            <p>在同一網路的任何裝置上開啟瀏覽器：/ Open a browser on any device on the same network:</p>
+            <h3>{{ t.web_console }}</h3>
             <pre class="bg-dark text-light p-3 rounded"><code>http://&lt;Pi-IP&gt;:5000</code></pre>
 
-            <h5>頁面說明 / Pages</h5>
             <table class="table table-bordered">
-                <thead><tr><th>頁面 / Page</th><th>功能 / Function</th></tr></thead>
+                <thead><tr><th>Page</th><th>Function</th></tr></thead>
                 <tbody>
-                    <tr><td><strong>控制台 / Dashboard</strong></td><td>照片導航、顯示器狀態、系統資訊、遠端管理 / Photo navigation, display status, system info, remote management</td></tr>
-                    <tr><td><strong>上傳圖片 / Upload</strong></td><td>拖曳上傳、預覽原圖及電子紙效果、一鍵顯示 / Drag-and-drop upload, preview original & e-paper effect, one-click display</td></tr>
-                    <tr><td><strong>圖庫 / Gallery</strong></td><td>瀏覽所有圖片、預覽、顯示、刪除 / Browse all images, preview, display, delete</td></tr>
-                    <tr><td><strong>使用手冊 / Manual</strong></td><td>本頁面 / This page</td></tr>
+                    <tr><td><strong>{{ t.dashboard }}</strong></td><td>Photo navigation, display status, system info, remote management</td></tr>
+                    <tr><td><strong>{{ t.upload }}</strong></td><td>Drag-and-drop upload, preview, one-click display</td></tr>
+                    <tr><td><strong>{{ t.gallery }}</strong></td><td>Browse, preview, display, delete</td></tr>
+                    <tr><td><strong>{{ t.settings }}</strong></td><td>Weather, calendar, photo, system settings</td></tr>
+                    <tr><td><strong>{{ t.wifi_setup }}</strong></td><td>WiFi configuration</td></tr>
                 </tbody>
             </table>
         </section>
 
         <!-- Photo Navigation -->
         <section id="photo-nav" class="mb-5">
-            <h3>照片導航 / Photo Navigation</h3>
-            <p>在控制台頁面，你可以使用虛擬按鍵瀏覽照片：/ On the dashboard, use virtual buttons to browse photos:</p>
+            <h3>{{ t.photo_navigation }}</h3>
             <table class="table table-bordered">
-                <thead><tr><th>按鍵 / Button</th><th>功能 / Function</th></tr></thead>
+                <thead><tr><th>Button</th><th>Function</th></tr></thead>
                 <tbody>
-                    <tr><td><strong>上一張 / Prev</strong></td><td>顯示上一張照片到電子紙 / Display previous photo on e-paper</td></tr>
-                    <tr><td><strong>下一張 / Next</strong></td><td>顯示下一張照片到電子紙 / Display next photo on e-paper</td></tr>
-                    <tr><td><strong>最新照片 / Latest</strong></td><td>顯示最新上傳的照片 / Display the most recently uploaded photo</td></tr>
-                    <tr><td><strong>測試圖案 / Test Pattern</strong></td><td>發送 7 色測試圖案驗證硬體 / Send 7-color test pattern to verify hardware</td></tr>
+                    <tr><td><strong>{{ t.prev }}</strong></td><td>Display previous photo on e-paper</td></tr>
+                    <tr><td><strong>{{ t.next }}</strong></td><td>Display next photo on e-paper</td></tr>
+                    <tr><td><strong>{{ t.latest }}</strong></td><td>Display the most recently uploaded photo</td></tr>
+                    <tr><td><strong>{{ t.test_pattern }}</strong></td><td>Send 6-color test pattern to verify hardware</td></tr>
                 </tbody>
             </table>
             <div class="alert alert-warning">
                 <i class="bi bi-exclamation-triangle"></i>
-                每次更新電子紙約需 12 秒，請耐心等待。/ Each e-paper refresh takes ~12 seconds, please be patient.
+                Each e-paper refresh takes ~12 seconds.
             </div>
         </section>
 
         <!-- API -->
         <section id="api" class="mb-5">
-            <h3>API 文件 / API Reference</h3>
+            <h3>{{ t.api_reference }}</h3>
             <table class="table table-bordered table-sm">
                 <thead>
-                    <tr><th>Method</th><th>Path</th><th>說明 / Description</th></tr>
+                    <tr><th>Method</th><th>Path</th><th>Description</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td><code>POST</code></td><td><code>/api/upload</code></td><td>上傳圖片 / Upload image (multipart/form-data)</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/display</code></td><td>顯示指定圖片 / Display image (JSON: {"filename": "..."})</td></tr>
-                    <tr><td><code>GET</code></td><td><code>/api/preview/&lt;filename&gt;</code></td><td>7 色預覽圖 / 7-color preview</td></tr>
-                    <tr><td><code>GET</code></td><td><code>/api/images</code></td><td>列出所有圖片 / List all images</td></tr>
-                    <tr><td><code>DELETE</code></td><td><code>/api/images/&lt;filename&gt;</code></td><td>刪除圖片 / Delete image</td></tr>
-                    <tr><td><code>GET</code></td><td><code>/api/photo/current</code></td><td>目前照片資訊 / Current photo info</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/photo/next</code></td><td>下一張照片 / Next photo</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/photo/prev</code></td><td>上一張照片 / Previous photo</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/photo/latest</code></td><td>最新照片 / Latest photo</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/photo/goto/&lt;idx&gt;</code></td><td>跳到指定索引 / Go to index</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/display/test</code></td><td>測試圖案 / Test pattern</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/clear</code></td><td>清除螢幕 / Clear display</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/sleep</code></td><td>螢幕休眠 / Display sleep</td></tr>
-                    <tr><td><code>GET</code></td><td><code>/api/system/info</code></td><td>系統資訊 / System info</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/system/update</code></td><td>遠端更新 / Remote update</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/system/reboot</code></td><td>重新啟動 / Reboot</td></tr>
-                    <tr><td><code>POST</code></td><td><code>/api/system/shutdown</code></td><td>關機 / Shutdown</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/upload</code></td><td>Upload image (multipart/form-data)</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/display</code></td><td>Display image (JSON: {"filename": "..."})</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/images</code></td><td>List all images</td></tr>
+                    <tr><td><code>DELETE</code></td><td><code>/api/images/&lt;filename&gt;</code></td><td>Delete image</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/page/switch</code></td><td>Switch page (JSON: {"page": "home|widget|photo"})</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/widget/set</code></td><td>Set widget mode (JSON: {"mode": "weather|calendar"})</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/photo/next</code></td><td>Next photo</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/photo/prev</code></td><td>Previous photo</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/display/test</code></td><td>Test pattern</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/clear</code></td><td>Clear display</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/lang</code></td><td>Set language (JSON: {"lang": "en|zh"})</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/wifi/status</code></td><td>WiFi status</td></tr>
+                    <tr><td><code>GET</code></td><td><code>/api/wifi/scan</code></td><td>Scan networks</td></tr>
+                    <tr><td><code>POST</code></td><td><code>/api/wifi/connect</code></td><td>Connect WiFi (JSON: {"ssid": "...", "password": "..."})</td></tr>
                 </tbody>
             </table>
-
-            <h5>範例 / Examples</h5>
-            <pre class="bg-dark text-light p-3 rounded"><code># Upload image / 上傳圖片
-curl -F "file=@photo.jpg" http://pi:5000/api/upload
-
-# Display on e-paper / 顯示到電子紙
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"filename": "photo.jpg"}' http://pi:5000/api/display
-
-# Next photo / 下一張照片
-curl -X POST http://pi:5000/api/photo/next
-
-# Test pattern / 測試圖案
-curl -X POST http://pi:5000/api/display/test</code></pre>
         </section>
 
         <!-- Service Management -->
         <section id="service" class="mb-5">
-            <h3>服務管理 / Service Management</h3>
-            <p>Vignette 以 systemd 服務運行，開機自動啟動。/ Vignette runs as a systemd service, auto-starts on boot.</p>
-            <pre class="bg-dark text-light p-3 rounded"><code># 查看狀態 / Check status
+            <h3>{{ t.service_mgmt }}</h3>
+            <pre class="bg-dark text-light p-3 rounded"><code># Check status
 sudo systemctl status vignette
 
-# 重啟服務 / Restart service
+# Restart service
 sudo systemctl restart vignette
 
-# 停止服務 / Stop service
-sudo systemctl stop vignette
-
-# 查看日誌 / View logs
+# View logs
 journalctl -u vignette -f</code></pre>
-
-            <h5>遠端管理 / Remote Management</h5>
-            <ul>
-                <li><strong>Web 介面 / Web UI:</strong> 在控制台點擊「遠端更新程式」、「重新啟動」或「關機」 / Use Dashboard buttons</li>
-                <li><strong>SSH:</strong> <code>bash scripts/update.sh</code></li>
-            </ul>
         </section>
 
         <!-- Troubleshooting -->
         <section id="troubleshooting" class="mb-5">
-            <h3>故障排除 / Troubleshooting</h3>
+            <h3>{{ t.troubleshooting }}</h3>
             <div class="accordion" id="troubleshootAccordion">
                 <div class="accordion-item">
                     <h2 class="accordion-header">
                         <button class="accordion-button collapsed" type="button"
                                 data-bs-toggle="collapse" data-bs-target="#t1">
-                            電子紙無法顯示 / E-paper not displaying
+                            E-paper not displaying
                         </button>
                     </h2>
                     <div id="t1" class="accordion-collapse collapse">
                         <div class="accordion-body">
                             <ol>
-                                <li>確認 SPI 已啟用 / Verify SPI is enabled: <code>sudo raspi-config</code> &rarr; Interface Options &rarr; SPI</li>
-                                <li>檢查排線連接 / Check ribbon cable connection</li>
-                                <li>使用測試圖案驗證 / Send test pattern from Dashboard or: <code>curl -X POST http://localhost:5000/api/display/test</code></li>
-                                <li>確認服務以 root 運行 / Ensure service runs as root (SPI/GPIO requires root)</li>
+                                <li>Verify SPI is enabled: <code>sudo raspi-config</code> &rarr; Interface Options &rarr; SPI</li>
+                                <li>Check ribbon cable connection</li>
+                                <li>Send test pattern from Dashboard</li>
+                                <li>Ensure service runs as root (SPI/GPIO requires root)</li>
                             </ol>
                         </div>
                     </div>
@@ -200,17 +162,16 @@ journalctl -u vignette -f</code></pre>
                     <h2 class="accordion-header">
                         <button class="accordion-button collapsed" type="button"
                                 data-bs-toggle="collapse" data-bs-target="#t2">
-                            Web 無法從其他裝置存取 / Cannot access Web from other devices
+                            Cannot access Web from other devices
                         </button>
                     </h2>
                     <div id="t2" class="accordion-collapse collapse">
                         <div class="accordion-body">
                             <ol>
-                                <li>確認服務運行中 / Check service status: <code>sudo systemctl status vignette</code></li>
-                                <li>確認 Pi 的 IP / Check Pi IP: <code>hostname -I</code></li>
-                                <li>確認同一 WiFi 網路 / Ensure same WiFi network</li>
-                                <li>確認 port 5000 未被阻擋 / Check port 5000: <code>sudo ufw allow 5000</code></li>
-                                <li>嘗試本機存取 / Try locally: <code>curl http://localhost:5000</code></li>
+                                <li>Check service: <code>sudo systemctl status vignette</code></li>
+                                <li>Check IP: <code>hostname -I</code></li>
+                                <li>Ensure same WiFi network</li>
+                                <li>Check port: <code>sudo ufw allow 5000</code></li>
                             </ol>
                         </div>
                     </div>
@@ -220,34 +181,16 @@ journalctl -u vignette -f</code></pre>
                     <h2 class="accordion-header">
                         <button class="accordion-button collapsed" type="button"
                                 data-bs-toggle="collapse" data-bs-target="#t3">
-                            溫度過高 / High temperature
+                            High temperature
                         </button>
                     </h2>
                     <div id="t3" class="accordion-collapse collapse">
                         <div class="accordion-body">
                             <ul>
-                                <li>正常運行溫度約 40-60°C / Normal operating temperature is ~40-60°C</li>
-                                <li>建議加裝散熱片 / Recommend adding a heatsink</li>
-                                <li>監控溫度 / Monitor: <code>vcgencmd measure_temp</code></li>
+                                <li>Normal operating temperature: ~40-60°C</li>
+                                <li>Recommend adding a heatsink</li>
+                                <li>Monitor: <code>vcgencmd measure_temp</code></li>
                             </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="accordion-item">
-                    <h2 class="accordion-header">
-                        <button class="accordion-button collapsed" type="button"
-                                data-bs-toggle="collapse" data-bs-target="#t4">
-                            遠端更新失敗 / Remote update failed
-                        </button>
-                    </h2>
-                    <div id="t4" class="accordion-collapse collapse">
-                        <div class="accordion-body">
-                            <ol>
-                                <li>確認 Pi 有網路連線 / Check network: <code>ping google.com</code></li>
-                                <li>確認 git remote / Check remote: <code>git remote -v</code></li>
-                                <li>手動更新 / Manual update: <code>cd photopainter && git pull && sudo systemctl restart vignette</code></li>
-                            </ol>
                         </div>
                     </div>
                 </div>

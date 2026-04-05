@@ -12,15 +12,18 @@ logger = logging.getLogger("vignette.config")
 DEFAULT_CONFIG = {
     "setup_complete": False,
 
+    # Language
+    "lang": "en",  # en, zh
+
     # Current display state
     "current_page": "photo",  # home, widget, photo
     "widget_mode": "weather",  # weather, calendar
 
-    # Weather settings
-    "weather_api_key": "",
+    # Weather settings (One Call API 3.0)
+    "weather_api_key": "db94ae04db1b19661eada39d37f1ee77",
     "weather_city": "",
     "weather_units": "metric",  # metric, imperial
-    "weather_lang": "zh_tw",
+    "weather_lang": "en",
 
     # Calendar settings
     "calendar_ical_url": "",
