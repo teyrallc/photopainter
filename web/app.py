@@ -215,8 +215,9 @@ def allowed_file(filename):
 
 def get_image_list():
     images = []
-    for ext in ALLOWED_EXTENSIONS:
-        for f in Path(OUTPUT_DIR).glob(f"*.{ext}"):
+    out = Path(OUTPUT_DIR)
+    for f in out.iterdir():
+        if f.is_file() and f.suffix.lower().lstrip('.') in ALLOWED_EXTENSIONS:
             stat = f.stat()
             images.append({
                 "filename": f.name, "path": str(f),
@@ -807,33 +808,32 @@ def _gdrive_access_token():
     return new_token
 
 
-@app.route('/api/gdrive/auth')
-def api_gdrive_auth():
-    """Start Google Drive OAuth flow."""
+@app.route('/api/gdrive/config')
+def api_gdrive_config():
+    """Return Google Drive client ID for the GIS popup flow."""
     client_id = config.get("gdrive_client_id", "")
-    if not client_id:
-        return jsonify({"error": "Google Client ID not configured. Set it in Settings."}), 400
-    url = gdrive.get_auth_url(client_id, _gdrive_redirect_uri())
-    return redirect(url)
+    return jsonify({
+        "client_id": client_id,
+        "connected": config.get("gdrive_connected", False),
+    })
 
 
-@app.route('/api/gdrive/callback')
-def api_gdrive_callback():
-    """OAuth callback from Google."""
-    code = request.args.get("code")
-    error = request.args.get("error")
-    if error:
-        return redirect(url_for('gallery_page') + '?gdrive_error=' + error)
+@app.route('/api/gdrive/auth', methods=['POST'])
+def api_gdrive_auth():
+    """Exchange auth code from Google Sign-In popup for tokens."""
+    data = request.get_json() or {}
+    code = data.get("code")
     if not code:
-        return redirect(url_for('gallery_page') + '?gdrive_error=no_code')
+        return jsonify({"error": "No auth code"}), 400
 
+    # GIS popup flow uses 'postmessage' as redirect_uri for token exchange
     tokens = gdrive.exchange_code(
         config.get("gdrive_client_id", ""),
         config.get("gdrive_client_secret", ""),
-        code, _gdrive_redirect_uri())
+        code, "postmessage")
 
     if not tokens:
-        return redirect(url_for('gallery_page') + '?gdrive_error=token_exchange_failed')
+        return jsonify({"error": "Token exchange failed"}), 400
 
     config.update({
         "gdrive_access_token": tokens.get("access_token", ""),
@@ -841,7 +841,30 @@ def api_gdrive_callback():
                                            config.get("gdrive_refresh_token", "")),
         "gdrive_connected": True,
     })
-    return redirect(url_for('gallery_page') + '?gdrive_connected=1')
+    return jsonify({"success": True})
+
+
+@app.route('/api/gdrive/callback')
+def api_gdrive_callback():
+    """OAuth redirect callback (used by GIS code flow as redirect_uri)."""
+    code = request.args.get("code")
+    error = request.args.get("error")
+    if error or not code:
+        return redirect(url_for('gallery_page'))
+
+    tokens = gdrive.exchange_code(
+        config.get("gdrive_client_id", ""),
+        config.get("gdrive_client_secret", ""),
+        code, _gdrive_redirect_uri())
+
+    if tokens:
+        config.update({
+            "gdrive_access_token": tokens.get("access_token", ""),
+            "gdrive_refresh_token": tokens.get("refresh_token",
+                                               config.get("gdrive_refresh_token", "")),
+            "gdrive_connected": True,
+        })
+    return redirect(url_for('gallery_page'))
 
 
 @app.route('/api/gdrive/disconnect', methods=['POST'])

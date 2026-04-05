@@ -10,22 +10,24 @@
         <i class="bi bi-upload"></i> {{ t.batch_upload }}
         <input type="file" id="batch-file-input" multiple accept="image/*" hidden>
     </label>
-    {% if gdrive_connected %}
-    <button class="btn btn-success" onclick="openDriveBrowser()">
-        <i class="bi bi-google"></i> Google Drive
-    </button>
-    <button class="btn btn-outline-secondary btn-sm" onclick="disconnectDrive()">
-        <i class="bi bi-x-circle"></i> {{ t.gdrive_disconnect }}
-    </button>
-    {% elif gdrive_configured %}
-    <a href="/api/gdrive/auth" class="btn btn-outline-success">
-        <i class="bi bi-google"></i> {{ t.gdrive_connect }}
-    </a>
-    {% else %}
-    <a href="/settings" class="btn btn-outline-secondary">
-        <i class="bi bi-google"></i> {{ t.gdrive_setup_hint }}
-    </a>
-    {% endif %}
+    <div id="gdrive-buttons">
+        {% if gdrive_connected %}
+        <button class="btn btn-success" onclick="openDriveBrowser()">
+            <i class="bi bi-google"></i> Google Drive
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="disconnectDrive()">
+            <i class="bi bi-x-circle"></i> {{ t.gdrive_disconnect }}
+        </button>
+        {% elif gdrive_configured %}
+        <button class="btn btn-outline-success" onclick="googleSignIn()">
+            <i class="bi bi-google"></i> {{ t.gdrive_connect }}
+        </button>
+        {% else %}
+        <a href="/settings" class="btn btn-outline-secondary">
+            <i class="bi bi-google"></i> {{ t.gdrive_setup_hint }}
+        </a>
+        {% endif %}
+    </div>
 </div>
 
 <!-- Batch Upload Progress -->
@@ -215,38 +217,94 @@ document.getElementById('batch-file-input').addEventListener('change', function(
     this.value = '';  // reset so same files can be re-selected
 });
 
-async function batchUpload(files) {
+function batchUpload(files) {
     const progressDiv = document.getElementById('batch-progress');
     const bar = document.getElementById('batch-progress-bar');
     const text = document.getElementById('batch-progress-text');
     progressDiv.classList.remove('d-none');
 
     const total = files.length;
-    let done = 0;
-    let ok = 0;
+    text.textContent = `{{ t.uploading }} ${total} files...`;
+    bar.style.width = '50%';
+    bar.classList.add('progress-bar-striped', 'progress-bar-animated');
 
+    const formData = new FormData();
     for (let i = 0; i < total; i++) {
-        text.textContent = `${i + 1} / ${total}: ${files[i].name}`;
-        bar.style.width = ((i / total) * 100) + '%';
-
-        const formData = new FormData();
         formData.append('files', files[i]);
-
-        try {
-            const resp = await fetch('/api/upload/batch', { method: 'POST', body: formData });
-            const data = await resp.json();
-            if (data.uploaded > 0) ok++;
-        } catch(e) {
-            console.error('Upload error:', e);
-        }
-        done++;
     }
 
-    bar.style.width = '100%';
-    text.textContent = `{{ t.upload_complete }}: ${ok} / ${total}`;
-    showToast(`{{ t.upload_complete }}: ${ok} / ${total}`, ok === total ? 'success' : 'warning');
+    fetch('/api/upload/batch', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            bar.style.width = '100%';
+            bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+            if (data.success) {
+                text.textContent = `{{ t.upload_complete }}: ${data.uploaded} / ${data.total}`;
+                showToast(`{{ t.upload_complete }}: ${data.uploaded} / ${data.total}`,
+                          data.uploaded === data.total ? 'success' : 'warning');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                text.textContent = data.error || 'Failed';
+                showToast(data.error || 'Failed', 'danger');
+            }
+        })
+        .catch(e => {
+            bar.style.width = '100%';
+            bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+            bar.classList.add('bg-danger');
+            text.textContent = 'Error: ' + e;
+            showToast('Upload failed: ' + e, 'danger');
+        });
+}
 
-    setTimeout(() => location.reload(), 1500);
+// ── Google Sign-In ────────────────────────────────────────────────────
+let _gisClient = null;
+
+function googleSignIn() {
+    // Load Google Identity Services library dynamically
+    if (typeof google !== 'undefined' && google.accounts) {
+        _startGisFlow();
+        return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.onload = _startGisFlow;
+    script.onerror = () => showToast('Failed to load Google Sign-In', 'danger');
+    document.head.appendChild(script);
+}
+
+function _startGisFlow() {
+    fetch('/api/gdrive/config').then(r => r.json()).then(cfg => {
+        if (!cfg.client_id) {
+            showToast('{{ t.gdrive_setup_hint }}', 'warning');
+            return;
+        }
+        _gisClient = google.accounts.oauth2.initCodeClient({
+            client_id: cfg.client_id,
+            scope: 'https://www.googleapis.com/auth/drive.readonly',
+            ux_mode: 'popup',
+            callback: (response) => {
+                if (response.error) {
+                    showToast('Google Sign-In: ' + response.error, 'danger');
+                    return;
+                }
+                // Send auth code to server to exchange for tokens
+                fetch('/api/gdrive/auth', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ code: response.code })
+                }).then(r => r.json()).then(d => {
+                    if (d.success) {
+                        showToast('Google Drive {{ t.connected }}!', 'success');
+                        location.reload();
+                    } else {
+                        showToast(d.error || 'Auth failed', 'danger');
+                    }
+                });
+            },
+        });
+        _gisClient.requestCode();
+    });
 }
 
 // ── Google Drive Browser ──────────────────────────────────────────────
@@ -275,7 +333,7 @@ function loadDriveFiles() {
         if (r.status === 401) {
             showToast('{{ t.gdrive_auth_expired }}', 'warning');
             bootstrap.Modal.getInstance(document.getElementById('driveModal')).hide();
-            window.location.href = '/api/gdrive/auth';
+            googleSignIn();
             return null;
         }
         return r.json();
