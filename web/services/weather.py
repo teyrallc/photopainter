@@ -38,6 +38,12 @@ def fetch_weather(api_key, city, units="metric", lang="en"):
         with urllib.request.urlopen(req, timeout=10) as resp:
             current = json.loads(resp.read().decode())
 
+        # Check API error response
+        cod = current.get("cod")
+        if cod and str(cod) != "200":
+            logger.error(f"Weather API error: {current.get('message', cod)}")
+            return _cache.get("data")
+
         # 5-day forecast (3-hour intervals)
         url_fc = f"https://api.openweathermap.org/data/2.5/forecast?{params}&cnt=24"
         req_fc = urllib.request.Request(url_fc, headers={"User-Agent": "Vignette/1.0"})
@@ -53,8 +59,8 @@ def fetch_weather(api_key, city, units="metric", lang="en"):
                 daily[day_key] = {
                     "date": day_key,
                     "weekday": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()],
-                    "temp_min": item["main"]["temp_min"],
-                    "temp_max": item["main"]["temp_max"],
+                    "temp_min": round(item["main"]["temp_min"]),
+                    "temp_max": round(item["main"]["temp_max"]),
                     "description": item["weather"][0]["description"],
                     "icon": item["weather"][0]["icon"],
                 }
@@ -79,7 +85,7 @@ def fetch_weather(api_key, city, units="metric", lang="en"):
         return result
 
     except Exception as e:
-        logger.error(f"Weather fetch failed: {e}")
+        logger.error(f"Weather fetch failed: {e}", exc_info=True)
         return _cache.get("data")  # Return stale cache on error
 
 
