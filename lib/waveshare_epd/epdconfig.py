@@ -58,6 +58,7 @@ class RaspberryPi:
         self.GPIO.setwarnings(False)
         self.GPIO.setup(self.RST_PIN, GPIO.OUT)
         self.GPIO.setup(self.DC_PIN, GPIO.OUT)
+        self.GPIO.setup(self.CS_PIN, GPIO.OUT)
         self.GPIO.setup(self.PWR_PIN, GPIO.OUT)
         self.GPIO.setup(self.BUSY_PIN, GPIO.IN)
 
