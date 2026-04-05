@@ -120,39 +120,74 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
     return img
 
 
-def render_qr_setup(ip_address, port=5000):
-    """Render QR code WiFi setup page on e-paper."""
+def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password="vignette123"):
+    """Render QR code WiFi setup page on e-paper.
+
+    Generates two QR codes:
+    1. WiFi QR (WIFI: format) - phone scans to join the Pi's hotspot directly
+    2. URL QR - fallback link to the WiFi config page
+
+    On first boot the Pi runs as an AP. Phones scan the WiFi QR,
+    auto-connect to the hotspot, and captive portal detection
+    redirects them to the WiFi settings page.
+    """
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    url = f"http://{ip_address}:{port}/wifi"
+    wifi_url = f"http://{ip_address}:{port}/wifi"
+    wifi_qr_str = f"WIFI:T:WPA;S:{ap_ssid};P:{ap_password};;"
 
     font_title = _get_font(32)
     font_body = _get_font(20)
     font_small = _get_font(16)
+    font_tiny = _get_font(13)
 
-    draw.text((EPD_W // 2, 30), "Vignette", fill=BLACK, font=font_title, anchor="mt")
-    draw.text((EPD_W // 2, 70), "Scan to configure WiFi", fill=BLUE, font=font_body, anchor="mt")
+    draw.text((EPD_W // 2, 25), "Vignette", fill=BLACK, font=font_title, anchor="mt")
+    draw.text((EPD_W // 2, 62), "Scan to Configure", fill=BLUE, font=font_body, anchor="mt")
 
-    # QR Code
     try:
         import qrcode
-        qr = qrcode.QRCode(version=1, box_size=6, border=2)
-        qr.add_data(url)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-        qr_x = (EPD_W - qr_img.width) // 2
-        qr_y = 110
-        img.paste(qr_img, (qr_x, qr_y))
-        qr_bottom = qr_y + qr_img.height + 15
+        # Left QR: WiFi auto-connect (captive portal style)
+        qr1 = qrcode.QRCode(version=1, box_size=5, border=2)
+        qr1.add_data(wifi_qr_str)
+        qr1.make(fit=True)
+        qr1_img = qr1.make_image(fill_color="black", back_color="white").convert("RGB")
+
+        # Right QR: Direct URL fallback
+        qr2 = qrcode.QRCode(version=1, box_size=5, border=2)
+        qr2.add_data(wifi_url)
+        qr2.make(fit=True)
+        qr2_img = qr2.make_image(fill_color="black", back_color="white").convert("RGB")
+
+        # Position: two QR codes side by side
+        gap = 60
+        total_w = qr1_img.width + gap + qr2_img.width
+        start_x = (EPD_W - total_w) // 2
+        qr_y = 95
+
+        img.paste(qr1_img, (start_x, qr_y))
+        img.paste(qr2_img, (start_x + qr1_img.width + gap, qr_y))
+
+        qr_bottom = qr_y + max(qr1_img.height, qr2_img.height)
+
+        # Labels under each QR
+        label_y = qr_bottom + 8
+        draw.text((start_x + qr1_img.width // 2, label_y),
+                  "1. Connect WiFi", fill=BLACK, font=font_small, anchor="mt")
+        draw.text((start_x + qr1_img.width // 2, label_y + 20),
+                  f"SSID: {ap_ssid}", fill=BLUE, font=font_tiny, anchor="mt")
+        draw.text((start_x + qr1_img.width // 2, label_y + 36),
+                  f"Pass: {ap_password}", fill=BLUE, font=font_tiny, anchor="mt")
+
+        draw.text((start_x + qr1_img.width + gap + qr2_img.width // 2, label_y),
+                  "2. Open Browser", fill=BLACK, font=font_small, anchor="mt")
+        draw.text((start_x + qr1_img.width + gap + qr2_img.width // 2, label_y + 20),
+                  wifi_url, fill=BLUE, font=font_tiny, anchor="mt")
+
     except ImportError:
         draw.text((EPD_W // 2, 200), "pip install qrcode[pil]",
                   fill=RED, font=font_body, anchor="mm")
-        qr_bottom = 240
-
-    draw.text((EPD_W // 2, qr_bottom),
-              f"Visit: {url}", fill=BLACK, font=font_small, anchor="mt")
 
     draw.text((EPD_W // 2, EPD_H - 20),
               "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")

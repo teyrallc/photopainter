@@ -227,7 +227,7 @@ def display_current_page():
             config.get("weather_api_key"),
             config.get("weather_city"),
             config.get("weather_units", "metric"),
-            config.get("weather_lang", "zh_tw"))
+            config.get("weather_lang", "en"))
     if config.get("calendar_ical_url"):
         events = fetch_calendar_events(config.get("calendar_ical_url"))
 
@@ -353,6 +353,35 @@ def manual_page():
 @app.route('/wifi')
 def wifi_page():
     return render_template('wifi.html', config=config.to_dict())
+
+
+# ── Captive Portal Detection ─────────────────────────────────────────────
+# When the Pi runs as a WiFi AP, phones probe these URLs to detect
+# captive portals. Redirecting them sends the user straight to /wifi.
+
+@app.route('/generate_204')
+@app.route('/gen_204')
+def captive_portal_android():
+    """Android captive portal detection."""
+    return redirect(url_for('wifi_page'))
+
+
+@app.route('/hotspot-detect.html')
+def captive_portal_apple():
+    """Apple captive portal detection."""
+    return redirect(url_for('wifi_page'))
+
+
+@app.route('/connecttest.txt')
+def captive_portal_windows():
+    """Windows captive portal detection."""
+    return redirect(url_for('wifi_page'))
+
+
+@app.route('/ncsi.txt')
+def captive_portal_windows_ncsi():
+    """Windows NCSI captive portal detection."""
+    return redirect(url_for('wifi_page'))
 
 
 # ── API: Setup & Config ──────────────────────────────────────────────────

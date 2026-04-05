@@ -52,7 +52,7 @@ def fetch_weather(api_key, city, units="metric", lang="zh_tw"):
             if day_key not in daily and len(daily) < 3:
                 daily[day_key] = {
                     "date": day_key,
-                    "weekday": ["一", "二", "三", "四", "五", "六", "日"][dt.weekday()],
+                    "weekday": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()],
                     "temp_min": item["main"]["temp_min"],
                     "temp_max": item["main"]["temp_max"],
                     "description": item["weather"][0]["description"],
