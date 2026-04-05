@@ -96,6 +96,34 @@
         </div>
     </div>
 
+    <!-- Google Drive -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-google"></i> Google Drive
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Client ID</label>
+                    <input type="text" class="form-control" id="s-gdrive-id"
+                           value="{{ config.gdrive_client_id }}" placeholder="xxxxxxxx.apps.googleusercontent.com">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Client Secret</label>
+                    <input type="password" class="form-control" id="s-gdrive-secret"
+                           value="{{ config.gdrive_client_secret }}">
+                </div>
+                <div class="form-text mb-3">{{ t.gdrive_setup_instructions }}</div>
+                <button class="btn btn-primary" onclick="saveGDrive()">
+                    <i class="bi bi-save"></i> {{ t.save }}
+                </button>
+                {% if config.gdrive_connected %}
+                <span class="badge bg-success ms-2"><i class="bi bi-check-circle"></i> {{ t.connected }}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     <!-- System -->
     <div class="col-md-6">
         <div class="card">
@@ -181,6 +209,19 @@ function savePhotoSettings() {
             body: JSON.stringify({fit_mode: fitMode})
         })
     ]).then(() => showToast('OK', 'success'));
+}
+
+function saveGDrive() {
+    fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            gdrive_client_id: document.getElementById('s-gdrive-id').value,
+            gdrive_client_secret: document.getElementById('s-gdrive-secret').value,
+        })
+    }).then(r => r.json()).then(d => {
+        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
+    });
 }
 
 function showQR() {

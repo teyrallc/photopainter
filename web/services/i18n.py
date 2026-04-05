@@ -113,6 +113,25 @@ TRANSLATIONS = {
         "deleted": "Deleted",
         "display": "Display",
         "images_count": "images",
+        "batch_upload": "Batch Upload",
+        "upload_complete": "Upload complete",
+        "select_all": "Select All",
+        "deselect_all": "Deselect All",
+        "selected": "selected",
+        "load_more": "Load More",
+
+        # Google Drive
+        "gdrive_connect": "Connect Google Drive",
+        "gdrive_disconnect": "Disconnect",
+        "gdrive_select": "Select Photos",
+        "gdrive_download": "Download Selected",
+        "gdrive_downloading": "Downloading",
+        "gdrive_download_ok": "Downloaded",
+        "gdrive_no_images": "No images found in Google Drive",
+        "gdrive_auth_expired": "Google Drive session expired, re-authenticating...",
+        "gdrive_confirm_disconnect": "Disconnect Google Drive?",
+        "gdrive_setup_hint": "Setup Google Drive",
+        "gdrive_setup_instructions": "Create a project at console.cloud.google.com, enable Drive API, create OAuth 2.0 credentials (Web application type). Add your Pi's URL as authorized redirect URI: http://YOUR_PI_IP:5000/api/gdrive/callback",
 
         # Setup
         "first_time_setup": "First Time Setup",
@@ -261,6 +280,25 @@ TRANSLATIONS = {
         "deleted": "\u5df2\u522a\u9664",
         "display": "\u986f\u793a",
         "images_count": "\u5f35",
+        "batch_upload": "\u6279\u91cf\u4e0a\u50b3",
+        "upload_complete": "\u4e0a\u50b3\u5b8c\u6210",
+        "select_all": "\u5168\u9078",
+        "deselect_all": "\u53d6\u6d88\u5168\u9078",
+        "selected": "\u5df2\u9078",
+        "load_more": "\u8f09\u5165\u66f4\u591a",
+
+        # Google Drive
+        "gdrive_connect": "\u9023\u7d50 Google Drive",
+        "gdrive_disconnect": "\u65b7\u958b\u9023\u7d50",
+        "gdrive_select": "\u9078\u64c7\u7167\u7247",
+        "gdrive_download": "\u4e0b\u8f09\u5df2\u9078",
+        "gdrive_downloading": "\u4e0b\u8f09\u4e2d",
+        "gdrive_download_ok": "\u5df2\u4e0b\u8f09",
+        "gdrive_no_images": "Google Drive \u4e2d\u6c92\u6709\u5716\u7247",
+        "gdrive_auth_expired": "Google Drive \u5df2\u904e\u671f\uff0c\u91cd\u65b0\u9a57\u8b49\u4e2d...",
+        "gdrive_confirm_disconnect": "\u78ba\u5b9a\u8981\u65b7\u958b Google Drive \u55ce\uff1f",
+        "gdrive_setup_hint": "\u8a2d\u5b9a Google Drive",
+        "gdrive_setup_instructions": "\u5728 console.cloud.google.com \u5efa\u7acb\u5c08\u6848\uff0c\u555f\u7528 Drive API\uff0c\u5efa\u7acb OAuth 2.0 \u6191\u8b49 (\u7db2\u9801\u61c9\u7528\u7a0b\u5f0f\u985e\u578b)\u3002\u5c07 Pi \u7684 URL \u52a0\u5165\u6388\u6b0a\u91cd\u65b0\u5c0e\u5411 URI: http://YOUR_PI_IP:5000/api/gdrive/callback",
 
         # Setup
         "first_time_setup": "H System \u667a\u6167\u87a2\u5e55 - \u521d\u6b21\u8a2d\u5b9a",

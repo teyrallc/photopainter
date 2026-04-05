@@ -28,6 +28,13 @@ DEFAULT_CONFIG = {
     # Calendar settings
     "calendar_ical_url": "",
 
+    # Google Drive
+    "gdrive_client_id": "",
+    "gdrive_client_secret": "",
+    "gdrive_access_token": "",
+    "gdrive_refresh_token": "",
+    "gdrive_connected": False,
+
     # Photo settings
     "photo_rotation": 0,  # 0, 90, 180, 270
     "photo_fit_mode": "fit",  # fit (letterbox) or stretch

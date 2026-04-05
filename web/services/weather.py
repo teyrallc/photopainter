@@ -10,8 +10,8 @@ from datetime import datetime
 
 logger = logging.getLogger("vignette.weather")
 
-# Cache weather data for 15 minutes
-CACHE_DURATION = 50  # seconds - allow 1-minute refresh cycle to get fresh data
+# Cache weather data for 1 hour (matches hourly e-paper refresh)
+CACHE_DURATION = 3500  # seconds (~58 min) - expires just before next hourly refresh
 _cache = {"data": None, "timestamp": 0}
 
 

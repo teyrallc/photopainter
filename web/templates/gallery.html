@@ -4,6 +4,43 @@
 {% block content %}
 <h2 class="mb-4"><i class="bi bi-images"></i> {{ t.gallery }} ({{ images|length }} {{ t.images_count }})</h2>
 
+<!-- Action Buttons -->
+<div class="d-flex flex-wrap gap-2 mb-4">
+    <label class="btn btn-primary mb-0">
+        <i class="bi bi-upload"></i> {{ t.batch_upload }}
+        <input type="file" id="batch-file-input" multiple accept="image/*" hidden>
+    </label>
+    {% if gdrive_connected %}
+    <button class="btn btn-success" onclick="openDriveBrowser()">
+        <i class="bi bi-google"></i> Google Drive
+    </button>
+    <button class="btn btn-outline-secondary btn-sm" onclick="disconnectDrive()">
+        <i class="bi bi-x-circle"></i> {{ t.gdrive_disconnect }}
+    </button>
+    {% elif gdrive_configured %}
+    <a href="/api/gdrive/auth" class="btn btn-outline-success">
+        <i class="bi bi-google"></i> {{ t.gdrive_connect }}
+    </a>
+    {% else %}
+    <a href="/settings" class="btn btn-outline-secondary">
+        <i class="bi bi-google"></i> {{ t.gdrive_setup_hint }}
+    </a>
+    {% endif %}
+</div>
+
+<!-- Batch Upload Progress -->
+<div id="batch-progress" class="d-none mb-4">
+    <div class="card">
+        <div class="card-body">
+            <h6><i class="bi bi-upload"></i> {{ t.uploading }}</h6>
+            <div class="progress mb-2">
+                <div class="progress-bar" id="batch-progress-bar" style="width: 0%"></div>
+            </div>
+            <small id="batch-progress-text" class="text-muted"></small>
+        </div>
+    </div>
+</div>
+
 {% if images %}
 <div class="row g-3" id="gallery-grid">
     {% for img in images %}
@@ -89,6 +126,55 @@
         </div>
     </div>
 </div>
+
+<!-- Google Drive Browser Modal -->
+<div class="modal fade" id="driveModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-google"></i> Google Drive - {{ t.gdrive_select }}</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="driveSelectAll()">
+                            {{ t.select_all }}
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="driveDeselectAll()">
+                            {{ t.deselect_all }}
+                        </button>
+                        <span class="badge bg-primary ms-2" id="drive-selected-count">0</span> {{ t.selected }}
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadDriveFiles()" id="drive-refresh-btn">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+                <div id="drive-files-grid" class="row g-2" style="max-height: 60vh; overflow-y: auto;">
+                    <div class="text-center py-5 text-muted">{{ t.loading }}</div>
+                </div>
+                <div class="text-center mt-3" id="drive-load-more" style="display:none;">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="loadDriveMore()">
+                        {{ t.load_more }}
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <!-- Download progress -->
+                <div id="drive-download-progress" class="w-100 d-none mb-2">
+                    <div class="progress">
+                        <div class="progress-bar bg-success" id="drive-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <small id="drive-progress-text" class="text-muted"></small>
+                </div>
+                <button type="button" class="btn btn-success" id="drive-download-btn" onclick="driveDownloadSelected()">
+                    <i class="bi bi-download"></i> {{ t.gdrive_download }}
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ t.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -119,6 +205,235 @@ function deleteImage(filename, cardId) {
                 showToast(data.error, 'danger');
             }
         });
+}
+
+// ── Batch Upload ──────────────────────────────────────────────────────
+document.getElementById('batch-file-input').addEventListener('change', function() {
+    const files = this.files;
+    if (!files.length) return;
+    batchUpload(files);
+    this.value = '';  // reset so same files can be re-selected
+});
+
+async function batchUpload(files) {
+    const progressDiv = document.getElementById('batch-progress');
+    const bar = document.getElementById('batch-progress-bar');
+    const text = document.getElementById('batch-progress-text');
+    progressDiv.classList.remove('d-none');
+
+    const total = files.length;
+    let done = 0;
+    let ok = 0;
+
+    for (let i = 0; i < total; i++) {
+        text.textContent = `${i + 1} / ${total}: ${files[i].name}`;
+        bar.style.width = ((i / total) * 100) + '%';
+
+        const formData = new FormData();
+        formData.append('files', files[i]);
+
+        try {
+            const resp = await fetch('/api/upload/batch', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.uploaded > 0) ok++;
+        } catch(e) {
+            console.error('Upload error:', e);
+        }
+        done++;
+    }
+
+    bar.style.width = '100%';
+    text.textContent = `{{ t.upload_complete }}: ${ok} / ${total}`;
+    showToast(`{{ t.upload_complete }}: ${ok} / ${total}`, ok === total ? 'success' : 'warning');
+
+    setTimeout(() => location.reload(), 1500);
+}
+
+// ── Google Drive Browser ──────────────────────────────────────────────
+let driveNextPageToken = null;
+let driveSelectedFiles = {};  // id -> {id, name}
+
+function openDriveBrowser() {
+    driveNextPageToken = null;
+    driveSelectedFiles = {};
+    updateDriveSelectedCount();
+    document.getElementById('drive-files-grid').innerHTML =
+        '<div class="text-center py-5 text-muted">{{ t.loading }}</div>';
+    document.getElementById('drive-load-more').style.display = 'none';
+    document.getElementById('drive-download-progress').classList.add('d-none');
+
+    const modal = new bootstrap.Modal(document.getElementById('driveModal'));
+    modal.show();
+    loadDriveFiles();
+}
+
+function loadDriveFiles() {
+    let url = '/api/gdrive/files';
+    if (driveNextPageToken) url += '?pageToken=' + encodeURIComponent(driveNextPageToken);
+
+    fetch(url).then(r => {
+        if (r.status === 401) {
+            showToast('{{ t.gdrive_auth_expired }}', 'warning');
+            bootstrap.Modal.getInstance(document.getElementById('driveModal')).hide();
+            window.location.href = '/api/gdrive/auth';
+            return null;
+        }
+        return r.json();
+    }).then(data => {
+        if (!data) return;
+        if (data.error) {
+            document.getElementById('drive-files-grid').innerHTML =
+                `<div class="text-center py-4 text-danger">${data.error}</div>`;
+            return;
+        }
+        renderDriveFiles(data.files, !driveNextPageToken);
+        driveNextPageToken = data.nextPageToken || null;
+        document.getElementById('drive-load-more').style.display =
+            driveNextPageToken ? 'block' : 'none';
+    }).catch(e => {
+        document.getElementById('drive-files-grid').innerHTML =
+            `<div class="text-center py-4 text-danger">Error: ${e}</div>`;
+    });
+}
+
+function loadDriveMore() {
+    if (driveNextPageToken) loadDriveFiles();
+}
+
+function renderDriveFiles(files, clearFirst) {
+    const grid = document.getElementById('drive-files-grid');
+    if (clearFirst) grid.innerHTML = '';
+
+    if (!files.length && clearFirst) {
+        grid.innerHTML = '<div class="text-center py-4 text-muted">{{ t.gdrive_no_images }}</div>';
+        return;
+    }
+
+    files.forEach(f => {
+        const thumb = f.thumbnailLink || '';
+        const checked = driveSelectedFiles[f.id] ? 'checked' : '';
+        const col = document.createElement('div');
+        col.className = 'col-6 col-md-4 col-lg-3';
+        col.innerHTML = `
+            <div class="card h-100 drive-card ${checked ? 'border-success border-2' : ''}"
+                 data-id="${f.id}" onclick="toggleDriveFile('${f.id}', '${f.name.replace(/'/g, "\\'")}', this)">
+                <div style="height:140px;overflow:hidden;background:#f0f0f0;display:flex;align-items:center;justify-content:center;">
+                    ${thumb ? `<img src="${thumb}" style="max-height:140px;max-width:100%;object-fit:cover;">` :
+                             '<i class="bi bi-image text-muted" style="font-size:3rem;"></i>'}
+                </div>
+                <div class="card-body p-2">
+                    <small class="d-block text-truncate" title="${f.name}">${f.name}</small>
+                    <div class="form-check mt-1">
+                        <input class="form-check-input drive-check" type="checkbox" ${checked}
+                               data-id="${f.id}" onclick="event.stopPropagation();"
+                               onchange="toggleDriveFile('${f.id}', '${f.name.replace(/'/g, "\\'")}')">
+                    </div>
+                </div>
+            </div>`;
+        grid.appendChild(col);
+    });
+}
+
+function toggleDriveFile(id, name, cardEl) {
+    if (driveSelectedFiles[id]) {
+        delete driveSelectedFiles[id];
+    } else {
+        driveSelectedFiles[id] = { id, name };
+    }
+    // Update checkbox + card border
+    document.querySelectorAll(`.drive-card[data-id="${id}"]`).forEach(card => {
+        const cb = card.querySelector('.drive-check');
+        const selected = !!driveSelectedFiles[id];
+        if (cb) cb.checked = selected;
+        card.classList.toggle('border-success', selected);
+        card.classList.toggle('border-2', selected);
+    });
+    updateDriveSelectedCount();
+}
+
+function driveSelectAll() {
+    document.querySelectorAll('.drive-card').forEach(card => {
+        const id = card.dataset.id;
+        const name = card.querySelector('small').textContent;
+        driveSelectedFiles[id] = { id, name };
+        const cb = card.querySelector('.drive-check');
+        if (cb) cb.checked = true;
+        card.classList.add('border-success', 'border-2');
+    });
+    updateDriveSelectedCount();
+}
+
+function driveDeselectAll() {
+    driveSelectedFiles = {};
+    document.querySelectorAll('.drive-card').forEach(card => {
+        const cb = card.querySelector('.drive-check');
+        if (cb) cb.checked = false;
+        card.classList.remove('border-success', 'border-2');
+    });
+    updateDriveSelectedCount();
+}
+
+function updateDriveSelectedCount() {
+    const count = Object.keys(driveSelectedFiles).length;
+    document.getElementById('drive-selected-count').textContent = count;
+    document.getElementById('drive-download-btn').disabled = count === 0;
+}
+
+function driveDownloadSelected() {
+    const files = Object.values(driveSelectedFiles);
+    if (!files.length) return;
+
+    const progressDiv = document.getElementById('drive-download-progress');
+    const bar = document.getElementById('drive-progress-bar');
+    const text = document.getElementById('drive-progress-text');
+    progressDiv.classList.remove('d-none');
+    bar.style.width = '0%';
+    text.textContent = `{{ t.gdrive_downloading }} (${files.length})...`;
+    document.getElementById('drive-download-btn').disabled = true;
+
+    fetch('/api/gdrive/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ files })
+    }).then(r => r.json()).then(data => {
+        bar.style.width = '100%';
+        if (data.success) {
+            text.textContent = `{{ t.upload_complete }}: ${data.downloaded} / ${data.total}`;
+            showToast(`{{ t.gdrive_download_ok }}: ${data.downloaded} / ${data.total}`, 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            text.textContent = data.error || 'Failed';
+            showToast(data.error || 'Failed', 'danger');
+            document.getElementById('drive-download-btn').disabled = false;
+        }
+    }).catch(e => {
+        text.textContent = 'Error: ' + e;
+        showToast('Error: ' + e, 'danger');
+        document.getElementById('drive-download-btn').disabled = false;
+    });
+}
+
+function disconnectDrive() {
+    if (!confirm('{{ t.gdrive_confirm_disconnect }}')) return;
+    fetch('/api/gdrive/disconnect', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                showToast('Google Drive disconnected', 'success');
+                location.reload();
+            }
+        });
+}
+
+// Show toast for gdrive callback results
+const params = new URLSearchParams(window.location.search);
+if (params.get('gdrive_connected') === '1') {
+    showToast('Google Drive {{ t.connected }}!', 'success');
+    history.replaceState({}, '', window.location.pathname);
+}
+if (params.get('gdrive_error')) {
+    showToast('Google Drive: ' + params.get('gdrive_error'), 'danger');
+    history.replaceState({}, '', window.location.pathname);
 }
 </script>
 {% endblock %}

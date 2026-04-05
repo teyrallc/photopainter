@@ -48,6 +48,7 @@ from services.weather import fetch_weather
 from services.calendar_svc import fetch_calendar_events, get_today_info
 from services.i18n import get_translations
 from services import renderer
+from services import gdrive
 
 config = Config(CONFIG_PATH)
 
@@ -464,7 +465,11 @@ def upload_page():
 @app.route('/gallery')
 def gallery_page():
     images = get_image_list()
-    return render_template('gallery.html', images=images, config=config.to_dict())
+    gdrive_connected = config.get("gdrive_connected", False)
+    gdrive_configured = bool(config.get("gdrive_client_id", ""))
+    return render_template('gallery.html', images=images, config=config.to_dict(),
+                           gdrive_connected=gdrive_connected,
+                           gdrive_configured=gdrive_configured)
 
 
 @app.route('/settings')
@@ -748,6 +753,186 @@ def api_delete_image(filename):
         return jsonify({"error": "Image not found"}), 404
     os.remove(filepath)
     return jsonify({"success": True, "message": f"Deleted {filename}"})
+
+
+@app.route('/api/upload/batch', methods=['POST'])
+def api_upload_batch():
+    """Upload multiple images at once."""
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify({"error": "No files provided"}), 400
+
+    rotation = int(request.form.get('rotation', 0))
+    fit_mode = request.form.get('fit_mode', config.get('photo_fit_mode', 'fit'))
+
+    results = []
+    for file in files:
+        if file.filename == '' or not allowed_file(file.filename):
+            results.append({"filename": file.filename, "success": False,
+                            "error": "Invalid file"})
+            continue
+        try:
+            filename = process_upload(file, rotation, fit_mode)
+            results.append({"filename": filename, "success": True})
+        except Exception as e:
+            results.append({"filename": file.filename, "success": False,
+                            "error": str(e)})
+
+    ok = sum(1 for r in results if r["success"])
+    return jsonify({"success": True, "uploaded": ok,
+                    "total": len(results), "results": results})
+
+
+# ── API: Google Drive ─────────────────────────────────────────────────────
+
+def _gdrive_redirect_uri():
+    """Build the OAuth redirect URI based on current request host."""
+    return f"http://{request.host}/api/gdrive/callback"
+
+
+def _gdrive_access_token():
+    """Get a valid access token, refreshing if needed."""
+    token = config.get("gdrive_access_token")
+    if token:
+        return token
+    refresh = config.get("gdrive_refresh_token")
+    if not refresh:
+        return None
+    new_token = gdrive.refresh_access_token(
+        config.get("gdrive_client_id", ""),
+        config.get("gdrive_client_secret", ""),
+        refresh)
+    if new_token:
+        config.set("gdrive_access_token", new_token)
+    return new_token
+
+
+@app.route('/api/gdrive/auth')
+def api_gdrive_auth():
+    """Start Google Drive OAuth flow."""
+    client_id = config.get("gdrive_client_id", "")
+    if not client_id:
+        return jsonify({"error": "Google Client ID not configured. Set it in Settings."}), 400
+    url = gdrive.get_auth_url(client_id, _gdrive_redirect_uri())
+    return redirect(url)
+
+
+@app.route('/api/gdrive/callback')
+def api_gdrive_callback():
+    """OAuth callback from Google."""
+    code = request.args.get("code")
+    error = request.args.get("error")
+    if error:
+        return redirect(url_for('gallery_page') + '?gdrive_error=' + error)
+    if not code:
+        return redirect(url_for('gallery_page') + '?gdrive_error=no_code')
+
+    tokens = gdrive.exchange_code(
+        config.get("gdrive_client_id", ""),
+        config.get("gdrive_client_secret", ""),
+        code, _gdrive_redirect_uri())
+
+    if not tokens:
+        return redirect(url_for('gallery_page') + '?gdrive_error=token_exchange_failed')
+
+    config.update({
+        "gdrive_access_token": tokens.get("access_token", ""),
+        "gdrive_refresh_token": tokens.get("refresh_token",
+                                           config.get("gdrive_refresh_token", "")),
+        "gdrive_connected": True,
+    })
+    return redirect(url_for('gallery_page') + '?gdrive_connected=1')
+
+
+@app.route('/api/gdrive/disconnect', methods=['POST'])
+def api_gdrive_disconnect():
+    """Disconnect Google Drive."""
+    config.update({
+        "gdrive_access_token": "",
+        "gdrive_refresh_token": "",
+        "gdrive_connected": False,
+    })
+    return jsonify({"success": True})
+
+
+@app.route('/api/gdrive/files')
+def api_gdrive_files():
+    """List image files from Google Drive."""
+    token = _gdrive_access_token()
+    if not token:
+        return jsonify({"error": "Not connected to Google Drive"}), 401
+    page_token = request.args.get("pageToken")
+    result = gdrive.list_images(token, page_token)
+    if "error" in result:
+        # Token might be expired, clear it so next call refreshes
+        config.set("gdrive_access_token", "")
+        return jsonify({"error": result["error"]}), 401
+    return jsonify(result)
+
+
+@app.route('/api/gdrive/download', methods=['POST'])
+def api_gdrive_download():
+    """Download selected files from Google Drive to local output directory."""
+    token = _gdrive_access_token()
+    if not token:
+        return jsonify({"error": "Not connected to Google Drive"}), 401
+
+    data = request.get_json() or {}
+    files = data.get("files", [])  # list of {id, name}
+    if not files:
+        return jsonify({"error": "No files selected"}), 400
+
+    rotation = int(data.get("rotation", 0))
+    fit_mode = data.get("fit_mode", config.get("photo_fit_mode", "fit"))
+
+    results = []
+    for f in files:
+        file_id = f.get("id")
+        name = f.get("name", f"{file_id}.jpg")
+        if not file_id:
+            continue
+
+        # Sanitize filename
+        from werkzeug.utils import secure_filename
+        safe_name = secure_filename(name)
+        if not safe_name:
+            safe_name = f"gdrive_{file_id}.jpg"
+
+        dest = os.path.join(OUTPUT_DIR, safe_name)
+        counter = 1
+        base, ext = os.path.splitext(safe_name)
+        while os.path.exists(dest):
+            safe_name = f"{base}_{counter}{ext}"
+            dest = os.path.join(OUTPUT_DIR, safe_name)
+            counter += 1
+
+        ok = gdrive.download_file(token, file_id, dest)
+        if ok:
+            # Process the downloaded image (rotation + fit)
+            try:
+                img = Image.open(dest).convert("RGB")
+                if rotation:
+                    img = img.rotate(-rotation, expand=True)
+                if fit_mode == "stretch":
+                    img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+                else:
+                    img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+                    canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+                    px = (EPD_WIDTH - img.width) // 2
+                    py = (EPD_HEIGHT - img.height) // 2
+                    canvas.paste(img, (px, py))
+                    img = canvas
+                img.save(dest)
+                results.append({"name": safe_name, "success": True})
+            except Exception as e:
+                logger.error(f"Failed to process {safe_name}: {e}")
+                results.append({"name": safe_name, "success": False, "error": str(e)})
+        else:
+            results.append({"name": name, "success": False, "error": "Download failed"})
+
+    ok_count = sum(1 for r in results if r["success"])
+    return jsonify({"success": True, "downloaded": ok_count,
+                    "total": len(results), "results": results})
 
 
 # ── API: Photo Navigation ───────────────────────────────────────────────
@@ -1136,17 +1321,25 @@ def serve_image(filename):
 
 # ── Auto-Refresh Timer ───────────────────────────────────────────────────
 
-AUTO_REFRESH_INTERVAL = 60  # seconds
-
 _auto_refresh_stop = threading.Event()
 
 
+def _seconds_until_next_hour():
+    """Calculate seconds until the next whole hour (:00)."""
+    from datetime import timedelta
+    now = datetime.now()
+    next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+    return max((next_hour - now).total_seconds(), 1)
+
+
 def _auto_refresh_loop():
-    """Background thread: re-render the current e-paper page every 60 seconds.
+    """Background thread: re-render the current e-paper page every hour on the hour.
     This keeps weather and calendar data up-to-date on the display."""
-    logger.info(f"Auto-refresh started (every {AUTO_REFRESH_INTERVAL}s)")
+    logger.info("Auto-refresh started (hourly on the hour)")
     while not _auto_refresh_stop.is_set():
-        _auto_refresh_stop.wait(AUTO_REFRESH_INTERVAL)
+        wait = _seconds_until_next_hour()
+        logger.info(f"Auto-refresh: next update in {int(wait)}s")
+        _auto_refresh_stop.wait(wait)
         if _auto_refresh_stop.is_set():
             break
 
@@ -1161,7 +1354,7 @@ def _auto_refresh_loop():
 
         if display_lock.acquire(blocking=False):
             try:
-                logger.info(f"Auto-refresh: re-rendering {page} page")
+                logger.info(f"Auto-refresh: re-rendering {page} page (hourly)")
                 display_current_page()
             except Exception as e:
                 logger.error(f"Auto-refresh failed: {e}")
