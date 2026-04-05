@@ -127,10 +127,16 @@ def process_upload(file_storage):
     from werkzeug.utils import secure_filename
 
     filename = secure_filename(file_storage.filename)
-    if not filename:
-        filename = f"upload_{int(time.time())}.png"
-
     base, ext = os.path.splitext(filename)
+
+    # secure_filename may strip non-ASCII chars, leaving no name or extension
+    if not base:
+        base = f"upload_{int(time.time())}"
+    if not ext:
+        # Try to get extension from original filename
+        _, orig_ext = os.path.splitext(file_storage.filename)
+        ext = orig_ext.lower() if orig_ext else ".png"
+    filename = base + ext
     filepath = os.path.join(OUTPUT_DIR, filename)
     counter = 1
     while os.path.exists(filepath):
