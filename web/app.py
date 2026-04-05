@@ -582,7 +582,7 @@ def api_reset():
 
 @app.route('/api/page/switch', methods=['POST'])
 def api_page_switch():
-    """Switch between Home/Widget/Photo pages."""
+    """Switch between Home/Widget/Photo pages (config only, no e-paper update)."""
     data = request.get_json() or {}
     target = data.get("page")
     pages = ["home", "widget", "photo"]
@@ -597,16 +597,8 @@ def api_page_switch():
         idx = pages.index(current) if current in pages else 2
         config.set("current_page", pages[(idx + 1) % 3])
 
-    if not display_lock.acquire(blocking=False):
-        return jsonify({"error": "Display is busy"}), 503
-    try:
-        success, msg = display_current_page()
-        page = config.get("current_page")
-        if success:
-            return jsonify({"success": True, "page": page})
-        return jsonify({"error": msg}), 500
-    finally:
-        display_lock.release()
+    page = config.get("current_page")
+    return jsonify({"success": True, "page": page})
 
 
 @app.route('/api/page/refresh', methods=['POST'])
@@ -625,22 +617,10 @@ def api_page_refresh():
 
 @app.route('/api/widget/toggle', methods=['POST'])
 def api_widget_toggle():
-    """Toggle widget between weather and calendar."""
+    """Toggle widget between weather and calendar (config only)."""
     current = config.get("widget_mode", "weather")
     new_mode = "calendar" if current == "weather" else "weather"
     config.set("widget_mode", new_mode)
-
-    if config.get("current_page") == "widget":
-        if not display_lock.acquire(blocking=False):
-            return jsonify({"error": "Display is busy"}), 503
-        try:
-            success, msg = display_current_page()
-            if success:
-                return jsonify({"success": True, "widget_mode": new_mode})
-            return jsonify({"error": msg}), 500
-        finally:
-            display_lock.release()
-
     return jsonify({"success": True, "widget_mode": new_mode})
 
 
@@ -1089,24 +1069,12 @@ def api_lang():
 
 @app.route('/api/widget/set', methods=['POST'])
 def api_widget_set():
-    """Set widget mode to a specific value (weather or calendar)."""
+    """Set widget mode (config only, no e-paper update)."""
     data = request.get_json() or {}
     mode = data.get("mode")
     if mode not in ("weather", "calendar", "split"):
         return jsonify({"error": "Invalid mode. Use weather, calendar, or split"}), 400
     config.set("widget_mode", mode)
-
-    if config.get("current_page") == "widget":
-        if not display_lock.acquire(blocking=False):
-            return jsonify({"error": "Display is busy"}), 503
-        try:
-            success, msg = display_current_page()
-            if success:
-                return jsonify({"success": True, "widget_mode": mode})
-            return jsonify({"error": msg}), 500
-        finally:
-            display_lock.release()
-
     return jsonify({"success": True, "widget_mode": mode})
 
 
@@ -1342,49 +1310,6 @@ def serve_image(filename):
     return send_from_directory(OUTPUT_DIR, filename)
 
 
-# ── Auto-Refresh Timer ───────────────────────────────────────────────────
-
-_auto_refresh_stop = threading.Event()
-
-
-def _seconds_until_next_hour():
-    """Calculate seconds until the next whole hour (:00)."""
-    from datetime import timedelta
-    now = datetime.now()
-    next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
-    return max((next_hour - now).total_seconds(), 1)
-
-
-def _auto_refresh_loop():
-    """Background thread: re-render the current e-paper page every hour on the hour.
-    This keeps weather and calendar data up-to-date on the display."""
-    logger.info("Auto-refresh started (hourly on the hour)")
-    while not _auto_refresh_stop.is_set():
-        wait = _seconds_until_next_hour()
-        logger.info(f"Auto-refresh: next update in {int(wait)}s")
-        _auto_refresh_stop.wait(wait)
-        if _auto_refresh_stop.is_set():
-            break
-
-        # Only refresh if setup is done and not in AP mode
-        if not config.is_setup_complete or is_ap_active():
-            continue
-
-        page = config.get("current_page", "photo")
-        # Only auto-refresh pages that have dynamic data (home, widget)
-        if page not in ("home", "widget"):
-            continue
-
-        if display_lock.acquire(blocking=False):
-            try:
-                logger.info(f"Auto-refresh: re-rendering {page} page (hourly)")
-                display_current_page()
-            except Exception as e:
-                logger.error(f"Auto-refresh failed: {e}")
-            finally:
-                display_lock.release()
-
-
 if __name__ == '__main__':
     ip = _get_ip()
     print("=" * 60)
@@ -1403,9 +1328,5 @@ if __name__ == '__main__':
             display_qr_setup()
         except Exception as e:
             logger.error(f"Could not display QR setup: {e}")
-
-    # Start auto-refresh background thread
-    refresh_thread = threading.Thread(target=_auto_refresh_loop, daemon=True)
-    refresh_thread.start()
 
     app.run(host='0.0.0.0', port=5000, debug=False)

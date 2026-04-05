@@ -50,8 +50,11 @@
                             onclick="setWidget('calendar')">
                         <i class="bi bi-calendar3"></i> {{ t.calendar }}
                     </button>
-                    <button class="btn btn-outline-success btn-sm" onclick="refreshPage()">
-                        <i class="bi bi-arrow-clockwise"></i> {{ t.refresh }}
+                </div>
+
+                <div class="d-grid">
+                    <button class="btn btn-success" onclick="refreshPage()">
+                        <i class="bi bi-send"></i> {{ t.update_display }}
                     </button>
                 </div>
             </div>
@@ -225,8 +228,14 @@ function switchPage(page) {
         body: JSON.stringify({page: page})
     }).then(r => r.json()).then(d => {
         if (d.success) {
-            showToast('{{ t.switch_to }} ' + d.page, 'success');
-            location.reload();
+            // Update UI without reloading or triggering e-paper
+            document.querySelectorAll('[onclick^="switchPage"]').forEach(btn => {
+                btn.className = btn.className.replace(/btn-primary\b/, 'btn-outline-primary');
+            });
+            event.target.closest('button').className =
+                event.target.closest('button').className.replace('btn-outline-primary', 'btn-primary');
+            const badge = document.getElementById('current-page-badge');
+            badge.textContent = '{{ t.current }}: ' + d.page.toUpperCase();
         } else { showToast(d.error, 'danger'); }
     }).catch(e => showToast('Error: ' + e, 'danger'));
 }
@@ -238,8 +247,12 @@ function setWidget(mode) {
         body: JSON.stringify({mode: mode})
     }).then(r => r.json()).then(d => {
         if (d.success) {
-            showToast(d.widget_mode, 'success');
-            location.reload();
+            // Update UI without reloading or triggering e-paper
+            document.querySelectorAll('[onclick^="setWidget"]').forEach(btn => {
+                btn.className = btn.className.replace(/btn-info\b/, 'btn-outline-info');
+            });
+            event.target.closest('button').className =
+                event.target.closest('button').className.replace('btn-outline-info', 'btn-info');
         } else showToast(d.error, 'danger');
     });
 }
