@@ -1134,6 +1134,41 @@ def serve_image(filename):
     return send_from_directory(OUTPUT_DIR, filename)
 
 
+# ── Auto-Refresh Timer ───────────────────────────────────────────────────
+
+AUTO_REFRESH_INTERVAL = 60  # seconds
+
+_auto_refresh_stop = threading.Event()
+
+
+def _auto_refresh_loop():
+    """Background thread: re-render the current e-paper page every 60 seconds.
+    This keeps weather and calendar data up-to-date on the display."""
+    logger.info(f"Auto-refresh started (every {AUTO_REFRESH_INTERVAL}s)")
+    while not _auto_refresh_stop.is_set():
+        _auto_refresh_stop.wait(AUTO_REFRESH_INTERVAL)
+        if _auto_refresh_stop.is_set():
+            break
+
+        # Only refresh if setup is done and not in AP mode
+        if not config.is_setup_complete or is_ap_active():
+            continue
+
+        page = config.get("current_page", "photo")
+        # Only auto-refresh pages that have dynamic data (home, widget)
+        if page not in ("home", "widget"):
+            continue
+
+        if display_lock.acquire(blocking=False):
+            try:
+                logger.info(f"Auto-refresh: re-rendering {page} page")
+                display_current_page()
+            except Exception as e:
+                logger.error(f"Auto-refresh failed: {e}")
+            finally:
+                display_lock.release()
+
+
 if __name__ == '__main__':
     ip = _get_ip()
     print("=" * 60)
@@ -1152,5 +1187,9 @@ if __name__ == '__main__':
             display_qr_setup()
         except Exception as e:
             logger.error(f"Could not display QR setup: {e}")
+
+    # Start auto-refresh background thread
+    refresh_thread = threading.Thread(target=_auto_refresh_loop, daemon=True)
+    refresh_thread.start()
 
     app.run(host='0.0.0.0', port=5000, debug=False)
