@@ -123,73 +123,59 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
 def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password="vignette123"):
     """Render QR code WiFi setup page on e-paper.
 
-    Generates two QR codes:
-    1. WiFi QR (WIFI: format) - phone scans to join the Pi's hotspot directly
-    2. URL QR - fallback link to the WiFi config page
-
-    On first boot the Pi runs as an AP. Phones scan the WiFi QR,
-    auto-connect to the hotspot, and captive portal detection
-    redirects them to the WiFi settings page.
+    Shows a single WiFi QR code. When scanned, the phone auto-joins
+    the Pi's hotspot. Captive portal detection then opens the WiFi
+    config page where the user enters their home WiFi credentials.
     """
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    wifi_url = f"http://{ip_address}:{port}/wifi"
     wifi_qr_str = f"WIFI:T:WPA;S:{ap_ssid};P:{ap_password};;"
 
-    font_title = _get_font(32)
-    font_body = _get_font(20)
-    font_small = _get_font(16)
-    font_tiny = _get_font(13)
+    font_title = _get_font(36)
+    font_body = _get_font(22)
+    font_info = _get_font(18)
+    font_small = _get_font(14)
 
-    draw.text((EPD_W // 2, 25), "Vignette", fill=BLACK, font=font_title, anchor="mt")
-    draw.text((EPD_W // 2, 62), "Scan to Configure", fill=BLUE, font=font_body, anchor="mt")
+    # Title
+    draw.text((EPD_W // 2, 28), "Vignette", fill=BLACK, font=font_title, anchor="mt")
+    draw.text((EPD_W // 2, 68), "Scan to Connect", fill=BLUE, font=font_body, anchor="mt")
 
     try:
         import qrcode
 
-        # Left QR: WiFi auto-connect (captive portal style)
-        qr1 = qrcode.QRCode(version=1, box_size=5, border=2)
-        qr1.add_data(wifi_qr_str)
-        qr1.make(fit=True)
-        qr1_img = qr1.make_image(fill_color="black", back_color="white").convert("RGB")
+        qr = qrcode.QRCode(version=1, box_size=7, border=2)
+        qr.add_data(wifi_qr_str)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-        # Right QR: Direct URL fallback
-        qr2 = qrcode.QRCode(version=1, box_size=5, border=2)
-        qr2.add_data(wifi_url)
-        qr2.make(fit=True)
-        qr2_img = qr2.make_image(fill_color="black", back_color="white").convert("RGB")
+        # Center QR code
+        qr_x = (EPD_W - qr_img.width) // 2
+        qr_y = 100
+        img.paste(qr_img, (qr_x, qr_y))
 
-        # Position: two QR codes side by side
-        gap = 60
-        total_w = qr1_img.width + gap + qr2_img.width
-        start_x = (EPD_W - total_w) // 2
-        qr_y = 95
-
-        img.paste(qr1_img, (start_x, qr_y))
-        img.paste(qr2_img, (start_x + qr1_img.width + gap, qr_y))
-
-        qr_bottom = qr_y + max(qr1_img.height, qr2_img.height)
-
-        # Labels under each QR
-        label_y = qr_bottom + 8
-        draw.text((start_x + qr1_img.width // 2, label_y),
-                  "1. Connect WiFi", fill=BLACK, font=font_small, anchor="mt")
-        draw.text((start_x + qr1_img.width // 2, label_y + 20),
-                  f"SSID: {ap_ssid}", fill=BLUE, font=font_tiny, anchor="mt")
-        draw.text((start_x + qr1_img.width // 2, label_y + 36),
-                  f"Pass: {ap_password}", fill=BLUE, font=font_tiny, anchor="mt")
-
-        draw.text((start_x + qr1_img.width + gap + qr2_img.width // 2, label_y),
-                  "2. Open Browser", fill=BLACK, font=font_small, anchor="mt")
-        draw.text((start_x + qr1_img.width + gap + qr2_img.width // 2, label_y + 20),
-                  wifi_url, fill=BLUE, font=font_tiny, anchor="mt")
+        qr_bottom = qr_y + qr_img.height + 12
 
     except ImportError:
         draw.text((EPD_W // 2, 200), "pip install qrcode[pil]",
                   fill=RED, font=font_body, anchor="mm")
+        qr_bottom = 240
 
-    draw.text((EPD_W // 2, EPD_H - 20),
+    # Instructions below QR
+    draw.text((EPD_W // 2, qr_bottom),
+              "1. Scan QR to join WiFi hotspot", fill=BLACK, font=font_info, anchor="mt")
+    draw.text((EPD_W // 2, qr_bottom + 26),
+              "2. WiFi setup page will open automatically", fill=BLACK, font=font_info, anchor="mt")
+    draw.text((EPD_W // 2, qr_bottom + 52),
+              "3. Enter your home WiFi credentials", fill=BLACK, font=font_info, anchor="mt")
+
+    # Manual info
+    draw.line([(100, qr_bottom + 85), (EPD_W - 100, qr_bottom + 85)], fill=BLACK, width=1)
+    draw.text((EPD_W // 2, qr_bottom + 95),
+              f"Manual:  SSID: {ap_ssid}  |  Password: {ap_password}",
+              fill=BLUE, font=font_small, anchor="mt")
+
+    draw.text((EPD_W // 2, EPD_H - 18),
               "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
 
     return img

@@ -376,6 +376,8 @@ def navigate_photo(direction):
 
 @app.route('/')
 def index():
+    if is_ap_active():
+        return redirect(url_for('captive_page'))
     if not config.is_setup_complete:
         return redirect(url_for('setup_page'))
     images = get_image_list()
@@ -389,6 +391,8 @@ def index():
 
 @app.route('/setup')
 def setup_page():
+    if is_ap_active():
+        return redirect(url_for('captive_page'))
     return render_template('setup.html', config=config.to_dict())
 
 
@@ -418,33 +422,39 @@ def wifi_page():
     return render_template('wifi.html', config=config.to_dict())
 
 
+@app.route('/captive')
+def captive_page():
+    """Minimal captive portal page - only WiFi SSID + password input."""
+    return render_template('captive.html')
+
+
 # ── Captive Portal Detection ─────────────────────────────────────────────
 # When the Pi runs as a WiFi AP, phones probe these URLs to detect
-# captive portals. Redirecting them sends the user straight to /wifi.
+# captive portals. Redirecting them sends the user straight to /captive.
 
 @app.route('/generate_204')
 @app.route('/gen_204')
 def captive_portal_android():
     """Android captive portal detection."""
-    return redirect(url_for('wifi_page'))
+    return redirect(url_for('captive_page'))
 
 
 @app.route('/hotspot-detect.html')
 def captive_portal_apple():
     """Apple captive portal detection."""
-    return redirect(url_for('wifi_page'))
+    return redirect(url_for('captive_page'))
 
 
 @app.route('/connecttest.txt')
 def captive_portal_windows():
     """Windows captive portal detection."""
-    return redirect(url_for('wifi_page'))
+    return redirect(url_for('captive_page'))
 
 
 @app.route('/ncsi.txt')
 def captive_portal_windows_ncsi():
     """Windows NCSI captive portal detection."""
-    return redirect(url_for('wifi_page'))
+    return redirect(url_for('captive_page'))
 
 
 # ── API: Setup & Config ──────────────────────────────────────────────────
