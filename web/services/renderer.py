@@ -90,11 +90,16 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
 
 
 def render_widget_page(mode, weather_data, calendar_events):
-    """Render full-screen widget: weather or calendar."""
+    """Render full-screen widget: weather, calendar, or split (both).
+    Split mode: left=calendar, right=weather, each 400x480."""
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    if mode == "weather":
+    if mode == "split":
+        _draw_calendar_panel(draw, 0, 0, 400, EPD_H, calendar_events)
+        _draw_weather_panel(draw, 400, 0, 400, EPD_H, weather_data)
+        draw.line([(400, 0), (400, EPD_H)], fill=BLACK, width=2)
+    elif mode == "weather":
         _draw_weather_fullscreen(draw, weather_data)
     else:
         _draw_calendar_fullscreen(draw, calendar_events)

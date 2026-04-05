@@ -420,12 +420,16 @@ def navigate_photo(direction):
     photo_state["current_image"] = images[idx]["filename"]
     photo_state["total"] = total
 
-    # Use page rendering if on photo page, direct display otherwise
-    if config.get("current_page") == "photo":
+    # Re-render whatever page is active (home includes a photo panel too)
+    page = config.get("current_page", "photo")
+    if page == "photo":
         filepath = os.path.join(OUTPUT_DIR, images[idx]["filename"])
         return display_image_on_epaper(filepath)
+    elif page == "home":
+        # Home page shows a photo in the right panel; re-render it
+        return display_current_page()
     else:
-        return True, "Photo index updated (display page unchanged)"
+        return True, "Photo index updated"
 
 
 # ── Page Routes ────────────────────────────────────────────────────────────
@@ -880,8 +884,8 @@ def api_widget_set():
     """Set widget mode to a specific value (weather or calendar)."""
     data = request.get_json() or {}
     mode = data.get("mode")
-    if mode not in ("weather", "calendar"):
-        return jsonify({"error": "Invalid mode. Use weather or calendar"}), 400
+    if mode not in ("weather", "calendar", "split"):
+        return jsonify({"error": "Invalid mode. Use weather, calendar, or split"}), 400
     config.set("widget_mode", mode)
 
     if config.get("current_page") == "widget":

@@ -37,7 +37,11 @@
                 </div>
 
                 <!-- Widget mode buttons -->
-                <div class="d-flex justify-content-center gap-2 mb-3">
+                <div class="d-flex justify-content-center gap-2 flex-wrap mb-3">
+                    <button class="btn btn-sm btn-{{ 'info' if config.widget_mode == 'split' else 'outline-info' }}"
+                            onclick="setWidget('split')">
+                        <i class="bi bi-layout-split"></i> {{ t.split }}
+                    </button>
                     <button class="btn btn-sm btn-{{ 'info' if config.widget_mode == 'weather' else 'outline-info' }}"
                             onclick="setWidget('weather')">
                         <i class="bi bi-cloud-sun"></i> {{ t.weather }}

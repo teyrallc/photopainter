@@ -36,6 +36,7 @@ TRANSLATIONS = {
         "home": "Home",
         "widget": "Widget",
         "photo": "Photo",
+        "split": "Split",
         "weather": "Weather",
         "calendar": "Calendar",
         "switch_to": "Switch to",
@@ -138,6 +139,18 @@ TRANSLATIONS = {
         "confirm_update": "Update software?",
         "confirm_reset": "Are you sure? This will clear ALL settings.",
         "display_busy": "Display is busy",
+
+        # JS app.js strings
+        "sending_to_epaper": "Sending to e-paper...",
+        "displayed_ok": "Image displayed!",
+        "confirm_clear": "Clear the display?",
+        "clearing": "Clearing...",
+        "sleep_ok": "Display sleeping",
+        "loading_next": "Loading next...",
+        "loading_prev": "Loading previous...",
+        "loading_latest": "Loading latest...",
+        "confirm_test": "Send test pattern to e-paper?",
+        "sending_test": "Sending test pattern...",
     },
     "zh": {
         "app_name": "Vignette",
@@ -171,6 +184,7 @@ TRANSLATIONS = {
         "home": "\u9996\u9801",
         "widget": "\u5c0f\u5de5\u5177",
         "photo": "\u7167\u7247",
+        "split": "\u5206\u5272",
         "weather": "\u5929\u6c23",
         "calendar": "\u884c\u4e8b\u66c6",
         "switch_to": "\u5207\u63db\u5230",
@@ -273,6 +287,18 @@ TRANSLATIONS = {
         "confirm_update": "\u78ba\u5b9a\u8981\u66f4\u65b0\u7a0b\u5f0f\u55ce\uff1f",
         "confirm_reset": "\u78ba\u5b9a\u8981\u5168\u90e8\u91cd\u8a2d\u55ce\uff1f\u6240\u6709\u8a2d\u5b9a\u5c07\u88ab\u6e05\u9664\u3002",
         "display_busy": "\u986f\u793a\u5668\u5fd9\u788c\u4e2d",
+
+        # JS app.js strings
+        "sending_to_epaper": "\u6b63\u5728\u767c\u9001\u5230\u96fb\u5b50\u7d19...",
+        "displayed_ok": "\u5716\u7247\u5df2\u986f\u793a\uff01",
+        "confirm_clear": "\u78ba\u5b9a\u8981\u6e05\u9664\u87a2\u5e55\u55ce\uff1f",
+        "clearing": "\u6b63\u5728\u6e05\u9664...",
+        "sleep_ok": "\u87a2\u5e55\u5df2\u4f11\u7720",
+        "loading_next": "\u8f09\u5165\u4e0b\u4e00\u5f35...",
+        "loading_prev": "\u8f09\u5165\u4e0a\u4e00\u5f35...",
+        "loading_latest": "\u8f09\u5165\u6700\u65b0\u7167\u7247...",
+        "confirm_test": "\u78ba\u5b9a\u8981\u767c\u9001\u6e2c\u8a66\u5716\u6848\u55ce\uff1f",
+        "sending_test": "\u6b63\u5728\u767c\u9001\u6e2c\u8a66\u5716\u6848...",
     },
 }
 
