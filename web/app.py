@@ -2,6 +2,9 @@
 """
 Vignette - H System Smart Display Web Control Interface
 Flask web application for controlling the Waveshare 7.3" e-paper display.
+
+Phase 2: Three page views (Home/Widget/Photo), Weather, Calendar,
+         QR setup, photo rotation/fit, virtual buttons.
 """
 
 import io
@@ -14,22 +17,24 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import (Flask, jsonify, render_template, request,
-                   send_file, send_from_directory)
+from flask import (Flask, jsonify, redirect, render_template, request,
+                   send_file, send_from_directory, url_for)
 from PIL import Image, ImageDraw, ImageFont
 
-# Pillow compatibility: Resampling.LANCZOS was added in Pillow 9.1
+# Pillow compatibility
 LANCZOS = getattr(Image, 'Resampling', Image).LANCZOS
 
 # Project paths
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(PROJECT_DIR, "output")
 LIB_DIR = os.path.join(PROJECT_DIR, "lib")
+CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
 
-# Add lib to path for waveshare_epd
+# Add lib to path for waveshare_epd, add web to path for services
 sys.path.insert(0, LIB_DIR)
+sys.path.insert(0, WEB_DIR)
 
-# Ensure output directory exists
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Logging
@@ -37,32 +42,37 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger("vignette")
 
+# Services
+from services.config import Config
+from services.weather import fetch_weather
+from services.calendar_svc import fetch_calendar_events, get_today_info
+from services import renderer
+
+config = Config(CONFIG_PATH)
+
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    """Return JSON for API errors instead of HTML."""
     if request.path.startswith('/api/'):
         logger.error(f"API error: {e}", exc_info=True)
         code = getattr(e, 'code', 500)
         return jsonify({"error": str(e)}), code
     raise e
 
-# Display lock - only one display operation at a time
+
 display_lock = threading.Lock()
 
-# Display state
 display_state = {
     "current_image": None,
     "last_update": None,
-    "status": "idle",  # idle, displaying, error
+    "status": "idle",
 }
 
-# Photo navigation state
 photo_state = {
-    "current_index": -1,  # -1 = latest
+    "current_index": -1,
     "current_image": None,
     "total": 0,
 }
@@ -71,15 +81,10 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'gif'}
 EPD_WIDTH = 800
 EPD_HEIGHT = 480
 
-# 6-color palette for e-paper simulation (epd7in3e panel)
 EPAPER_PALETTE = (
-    0, 0, 0,        # Black   (index 0)
-    255, 255, 255,   # White   (index 1)
-    255, 255, 0,     # Yellow  (index 2)
-    255, 0, 0,       # Red     (index 3)
-    0, 0, 0,         # (unused, index 4)
-    0, 0, 255,       # Blue    (index 5)
-    0, 255, 0,       # Green   (index 6)
+    0, 0, 0,        255, 255, 255,   255, 255, 0,
+    255, 0, 0,      0, 0, 0,         0, 0, 255,
+    0, 255, 0,
 ) + (0, 0, 0) * 249
 
 
@@ -88,14 +93,12 @@ def allowed_file(filename):
 
 
 def get_image_list():
-    """Get list of images sorted by modification time (newest first)."""
     images = []
     for ext in ALLOWED_EXTENSIONS:
         for f in Path(OUTPUT_DIR).glob(f"*.{ext}"):
             stat = f.stat()
             images.append({
-                "filename": f.name,
-                "path": str(f),
+                "filename": f.name, "path": str(f),
                 "size": stat.st_size,
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
                 "modified_ts": stat.st_mtime,
@@ -105,38 +108,43 @@ def get_image_list():
     return images
 
 
+def get_current_photo_path():
+    """Get the path of the current photo for display."""
+    images = get_image_list()
+    if not images:
+        return None
+    idx = photo_state["current_index"]
+    if idx < 0 or idx >= len(images):
+        idx = 0
+    return os.path.join(OUTPUT_DIR, images[idx]["filename"])
+
+
 def quantize_to_epaper(image_path):
-    """Quantize an image to 7-color e-paper palette, return as PNG bytes."""
     img = Image.open(image_path).convert("RGB")
     img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-
     pal_image = Image.new("P", (1, 1))
     pal_image.putpalette(EPAPER_PALETTE)
-
     img_quantized = img.quantize(palette=pal_image)
     img_rgb = img_quantized.convert("RGB")
-
     buf = io.BytesIO()
     img_rgb.save(buf, format='PNG')
     buf.seek(0)
     return buf
 
 
-def process_upload(file_storage):
-    """Process an uploaded image: save and create display-ready version."""
+def process_upload(file_storage, rotation=0, fit_mode="fit"):
+    """Process an uploaded image: save original, then create display-ready version."""
     from werkzeug.utils import secure_filename
 
     filename = secure_filename(file_storage.filename)
     base, ext = os.path.splitext(filename)
-
-    # secure_filename may strip non-ASCII chars, leaving no name or extension
     if not base:
         base = f"upload_{int(time.time())}"
     if not ext:
-        # Try to get extension from original filename
         _, orig_ext = os.path.splitext(file_storage.filename)
         ext = orig_ext.lower() if orig_ext else ".png"
     filename = base + ext
+
     filepath = os.path.join(OUTPUT_DIR, filename)
     counter = 1
     while os.path.exists(filepath):
@@ -146,109 +154,128 @@ def process_upload(file_storage):
 
     file_storage.save(filepath)
 
-    # Resize to display dimensions
+    # Apply rotation if requested
     img = Image.open(filepath).convert("RGB")
-    img_resized = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-    img_resized.save(filepath)
+    if rotation:
+        img = img.rotate(-rotation, expand=True)
 
+    # Apply fit mode
+    if fit_mode == "stretch":
+        img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+    else:
+        # Fit: maintain aspect ratio, save at original (rotated) size
+        img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+        # Create white canvas and center
+        canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+        px = (EPD_WIDTH - img.width) // 2
+        py = (EPD_HEIGHT - img.height) // 2
+        canvas.paste(img, (px, py))
+        img = canvas
+
+    img.save(filepath)
     return filename
 
 
 # ── E-Paper Display Functions ──────────────────────────────────────────────
 
-def display_image_on_epaper(image_path):
-    """Display image on e-paper using direct driver import."""
+def display_pil_image(img):
+    """Send a PIL Image to the e-paper display."""
     display_state["status"] = "displaying"
-    display_state["current_image"] = os.path.basename(image_path)
-    logger.info(f"Displaying image: {image_path}")
-
+    logger.info("Sending image to e-paper...")
     try:
         from waveshare_epd import epd7in3e
-
-        img = Image.open(image_path).convert("RGB")
-        img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-
         epd = epd7in3e.EPD()
-        logger.info("EPD init...")
         epd.init()
-
-        logger.info("Sending image buffer...")
         buf = epd.getbuffer(img)
         epd.display(buf)
-
-        logger.info("EPD sleep...")
         epd.sleep()
-
         display_state["status"] = "idle"
         display_state["last_update"] = datetime.now().isoformat()
         logger.info("Display update complete!")
         return True, "OK"
-
     except Exception as e:
         logger.error(f"Display failed: {e}", exc_info=True)
         display_state["status"] = "error"
         return False, str(e)
 
 
+def display_image_on_epaper(image_path):
+    """Display an image file on e-paper."""
+    display_state["current_image"] = os.path.basename(image_path)
+    img = Image.open(image_path).convert("RGB")
+    img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+    return display_pil_image(img)
+
+
+def display_current_page():
+    """Render and display the current page view on e-paper."""
+    page = config.get("current_page", "photo")
+    logger.info(f"Rendering page: {page}")
+
+    weather = None
+    events = []
+    if config.get("weather_api_key") and config.get("weather_city"):
+        weather = fetch_weather(
+            config.get("weather_api_key"),
+            config.get("weather_city"),
+            config.get("weather_units", "metric"),
+            config.get("weather_lang", "zh_tw"))
+    if config.get("calendar_ical_url"):
+        events = fetch_calendar_events(config.get("calendar_ical_url"))
+
+    photo_path = get_current_photo_path()
+
+    if page == "home":
+        img = renderer.render_home_page(weather, events, photo_path, config)
+    elif page == "widget":
+        mode = config.get("widget_mode", "weather")
+        img = renderer.render_widget_page(mode, weather, events)
+    else:  # photo
+        rotation = config.get("photo_rotation", 0)
+        fit_mode = config.get("photo_fit_mode", "fit")
+        img = renderer.render_photo_page(photo_path, rotation, fit_mode)
+
+    display_state["current_image"] = f"[{page} page]"
+    return display_pil_image(img)
+
+
+def display_qr_setup():
+    """Display QR code setup page on e-paper."""
+    ip = _get_ip()
+    img = renderer.render_qr_setup(ip)
+    display_state["current_image"] = "[QR setup]"
+    return display_pil_image(img)
+
+
 def display_test_pattern():
-    """Send a test pattern to e-paper to verify hardware."""
+    """Send a test pattern to e-paper."""
     logger.info("Sending test pattern...")
-    try:
-        from waveshare_epd import epd7in3e
-
-        epd = epd7in3e.EPD()
-        epd.init()
-
-        # Create test image with color bars
-        img = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
-        draw = ImageDraw.Draw(img)
-
-        colors = [
-            ((0, 0, 0), "Black"),
-            ((255, 255, 255), "White"),
-            ((0, 255, 0), "Green"),
-            ((0, 0, 255), "Blue"),
-            ((255, 0, 0), "Red"),
-            ((255, 255, 0), "Yellow"),
-            ((255, 128, 0), "Orange"),
-        ]
-        bar_width = EPD_WIDTH // len(colors)
-        for i, (color, name) in enumerate(colors):
-            x0 = i * bar_width
-            x1 = (i + 1) * bar_width
-            draw.rectangle([x0, 0, x1, EPD_HEIGHT], fill=color)
-            text_color = (255, 255, 255) if color in [(0, 0, 0), (0, 0, 255)] else (0, 0, 0)
-            draw.text((x0 + 10, EPD_HEIGHT // 2), name, fill=text_color)
-
-        # Add header
-        draw.rectangle([0, 0, EPD_WIDTH, 40], fill=(0, 0, 0))
-        draw.text((10, 10), "Vignette - E-Paper Test Pattern", fill=(255, 255, 255))
-
-        buf = epd.getbuffer(img)
-        epd.display(buf)
-        epd.sleep()
-
-        display_state["status"] = "idle"
-        display_state["current_image"] = "[test pattern]"
-        display_state["last_update"] = datetime.now().isoformat()
-        logger.info("Test pattern displayed!")
-        return True, "OK"
-
-    except Exception as e:
-        logger.error(f"Test pattern failed: {e}", exc_info=True)
-        return False, str(e)
+    img = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    colors = [
+        ((0, 0, 0), "Black"), ((255, 255, 255), "White"),
+        ((0, 255, 0), "Green"), ((0, 0, 255), "Blue"),
+        ((255, 0, 0), "Red"), ((255, 255, 0), "Yellow"),
+    ]
+    bar_width = EPD_WIDTH // len(colors)
+    for i, (color, name) in enumerate(colors):
+        x0, x1 = i * bar_width, (i + 1) * bar_width
+        draw.rectangle([x0, 0, x1, EPD_HEIGHT], fill=color)
+        tc = (255, 255, 255) if color in [(0, 0, 0), (0, 0, 255)] else (0, 0, 0)
+        draw.text((x0 + 10, EPD_HEIGHT // 2), name, fill=tc)
+    draw.rectangle([0, 0, EPD_WIDTH, 40], fill=(0, 0, 0))
+    draw.text((10, 10), "Vignette - E-Paper Test Pattern", fill=(255, 255, 255))
+    display_state["current_image"] = "[test pattern]"
+    return display_pil_image(img)
 
 
 # ── Photo Navigation ──────────────────────────────────────────────────────
 
 def navigate_photo(direction):
-    """Navigate to next/prev/latest photo and display it."""
     images = get_image_list()
     if not images:
         return False, "No images available"
-
     total = len(images)
-
     if direction == "latest":
         photo_state["current_index"] = 0
     elif direction == "next":
@@ -262,43 +289,205 @@ def navigate_photo(direction):
             photo_state["current_index"] = direction
         else:
             return False, f"Index out of range (0-{total-1})"
-
     idx = photo_state["current_index"]
-    image = images[idx]
-    photo_state["current_image"] = image["filename"]
+    photo_state["current_image"] = images[idx]["filename"]
     photo_state["total"] = total
 
-    filepath = os.path.join(OUTPUT_DIR, image["filename"])
-    return display_image_on_epaper(filepath)
+    # Use page rendering if on photo page, direct display otherwise
+    if config.get("current_page") == "photo":
+        filepath = os.path.join(OUTPUT_DIR, images[idx]["filename"])
+        return display_image_on_epaper(filepath)
+    else:
+        return True, "Photo index updated (display page unchanged)"
 
 
 # ── Page Routes ────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
-    """Dashboard page."""
+    if not config.is_setup_complete:
+        return redirect(url_for('setup_page'))
     images = get_image_list()
     return render_template('index.html',
                            images=images[:5],
                            display_state=display_state,
                            photo_state=photo_state,
-                           total_images=len(images))
+                           total_images=len(images),
+                           config=config.to_dict())
+
+
+@app.route('/setup')
+def setup_page():
+    return render_template('setup.html', config=config.to_dict())
 
 
 @app.route('/upload')
 def upload_page():
-    return render_template('upload.html')
+    return render_template('upload.html', config=config.to_dict())
 
 
 @app.route('/gallery')
 def gallery_page():
     images = get_image_list()
-    return render_template('gallery.html', images=images)
+    return render_template('gallery.html', images=images, config=config.to_dict())
+
+
+@app.route('/settings')
+def settings_page():
+    return render_template('settings.html', config=config.to_dict())
 
 
 @app.route('/manual')
 def manual_page():
     return render_template('manual.html')
+
+
+# ── API: Setup & Config ──────────────────────────────────────────────────
+
+@app.route('/api/setup', methods=['POST'])
+def api_setup():
+    """Save initial setup configuration."""
+    data = request.get_json() or {}
+    config.update({
+        "setup_complete": True,
+        "weather_api_key": data.get("weather_api_key", ""),
+        "weather_city": data.get("weather_city", ""),
+        "weather_units": data.get("weather_units", "metric"),
+        "calendar_ical_url": data.get("calendar_ical_url", ""),
+        "current_page": data.get("current_page", "photo"),
+    })
+    logger.info("Setup complete!")
+    return jsonify({"success": True, "message": "Setup saved"})
+
+
+@app.route('/api/config', methods=['GET'])
+def api_config_get():
+    return jsonify(config.to_dict())
+
+
+@app.route('/api/config', methods=['POST'])
+def api_config_set():
+    data = request.get_json() or {}
+    config.update(data)
+    return jsonify({"success": True, "config": config.to_dict()})
+
+
+@app.route('/api/reset', methods=['POST'])
+def api_reset():
+    """Reset all settings to factory defaults (simulates first-time QR setup)."""
+    config.reset()
+    logger.info("System reset to factory defaults")
+    # Display QR setup on e-paper
+    if display_lock.acquire(blocking=False):
+        try:
+            display_qr_setup()
+        finally:
+            display_lock.release()
+    return jsonify({"success": True, "message": "Reset complete. QR setup displayed."})
+
+
+# ── API: Page Control (virtual buttons) ──────────────────────────────────
+
+@app.route('/api/page/switch', methods=['POST'])
+def api_page_switch():
+    """Switch between Home/Widget/Photo pages."""
+    data = request.get_json() or {}
+    target = data.get("page")
+    pages = ["home", "widget", "photo"]
+
+    if target:
+        if target not in pages:
+            return jsonify({"error": f"Invalid page: {target}"}), 400
+        config.set("current_page", target)
+    else:
+        # Cycle: home → widget → photo → home
+        current = config.get("current_page", "photo")
+        idx = pages.index(current) if current in pages else 2
+        config.set("current_page", pages[(idx + 1) % 3])
+
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
+    try:
+        success, msg = display_current_page()
+        page = config.get("current_page")
+        if success:
+            return jsonify({"success": True, "page": page})
+        return jsonify({"error": msg}), 500
+    finally:
+        display_lock.release()
+
+
+@app.route('/api/page/refresh', methods=['POST'])
+def api_page_refresh():
+    """Re-render and display the current page (refreshes weather/calendar data)."""
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
+    try:
+        success, msg = display_current_page()
+        if success:
+            return jsonify({"success": True, "page": config.get("current_page")})
+        return jsonify({"error": msg}), 500
+    finally:
+        display_lock.release()
+
+
+@app.route('/api/widget/toggle', methods=['POST'])
+def api_widget_toggle():
+    """Toggle widget between weather and calendar."""
+    current = config.get("widget_mode", "weather")
+    new_mode = "calendar" if current == "weather" else "weather"
+    config.set("widget_mode", new_mode)
+
+    if config.get("current_page") == "widget":
+        if not display_lock.acquire(blocking=False):
+            return jsonify({"error": "Display is busy"}), 503
+        try:
+            success, msg = display_current_page()
+            if success:
+                return jsonify({"success": True, "widget_mode": new_mode})
+            return jsonify({"error": msg}), 500
+        finally:
+            display_lock.release()
+
+    return jsonify({"success": True, "widget_mode": new_mode})
+
+
+@app.route('/api/page/qr', methods=['POST'])
+def api_page_qr():
+    """Display QR setup code on e-paper."""
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
+    try:
+        success, msg = display_qr_setup()
+        if success:
+            return jsonify({"success": True, "message": "QR code displayed"})
+        return jsonify({"error": msg}), 500
+    finally:
+        display_lock.release()
+
+
+# ── API: Photo Settings ──────────────────────────────────────────────────
+
+@app.route('/api/photo/rotation', methods=['POST'])
+def api_photo_rotation():
+    """Set photo rotation (0, 90, 180, 270)."""
+    data = request.get_json() or {}
+    rotation = data.get("rotation", 0)
+    if rotation not in [0, 90, 180, 270]:
+        return jsonify({"error": "Invalid rotation. Use 0, 90, 180, 270"}), 400
+    config.set("photo_rotation", rotation)
+    return jsonify({"success": True, "rotation": rotation})
+
+
+@app.route('/api/photo/fit_mode', methods=['POST'])
+def api_photo_fit_mode():
+    """Set photo fit mode (fit or stretch)."""
+    data = request.get_json() or {}
+    mode = data.get("fit_mode", "fit")
+    if mode not in ["fit", "stretch"]:
+        return jsonify({"error": "Invalid mode. Use fit or stretch"}), 400
+    config.set("photo_fit_mode", mode)
+    return jsonify({"success": True, "fit_mode": mode})
 
 
 # ── API: Image Management ─────────────────────────────────────────────────
@@ -307,16 +496,17 @@ def manual_page():
 def api_upload():
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
-
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
-
     if not allowed_file(file.filename):
-        return jsonify({"error": "File type not allowed. Use: png, jpg, jpeg, bmp, gif"}), 400
+        return jsonify({"error": "File type not allowed"}), 400
+
+    rotation = int(request.form.get('rotation', 0))
+    fit_mode = request.form.get('fit_mode', config.get('photo_fit_mode', 'fit'))
 
     try:
-        filename = process_upload(file)
+        filename = process_upload(file, rotation, fit_mode)
         return jsonify({"success": True, "filename": filename,
                         "message": f"Image uploaded: {filename}"})
     except Exception as e:
@@ -326,33 +516,27 @@ def api_upload():
 
 @app.route('/api/display', methods=['POST'])
 def api_display():
-    """Display a specific image on e-paper."""
     data = request.get_json() or {}
     filename = data.get('filename') or request.form.get('filename')
-
     if not filename:
         return jsonify({"error": "No filename provided"}), 400
-
     filepath = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
-
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
-
     try:
         success, msg = display_image_on_epaper(filepath)
         if success:
-            # Update photo state to match
             images = get_image_list()
             for i, img in enumerate(images):
                 if img["filename"] == filename:
                     photo_state["current_index"] = i
                     photo_state["current_image"] = filename
                     break
+            config.set("current_page", "photo")
             return jsonify({"success": True, "message": "Image displayed"})
-        else:
-            return jsonify({"error": f"Display failed: {msg}"}), 500
+        return jsonify({"error": f"Display failed: {msg}"}), 500
     finally:
         display_lock.release()
 
@@ -362,10 +546,8 @@ def api_preview(filename):
     filepath = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
-
     buf = quantize_to_epaper(filepath)
-    return send_file(buf, mimetype='image/png',
-                     download_name=f"preview_{filename}")
+    return send_file(buf, mimetype='image/png', download_name=f"preview_{filename}")
 
 
 @app.route('/api/images')
@@ -378,16 +560,14 @@ def api_delete_image(filename):
     filepath = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
-
     os.remove(filepath)
     return jsonify({"success": True, "message": f"Deleted {filename}"})
 
 
-# ── API: Photo Navigation (virtual buttons) ───────────────────────────────
+# ── API: Photo Navigation ───────────────────────────────────────────────
 
 @app.route('/api/photo/current')
 def api_photo_current():
-    """Get current photo info and navigation state."""
     images = get_image_list()
     photo_state["total"] = len(images)
     return jsonify({
@@ -453,7 +633,6 @@ def api_photo_goto(idx):
 
 @app.route('/api/display/test', methods=['POST'])
 def api_display_test():
-    """Send test pattern to e-paper."""
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
     try:
@@ -497,16 +676,49 @@ def api_sleep():
         return jsonify({"error": f"Sleep failed: {e}"}), 500
 
 
-# ── API: System Status & Management ───────────────────────────────────────
+# ── API: System ──────────────────────────────────────────────────────────
 
 @app.route('/api/status')
 def api_status():
     return jsonify({
         "display": display_state,
         "photo": photo_state,
+        "config": config.to_dict(),
         "total_images": len(get_image_list()),
         "system": get_system_info(),
     })
+
+
+@app.route('/api/weather')
+def api_weather():
+    """Get current weather data."""
+    weather = fetch_weather(
+        config.get("weather_api_key", ""),
+        config.get("weather_city", ""),
+        config.get("weather_units", "metric"),
+        config.get("weather_lang", "zh_tw"))
+    if weather:
+        return jsonify(weather)
+    return jsonify({"error": "No weather data. Check API key and city."}), 404
+
+
+@app.route('/api/calendar')
+def api_calendar():
+    """Get upcoming calendar events."""
+    events = fetch_calendar_events(config.get("calendar_ical_url", ""))
+    today = get_today_info()
+    return jsonify({"today": today, "events": [
+        {"summary": e.get("summary"), "start": e["start"].isoformat() if e.get("start") else None}
+        for e in events
+    ]})
+
+
+def _get_ip():
+    try:
+        return subprocess.check_output(
+            ["hostname", "-I"], text=True, timeout=5).strip().split()[0]
+    except Exception:
+        return "localhost"
 
 
 def get_system_info():
@@ -516,13 +728,11 @@ def get_system_info():
         "disk_free_gb": None, "uptime": None, "git_version": None,
     }
     try:
-        info["hostname"] = subprocess.check_output(
-            ["hostname"], text=True, timeout=5).strip()
+        info["hostname"] = subprocess.check_output(["hostname"], text=True, timeout=5).strip()
     except Exception:
         pass
     try:
-        output = subprocess.check_output(
-            ["hostname", "-I"], text=True, timeout=5).strip()
+        output = subprocess.check_output(["hostname", "-I"], text=True, timeout=5).strip()
         info["ip_addresses"] = output.split()
     except Exception:
         pass
@@ -611,19 +821,21 @@ def serve_image(filename):
 
 
 if __name__ == '__main__':
-    ip = "localhost"
-    try:
-        output = subprocess.check_output(
-            ["hostname", "-I"], text=True, timeout=5).strip()
-        if output:
-            ip = output.split()[0]
-    except Exception:
-        pass
-
+    ip = _get_ip()
     print("=" * 60)
     print("  Vignette - H System Smart Display")
     print(f"  Output directory: {OUTPUT_DIR}")
+    print(f"  Setup complete: {config.is_setup_complete}")
     print(f"  Local:   http://localhost:5000")
     print(f"  Network: http://{ip}:5000")
     print("=" * 60)
+
+    # On first boot, display QR setup
+    if not config.is_setup_complete:
+        logger.info("First boot - displaying QR setup code")
+        try:
+            display_qr_setup()
+        except Exception as e:
+            logger.error(f"Could not display QR setup: {e}")
+
     app.run(host='0.0.0.0', port=5000, debug=False)

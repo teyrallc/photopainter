@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Vignette - Setup{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="text-center mb-4">
+            <h2><i class="bi bi-display"></i> Vignette Setup</h2>
+            <p class="text-muted">H System Smart Display - First Time Setup</p>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <form id="setup-form">
+                    <h5 class="mb-3"><i class="bi bi-cloud-sun"></i> Weather Settings</h5>
+
+                    <div class="mb-3">
+                        <label class="form-label">OpenWeatherMap API Key</label>
+                        <input type="text" class="form-control" id="weather_api_key"
+                               value="{{ config.weather_api_key }}"
+                               placeholder="Get free key at openweathermap.org">
+                        <div class="form-text">
+                            <a href="https://openweathermap.org/api" target="_blank">Get a free API key</a> (optional)
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">City / Location</label>
+                        <input type="text" class="form-control" id="weather_city"
+                               value="{{ config.weather_city }}"
+                               placeholder="e.g., Taipei, Tokyo, New York">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Temperature Unit</label>
+                        <select class="form-select" id="weather_units">
+                            <option value="metric" {% if config.weather_units == 'metric' %}selected{% endif %}>Celsius (°C)</option>
+                            <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>Fahrenheit (°F)</option>
+                        </select>
+                    </div>
+
+                    <hr>
+                    <h5 class="mb-3"><i class="bi bi-calendar3"></i> Calendar Settings</h5>
+
+                    <div class="mb-3">
+                        <label class="form-label">iCal URL (Google Calendar)</label>
+                        <input type="url" class="form-control" id="calendar_ical_url"
+                               value="{{ config.calendar_ical_url }}"
+                               placeholder="https://calendar.google.com/calendar/ical/...">
+                        <div class="form-text">
+                            Google Calendar: Settings &rarr; Calendar &rarr; Secret address in iCal format (optional)
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h5 class="mb-3"><i class="bi bi-display"></i> Default Page</h5>
+
+                    <div class="mb-4">
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="page" id="page-home" value="home">
+                            <label class="btn btn-outline-primary" for="page-home">
+                                <i class="bi bi-house"></i> Home
+                            </label>
+                            <input type="radio" class="btn-check" name="page" id="page-widget" value="widget">
+                            <label class="btn btn-outline-primary" for="page-widget">
+                                <i class="bi bi-grid"></i> Widget
+                            </label>
+                            <input type="radio" class="btn-check" name="page" id="page-photo" value="photo" checked>
+                            <label class="btn btn-outline-primary" for="page-photo">
+                                <i class="bi bi-camera"></i> Photo
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-check-circle"></i> Complete Setup
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="text-center mt-3">
+            <small class="text-muted">All settings can be changed later in Settings page</small>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('setup-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const data = {
+        weather_api_key: document.getElementById('weather_api_key').value,
+        weather_city: document.getElementById('weather_city').value,
+        weather_units: document.getElementById('weather_units').value,
+        calendar_ical_url: document.getElementById('calendar_ical_url').value,
+        current_page: document.querySelector('input[name="page"]:checked').value,
+    };
+
+    fetch('/api/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showToast('Setup complete!', 'success');
+            setTimeout(() => window.location.href = '/', 1000);
+        } else {
+            showToast('Setup failed: ' + (result.error || ''), 'danger');
+        }
+    })
+    .catch(err => showToast('Error: ' + err, 'danger'));
+});
+</script>
+{% endblock %}

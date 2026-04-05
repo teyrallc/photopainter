@@ -35,8 +35,13 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings">
+                            <i class="bi bi-gear"></i> 設定
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if request.path == '/manual' %}active{% endif %}" href="/manual">
-                            <i class="bi bi-book"></i> 使用手冊
+                            <i class="bi bi-book"></i> 手冊
                         </a>
                     </li>
                 </ul>

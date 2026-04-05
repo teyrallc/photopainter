@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}Vignette - Settings{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-gear"></i> Settings / 設定</h2>
+
+<div class="row g-4">
+    <!-- Weather -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <i class="bi bi-cloud-sun"></i> Weather / 天氣
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">API Key</label>
+                    <input type="text" class="form-control" id="s-weather-key"
+                           value="{{ config.weather_api_key }}">
+                    <div class="form-text"><a href="https://openweathermap.org/api" target="_blank">openweathermap.org</a></div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">City / 城市</label>
+                    <input type="text" class="form-control" id="s-weather-city"
+                           value="{{ config.weather_city }}" placeholder="Taipei">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Units / 單位</label>
+                    <select class="form-select" id="s-weather-units">
+                        <option value="metric" {% if config.weather_units == 'metric' %}selected{% endif %}>°C</option>
+                        <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>°F</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" onclick="saveWeather()">
+                    <i class="bi bi-save"></i> Save
+                </button>
+                <button class="btn btn-outline-info" onclick="testWeather()">
+                    <i class="bi bi-cloud-sun"></i> Test
+                </button>
+                <div id="weather-test-result" class="mt-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-danger text-white">
+                <i class="bi bi-calendar3"></i> Calendar / 行事曆
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">iCal URL</label>
+                    <input type="url" class="form-control" id="s-cal-url"
+                           value="{{ config.calendar_ical_url }}"
+                           placeholder="https://calendar.google.com/calendar/ical/...">
+                    <div class="form-text">Google Calendar &rarr; Settings &rarr; Secret address in iCal format</div>
+                </div>
+                <button class="btn btn-primary" onclick="saveCalendar()">
+                    <i class="bi bi-save"></i> Save
+                </button>
+                <button class="btn btn-outline-info" onclick="testCalendar()">
+                    <i class="bi bi-calendar-check"></i> Test
+                </button>
+                <div id="cal-test-result" class="mt-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Photo Display -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-camera"></i> Photo Display / 照片顯示
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Default Rotation / 旋轉</label>
+                    <select class="form-select" id="s-rotation">
+                        <option value="0" {% if config.photo_rotation == 0 %}selected{% endif %}>0° (Normal)</option>
+                        <option value="90" {% if config.photo_rotation == 90 %}selected{% endif %}>90° CW</option>
+                        <option value="180" {% if config.photo_rotation == 180 %}selected{% endif %}>180°</option>
+                        <option value="270" {% if config.photo_rotation == 270 %}selected{% endif %}>270° CW (90° CCW)</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Fit Mode / 填充模式</label>
+                    <select class="form-select" id="s-fit-mode">
+                        <option value="fit" {% if config.photo_fit_mode == 'fit' %}selected{% endif %}>Fit (letterbox, keep ratio) / 等比留白</option>
+                        <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>Stretch (fill screen) / 拉伸填滿</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" onclick="savePhotoSettings()">
+                    <i class="bi bi-save"></i> Save
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- System -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <i class="bi bi-wrench"></i> System / 系統
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-warning" onclick="showQR()">
+                        <i class="bi bi-qr-code"></i> Show QR Code on Display / 顯示 QR Code
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="resetAll()">
+                        <i class="bi bi-arrow-counterclockwise"></i> Factory Reset / 全部重設
+                    </button>
+                </div>
+                <div class="alert alert-warning mt-3 mb-0 small">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    Factory Reset will clear all settings and show the QR setup screen.<br>
+                    全部重設會清除所有設定並顯示 QR 配對畫面。
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function saveWeather() {
+    fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            weather_api_key: document.getElementById('s-weather-key').value,
+            weather_city: document.getElementById('s-weather-city').value,
+            weather_units: document.getElementById('s-weather-units').value,
+        })
+    }).then(r => r.json()).then(d => {
+        showToast(d.success ? 'Weather settings saved' : d.error, d.success ? 'success' : 'danger');
+    });
+}
+
+function testWeather() {
+    const div = document.getElementById('weather-test-result');
+    div.innerHTML = '<span class="text-muted">Loading...</span>';
+    fetch('/api/weather').then(r => r.json()).then(d => {
+        if (d.error) {
+            div.innerHTML = `<span class="text-danger">${d.error}</span>`;
+        } else {
+            div.innerHTML = `<span class="text-success">${d.city}: ${d.temp}° ${d.description}</span>`;
+        }
+    }).catch(e => { div.innerHTML = `<span class="text-danger">${e}</span>`; });
+}
+
+function saveCalendar() {
+    fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ calendar_ical_url: document.getElementById('s-cal-url').value })
+    }).then(r => r.json()).then(d => {
+        showToast(d.success ? 'Calendar settings saved' : d.error, d.success ? 'success' : 'danger');
+    });
+}
+
+function testCalendar() {
+    const div = document.getElementById('cal-test-result');
+    div.innerHTML = '<span class="text-muted">Loading...</span>';
+    fetch('/api/calendar').then(r => r.json()).then(d => {
+        const count = d.events ? d.events.length : 0;
+        div.innerHTML = `<span class="text-success">Today: ${d.today.date_str} (${d.today.weekday}) - ${count} upcoming events</span>`;
+    }).catch(e => { div.innerHTML = `<span class="text-danger">${e}</span>`; });
+}
+
+function savePhotoSettings() {
+    const rotation = parseInt(document.getElementById('s-rotation').value);
+    const fitMode = document.getElementById('s-fit-mode').value;
+    Promise.all([
+        fetch('/api/photo/rotation', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({rotation})
+        }),
+        fetch('/api/photo/fit_mode', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({fit_mode: fitMode})
+        })
+    ]).then(() => showToast('Photo settings saved', 'success'));
+}
+
+function showQR() {
+    showToast('Displaying QR code...', 'info');
+    fetch('/api/page/qr', {method: 'POST'}).then(r => r.json()).then(d => {
+        showToast(d.success ? 'QR code displayed on e-paper' : d.error, d.success ? 'success' : 'danger');
+    });
+}
+
+function resetAll() {
+    if (!confirm('Are you sure? This will clear ALL settings.\n確定要全部重設嗎？所有設定將被清除。')) return;
+    fetch('/api/reset', {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.success) {
+            showToast('Reset complete. Redirecting to setup...', 'success');
+            setTimeout(() => window.location.href = '/setup', 2000);
+        } else {
+            showToast(d.error, 'danger');
+        }
+    });
+}
+</script>
+{% endblock %}

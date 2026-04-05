@@ -1,130 +1,171 @@
 {% extends "base.html" %}
-{% block title %}Vignette - 控制台{% endblock %}
+{% block title %}Vignette - Dashboard{% endblock %}
 
 {% block content %}
-<h2 class="mb-4"><i class="bi bi-house"></i> 控制台</h2>
+<h2 class="mb-4"><i class="bi bi-house"></i> Dashboard</h2>
 
 <div class="row g-4">
-    <!-- Photo Navigation -->
+    <!-- Page Control (Virtual Buttons) -->
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-primary text-white">
-                <i class="bi bi-camera"></i> 照片控制
+                <i class="bi bi-display"></i> Display Page / 顯示頁面
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-center gap-2 mb-3">
+                    <button class="btn btn-{{ 'primary' if config.current_page == 'home' else 'outline-primary' }}"
+                            onclick="switchPage('home')">
+                        <i class="bi bi-house"></i> Home
+                    </button>
+                    <button class="btn btn-{{ 'primary' if config.current_page == 'widget' else 'outline-primary' }}"
+                            onclick="switchPage('widget')">
+                        <i class="bi bi-grid"></i> Widget
+                    </button>
+                    <button class="btn btn-{{ 'primary' if config.current_page == 'photo' else 'outline-primary' }}"
+                            onclick="switchPage('photo')">
+                        <i class="bi bi-camera"></i> Photo
+                    </button>
+                </div>
+
+                <div class="text-center mb-3">
+                    <span class="badge bg-secondary" id="current-page-badge">
+                        Current: {{ config.current_page | upper }}
+                        {% if config.current_page == 'widget' %}
+                        ({{ config.widget_mode }})
+                        {% endif %}
+                    </span>
+                </div>
+
+                <!-- Widget toggle (visible when on Widget page) -->
+                <div class="d-flex justify-content-center gap-2 mb-3">
+                    <button class="btn btn-outline-info btn-sm" onclick="toggleWidget()">
+                        <i class="bi bi-arrow-repeat"></i> Toggle Widget (Weather/Calendar)
+                    </button>
+                    <button class="btn btn-outline-success btn-sm" onclick="refreshPage()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Photo Navigation -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-camera"></i> Photo Control / 照片控制
             </div>
             <div class="card-body text-center">
                 <div id="photo-preview" class="mb-3">
                     {% if photo_state.current_image %}
                     <div class="epaper-frame">
                         <img src="/output/{{ photo_state.current_image }}" class="img-fluid rounded"
-                             alt="Current" style="max-height: 200px; object-fit: contain;">
+                             alt="Current" style="max-height: 180px; object-fit: contain;">
                     </div>
-                    <p class="mt-2 mb-0">
-                        <strong>{{ photo_state.current_image }}</strong>
-                    </p>
+                    <p class="mt-2 mb-0 small"><strong>{{ photo_state.current_image }}</strong></p>
                     {% else %}
-                    <p class="text-muted mb-0">尚未顯示任何照片</p>
+                    <p class="text-muted mb-0">No photo displayed</p>
                     {% endif %}
                 </div>
 
-                <div id="photo-nav-info" class="mb-3">
+                <div class="mb-2">
                     <span class="badge bg-secondary">
-                        第 <span id="photo-index">{{ photo_state.current_index + 1 if photo_state.current_index >= 0 else '-' }}</span>
-                        / <span id="photo-total">{{ photo_state.total }}</span> 張
+                        <span id="photo-index">{{ photo_state.current_index + 1 if photo_state.current_index >= 0 else '-' }}</span>
+                        / <span id="photo-total">{{ photo_state.total }}</span>
                     </span>
                 </div>
 
-                <div class="d-flex justify-content-center gap-2 mb-3">
-                    <button class="btn btn-outline-primary" onclick="photoPrev()" title="上一張">
-                        <i class="bi bi-chevron-left"></i> 上一張
+                <div class="d-flex justify-content-center gap-2 mb-2">
+                    <button class="btn btn-outline-primary" onclick="photoPrev()">
+                        <i class="bi bi-chevron-left"></i> Prev
                     </button>
-                    <button class="btn btn-outline-primary" onclick="photoNext()" title="下一張">
-                        下一張 <i class="bi bi-chevron-right"></i>
+                    <button class="btn btn-outline-primary" onclick="photoNext()">
+                        Next <i class="bi bi-chevron-right"></i>
                     </button>
                 </div>
-
                 <div class="d-flex justify-content-center gap-2">
                     <button class="btn btn-outline-success btn-sm" onclick="photoLatest()">
-                        <i class="bi bi-camera"></i> 最新照片
+                        <i class="bi bi-camera"></i> Latest
                     </button>
                     <button class="btn btn-outline-info btn-sm" onclick="displayTest()">
-                        <i class="bi bi-grid-3x3"></i> 測試圖案
+                        <i class="bi bi-grid-3x3"></i> Test Pattern
                     </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Display Status & Quick Actions -->
+    <!-- Display Status -->
     <div class="col-md-6">
-        <div class="card mb-4">
-            <div class="card-header bg-success text-white">
-                <i class="bi bi-display"></i> 顯示器狀態
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <i class="bi bi-info-circle"></i> Display Status / 顯示器狀態
             </div>
             <div class="card-body">
-                <p><strong>狀態：</strong>
+                <p><strong>Status:</strong>
                     <span class="badge bg-{{ 'success' if display_state.status == 'idle' else 'warning' }}">
                         {{ display_state.status }}
                     </span>
                 </p>
-                <p><strong>目前顯示：</strong> {{ display_state.current_image or '無' }}</p>
-                <p><strong>最後更新：</strong> {{ display_state.last_update or '尚未更新' }}</p>
-                <p class="mb-0"><strong>圖片總數：</strong> {{ total_images }}</p>
-
+                <p><strong>Showing:</strong> {{ display_state.current_image or 'None' }}</p>
+                <p><strong>Last update:</strong> {{ display_state.last_update or 'Never' }}</p>
+                <p class="mb-0"><strong>Total images:</strong> {{ total_images }}</p>
                 <div class="d-flex gap-2 mt-3">
                     <button class="btn btn-outline-warning btn-sm" onclick="clearDisplay()">
-                        <i class="bi bi-eraser"></i> 清除螢幕
+                        <i class="bi bi-eraser"></i> Clear
                     </button>
                     <button class="btn btn-outline-secondary btn-sm" onclick="sleepDisplay()">
-                        <i class="bi bi-moon"></i> 休眠
+                        <i class="bi bi-moon"></i> Sleep
                     </button>
                 </div>
             </div>
         </div>
+    </div>
 
+    <!-- Quick Actions -->
+    <div class="col-md-6">
         <div class="card">
-            <div class="card-header bg-dark text-white">
-                <i class="bi bi-lightning"></i> 快速操作
+            <div class="card-header bg-secondary text-white">
+                <i class="bi bi-lightning"></i> Quick Actions
             </div>
             <div class="card-body">
                 <div class="d-grid gap-2">
                     <a href="/upload" class="btn btn-outline-primary">
-                        <i class="bi bi-upload"></i> 上傳新圖片
+                        <i class="bi bi-upload"></i> Upload Photo
                     </a>
                     <a href="/gallery" class="btn btn-outline-info">
-                        <i class="bi bi-images"></i> 瀏覽圖庫 ({{ total_images }} 張)
+                        <i class="bi bi-images"></i> Gallery ({{ total_images }})
+                    </a>
+                    <a href="/settings" class="btn btn-outline-dark">
+                        <i class="bi bi-gear"></i> Settings
                     </a>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- System Info & Remote Management -->
+    <!-- System Info -->
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header bg-dark text-white">
-                <i class="bi bi-cpu"></i> 系統資訊
-            </div>
-            <div class="card-body" id="system-info">
-                <p class="text-muted">載入中...</p>
-            </div>
+            <div class="card-header"><i class="bi bi-cpu"></i> System Info</div>
+            <div class="card-body" id="system-info"><p class="text-muted">Loading...</p></div>
         </div>
     </div>
 
+    <!-- Remote Management -->
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header bg-secondary text-white">
-                <i class="bi bi-gear"></i> 遠端管理
-            </div>
+            <div class="card-header"><i class="bi bi-gear"></i> Remote Management</div>
             <div class="card-body">
                 <div class="d-grid gap-2">
                     <button class="btn btn-outline-primary" onclick="systemUpdate()">
-                        <i class="bi bi-arrow-repeat"></i> 遠端更新程式
+                        <i class="bi bi-arrow-repeat"></i> Update / 更新程式
                     </button>
                     <button class="btn btn-outline-warning" onclick="systemReboot()">
-                        <i class="bi bi-arrow-clockwise"></i> 重新啟動 Pi
+                        <i class="bi bi-arrow-clockwise"></i> Reboot / 重啟
                     </button>
                     <button class="btn btn-outline-danger" onclick="systemShutdown()">
-                        <i class="bi bi-power"></i> 關機
+                        <i class="bi bi-power"></i> Shutdown / 關機
                     </button>
                 </div>
                 <div id="update-output" class="mt-3 d-none">
@@ -137,9 +178,7 @@
     <!-- Recent Images -->
     <div class="col-12">
         <div class="card">
-            <div class="card-header">
-                <i class="bi bi-clock-history"></i> 最近圖片
-            </div>
+            <div class="card-header"><i class="bi bi-clock-history"></i> Recent Photos</div>
             <div class="card-body">
                 {% if images %}
                 <div class="row g-3">
@@ -152,7 +191,7 @@
                                 <small class="text-muted d-block text-truncate">{{ img.filename }}</small>
                                 <button class="btn btn-sm btn-primary mt-1 w-100"
                                         onclick="displayImage('{{ img.filename }}')">
-                                    <i class="bi bi-display"></i> 顯示
+                                    <i class="bi bi-display"></i> Display
                                 </button>
                             </div>
                         </div>
@@ -160,7 +199,7 @@
                     {% endfor %}
                 </div>
                 {% else %}
-                <p class="text-muted mb-0">尚無圖片。請上傳或生成新圖片。</p>
+                <p class="text-muted mb-0">No photos yet. Upload one!</p>
                 {% endif %}
             </div>
         </div>
@@ -170,81 +209,75 @@
 
 {% block scripts %}
 <script>
-// Load system info on page load
+function switchPage(page) {
+    showToast('Switching to ' + page + ' page...', 'info');
+    fetch('/api/page/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({page: page})
+    }).then(r => r.json()).then(d => {
+        if (d.success) {
+            showToast('Switched to ' + d.page, 'success');
+            document.getElementById('current-page-badge').textContent = 'Current: ' + d.page.toUpperCase();
+        } else { showToast(d.error, 'danger'); }
+    }).catch(e => showToast('Error: ' + e, 'danger'));
+}
+
+function toggleWidget() {
+    fetch('/api/widget/toggle', {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.success) showToast('Widget: ' + d.widget_mode, 'success');
+        else showToast(d.error, 'danger');
+    });
+}
+
+function refreshPage() {
+    showToast('Refreshing page...', 'info');
+    fetch('/api/page/refresh', {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.success) showToast('Page refreshed', 'success');
+        else showToast(d.error, 'danger');
+    });
+}
+
 function loadSystemInfo() {
-    fetch('/api/system/info')
-        .then(r => r.json())
-        .then(info => {
-            const div = document.getElementById('system-info');
-            const tempColor = info.cpu_temp > 70 ? 'danger' : (info.cpu_temp > 55 ? 'warning' : 'success');
-            div.innerHTML = `
-                <table class="table table-sm mb-0">
-                    <tr><td><i class="bi bi-pc-display"></i> 主機名稱</td><td>${info.hostname || '-'}</td></tr>
-                    <tr><td><i class="bi bi-wifi"></i> IP 位址</td><td>${(info.ip_addresses || []).join(', ') || '-'}</td></tr>
-                    <tr><td><i class="bi bi-thermometer-half"></i> CPU 溫度</td>
-                        <td><span class="badge bg-${tempColor}">${info.cpu_temp ? info.cpu_temp + '°C' : '-'}</span></td></tr>
-                    <tr><td><i class="bi bi-memory"></i> 記憶體</td>
-                        <td>${info.mem_available_mb || '-'} MB / ${info.mem_total_mb || '-'} MB</td></tr>
-                    <tr><td><i class="bi bi-hdd"></i> 磁碟可用</td><td>${info.disk_free_gb ? info.disk_free_gb + ' GB' : '-'}</td></tr>
-                    <tr><td><i class="bi bi-clock"></i> 已運行</td><td>${info.uptime || '-'}</td></tr>
-                    <tr><td><i class="bi bi-git"></i> 版本</td><td><code>${info.git_version || '-'}</code></td></tr>
-                </table>
-            `;
-        })
-        .catch(() => {
-            document.getElementById('system-info').innerHTML =
-                '<p class="text-danger mb-0">無法取得系統資訊</p>';
-        });
+    fetch('/api/system/info').then(r => r.json()).then(info => {
+        const div = document.getElementById('system-info');
+        const tc = info.cpu_temp > 70 ? 'danger' : (info.cpu_temp > 55 ? 'warning' : 'success');
+        div.innerHTML = `<table class="table table-sm mb-0">
+            <tr><td><i class="bi bi-pc-display"></i> Host</td><td>${info.hostname || '-'}</td></tr>
+            <tr><td><i class="bi bi-wifi"></i> IP</td><td>${(info.ip_addresses || []).join(', ') || '-'}</td></tr>
+            <tr><td><i class="bi bi-thermometer-half"></i> Temp</td><td><span class="badge bg-${tc}">${info.cpu_temp ? info.cpu_temp + '°C' : '-'}</span></td></tr>
+            <tr><td><i class="bi bi-memory"></i> RAM</td><td>${info.mem_available_mb || '-'} / ${info.mem_total_mb || '-'} MB</td></tr>
+            <tr><td><i class="bi bi-hdd"></i> Disk</td><td>${info.disk_free_gb ? info.disk_free_gb + ' GB' : '-'}</td></tr>
+            <tr><td><i class="bi bi-clock"></i> Uptime</td><td>${info.uptime || '-'}</td></tr>
+        </table>`;
+    }).catch(() => {
+        document.getElementById('system-info').innerHTML = '<p class="text-danger mb-0">Failed to load</p>';
+    });
 }
 
 function systemUpdate() {
-    if (!confirm('確定要更新程式嗎？更新後服務會自動重啟。')) return;
-
-    const outputDiv = document.getElementById('update-output');
-    const pre = outputDiv.querySelector('pre');
-    outputDiv.classList.remove('d-none');
-    pre.textContent = '正在更新中，請稍候...\n';
-
-    fetch('/api/system/update', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                pre.textContent = data.output || '更新完成！';
-                showToast('程式更新成功！頁面將在 5 秒後重新載入。', 'success');
-                setTimeout(() => location.reload(), 5000);
-            } else {
-                pre.textContent = (data.output || '') + '\n' + (data.error || '更新失敗');
-                showToast('更新失敗：' + (data.error || '未知錯誤'), 'danger');
-            }
-        })
-        .catch(err => {
-            pre.textContent = '連線錯誤：' + err;
-            showToast('更新連線失敗', 'danger');
-        });
+    if (!confirm('Update software?')) return;
+    const out = document.getElementById('update-output');
+    out.classList.remove('d-none');
+    out.querySelector('pre').textContent = 'Updating...\n';
+    fetch('/api/system/update', {method:'POST'}).then(r=>r.json()).then(d => {
+        out.querySelector('pre').textContent = d.output || d.error || 'Done';
+        if (d.success) { showToast('Updated! Reloading in 5s...', 'success'); setTimeout(()=>location.reload(), 5000); }
+        else showToast('Update failed', 'danger');
+    });
 }
-
 function systemReboot() {
-    if (!confirm('確定要重新啟動 Raspberry Pi 嗎？')) return;
-    fetch('/api/system/reboot', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            showToast('Pi 正在重新啟動，請等待約 30 秒後重新整理頁面。', 'info');
-        })
-        .catch(err => showToast('連線錯誤', 'danger'));
+    if (!confirm('Reboot Pi?')) return;
+    fetch('/api/system/reboot', {method:'POST'});
+    showToast('Rebooting... wait 30s then refresh.', 'info');
 }
-
 function systemShutdown() {
-    if (!confirm('確定要關閉 Raspberry Pi 嗎？關機後需要手動重新接電開機。')) return;
-    fetch('/api/system/shutdown', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            showToast('Pi 正在關機...', 'warning');
-        })
-        .catch(err => showToast('連線錯誤', 'danger'));
+    if (!confirm('Shutdown Pi? Need manual power cycle to restart.')) return;
+    fetch('/api/system/shutdown', {method:'POST'});
+    showToast('Shutting down...', 'warning');
 }
 
 loadSystemInfo();
-// Auto-refresh system info every 30 seconds
 setInterval(loadSystemInfo, 30000);
 </script>
 {% endblock %}
