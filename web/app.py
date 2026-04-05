@@ -18,6 +18,9 @@ from flask import (Flask, jsonify, render_template, request,
                    send_file, send_from_directory)
 from PIL import Image, ImageDraw, ImageFont
 
+# Pillow compatibility: Resampling.LANCZOS was added in Pillow 9.1
+LANCZOS = getattr(Image, 'Resampling', Image).LANCZOS
+
 # Project paths
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_DIR, "output")
@@ -36,6 +39,16 @@ logger = logging.getLogger("vignette")
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Return JSON for API errors instead of HTML."""
+    if request.path.startswith('/api/'):
+        logger.error(f"API error: {e}", exc_info=True)
+        code = getattr(e, 'code', 500)
+        return jsonify({"error": str(e)}), code
+    raise e
 
 # Display lock - only one display operation at a time
 display_lock = threading.Lock()
@@ -95,7 +108,7 @@ def get_image_list():
 def quantize_to_epaper(image_path):
     """Quantize an image to 7-color e-paper palette, return as PNG bytes."""
     img = Image.open(image_path).convert("RGB")
-    img = img.resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
+    img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
 
     pal_image = Image.new("P", (1, 1))
     pal_image.putpalette(EPAPER_PALETTE)
@@ -129,7 +142,7 @@ def process_upload(file_storage):
 
     # Resize to display dimensions
     img = Image.open(filepath).convert("RGB")
-    img_resized = img.resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
+    img_resized = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
     img_resized.save(filepath)
 
     return filename
@@ -147,7 +160,7 @@ def display_image_on_epaper(image_path):
         from waveshare_epd import epd7in3e
 
         img = Image.open(image_path).convert("RGB")
-        img = img.resize((EPD_WIDTH, EPD_HEIGHT), Image.Resampling.LANCZOS)
+        img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
 
         epd = epd7in3e.EPD()
         logger.info("EPD init...")
@@ -296,9 +309,13 @@ def api_upload():
     if not allowed_file(file.filename):
         return jsonify({"error": "File type not allowed. Use: png, jpg, jpeg, bmp, gif"}), 400
 
-    filename = process_upload(file)
-    return jsonify({"success": True, "filename": filename,
-                    "message": f"Image uploaded: {filename}"})
+    try:
+        filename = process_upload(file)
+        return jsonify({"success": True, "filename": filename,
+                        "message": f"Image uploaded: {filename}"})
+    except Exception as e:
+        logger.error(f"Upload failed: {e}", exc_info=True)
+        return jsonify({"error": f"Upload failed: {e}"}), 500
 
 
 @app.route('/api/display', methods=['POST'])
