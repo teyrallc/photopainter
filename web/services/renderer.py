@@ -181,6 +181,55 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
     return img
 
 
+def render_wifi_connected(ssid, ip_address, port=5000):
+    """Render 'WiFi Connected' confirmation page on e-paper.
+    Shows the new IP address so the user knows where to access the web UI."""
+    img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
+    draw = ImageDraw.Draw(img)
+
+    url = f"http://{ip_address}:{port}"
+
+    font_title = _get_font(36)
+    font_big = _get_font(28)
+    font_body = _get_font(22)
+    font_info = _get_font(18)
+    font_small = _get_font(14)
+
+    # Success header
+    draw.rectangle([0, 0, EPD_W, 60], fill=GREEN)
+    draw.text((EPD_W // 2, 30), "WiFi Connected!", fill=WHITE, font=font_title, anchor="mm")
+
+    # WiFi network name
+    draw.text((EPD_W // 2, 100), f"Network: {ssid}", fill=BLACK, font=font_body, anchor="mt")
+
+    # Big URL - this is the most important info
+    draw.text((EPD_W // 2, 160), "Open in browser:", fill=BLACK, font=font_info, anchor="mt")
+    draw.text((EPD_W // 2, 200), url, fill=BLUE, font=font_big, anchor="mt")
+
+    # QR code for the URL
+    try:
+        import qrcode
+        qr = qrcode.QRCode(version=1, box_size=5, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+        qr_x = (EPD_W - qr_img.width) // 2
+        img.paste(qr_img, (qr_x, 250))
+        qr_bottom = 250 + qr_img.height + 10
+    except ImportError:
+        qr_bottom = 260
+
+    # Instructions
+    draw.text((EPD_W // 2, max(qr_bottom, 420)),
+              "Connect your phone to the same WiFi, then scan QR or type the URL",
+              fill=BLACK, font=font_small, anchor="mt")
+
+    draw.text((EPD_W // 2, EPD_H - 18),
+              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
+
+    return img
+
+
 # ── Internal Drawing Functions ────────────────────────────────────────────
 
 

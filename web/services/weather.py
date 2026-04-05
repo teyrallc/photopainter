@@ -15,7 +15,7 @@ CACHE_DURATION = 900
 _cache = {"data": None, "timestamp": 0}
 
 
-def fetch_weather(api_key, city, units="metric", lang="zh_tw"):
+def fetch_weather(api_key, city, units="metric", lang="en"):
     """Fetch current weather + 3-day forecast from OpenWeatherMap."""
     if not api_key or not city:
         return None

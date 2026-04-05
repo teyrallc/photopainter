@@ -78,17 +78,23 @@ display_lock = threading.Lock()
 AP_SSID = "Vignette-Setup"
 AP_PASSWORD = "vignette123"
 AP_CONN_NAME = "Vignette-Hotspot"
+DNSMASQ_CAPTIVE_CONF = "/etc/NetworkManager/dnsmasq-shared.d/captive-portal.conf"
 
 
 def start_ap_hotspot():
     """Start WiFi Access Point so phones can connect and configure WiFi.
-    Uses nmcli to create a hotspot on wlan0 with explicit security settings."""
+    Uses nmcli to create a hotspot on wlan0 with explicit security settings.
+    Also sets up dnsmasq to redirect all DNS to the Pi for captive portal."""
     logger.info(f"Starting AP hotspot: {AP_SSID}")
     try:
         # Remove old hotspot connection if exists
         subprocess.run(
             ["nmcli", "connection", "delete", AP_CONN_NAME],
             capture_output=True, text=True, timeout=10)
+
+        # Write dnsmasq config to redirect all DNS queries to this Pi
+        # This enables captive portal detection on phones
+        _setup_captive_dns()
 
         # Create connection profile with explicit settings
         result = subprocess.run([
@@ -126,7 +132,7 @@ def start_ap_hotspot():
 
 
 def stop_ap_hotspot():
-    """Stop the WiFi AP hotspot."""
+    """Stop the WiFi AP hotspot and clean up DNS redirect."""
     logger.info("Stopping AP hotspot")
     try:
         subprocess.run(
@@ -135,9 +141,35 @@ def stop_ap_hotspot():
         subprocess.run(
             ["nmcli", "connection", "delete", AP_CONN_NAME],
             capture_output=True, text=True, timeout=10)
+        _cleanup_captive_dns()
         logger.info("AP hotspot stopped")
     except Exception as e:
         logger.error(f"Hotspot stop error: {e}")
+
+
+def _setup_captive_dns():
+    """Write dnsmasq config that resolves ALL DNS to the Pi.
+    When phones do captive portal checks (e.g. connectivitycheck.gstatic.com),
+    DNS resolves to 192.168.4.1 → Flask handles → redirects to /captive."""
+    try:
+        conf_dir = os.path.dirname(DNSMASQ_CAPTIVE_CONF)
+        os.makedirs(conf_dir, exist_ok=True)
+        with open(DNSMASQ_CAPTIVE_CONF, 'w') as f:
+            f.write("# Vignette captive portal - redirect all DNS to this Pi\n")
+            f.write("address=/#/192.168.4.1\n")
+        logger.info("Captive portal DNS config written")
+    except Exception as e:
+        logger.error(f"Failed to write captive DNS config: {e}")
+
+
+def _cleanup_captive_dns():
+    """Remove captive portal DNS redirect config."""
+    try:
+        if os.path.exists(DNSMASQ_CAPTIVE_CONF):
+            os.remove(DNSMASQ_CAPTIVE_CONF)
+            logger.info("Captive portal DNS config removed")
+    except Exception as e:
+        logger.error(f"Failed to remove captive DNS config: {e}")
 
 
 def is_ap_active():
@@ -335,6 +367,13 @@ def display_qr_setup():
     return display_pil_image(img)
 
 
+def display_wifi_connected(ssid, ip_address):
+    """Display 'WiFi Connected' confirmation on e-paper with new IP."""
+    img = renderer.render_wifi_connected(ssid, ip_address)
+    display_state["current_image"] = "[WiFi connected]"
+    return display_pil_image(img)
+
+
 def display_test_pattern():
     """Send a test pattern to e-paper."""
     logger.info("Sending test pattern...")
@@ -472,6 +511,15 @@ def captive_portal_windows():
 def captive_portal_windows_ncsi():
     """Windows NCSI captive portal detection."""
     return redirect(url_for('captive_page'))
+
+
+@app.errorhandler(404)
+def handle_404(e):
+    """When AP is active, redirect ALL unknown URLs to captive portal.
+    This catches captive portal checks that hit random hostnames."""
+    if is_ap_active():
+        return redirect(url_for('captive_page'))
+    return jsonify({"error": "Not found"}), 404
 
 
 # ── API: Setup & Config ──────────────────────────────────────────────────
@@ -915,8 +963,15 @@ def api_wifi_connect():
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             logger.info(f"WiFi connected to {ssid}")
+            time.sleep(2)  # Wait for IP assignment
+            new_ip = _get_ip()
+            # Show the new IP on e-paper so user knows where to go
+            try:
+                display_wifi_connected(ssid, new_ip)
+            except Exception as e:
+                logger.error(f"Could not update e-paper after WiFi connect: {e}")
             return jsonify({"success": True, "message": f"Connected to {ssid}",
-                            "ip": _get_ip()})
+                            "ip": new_ip})
         else:
             # Connection failed - restart AP if we were in setup mode
             err = result.stderr.strip() or "Connection failed"
@@ -951,7 +1006,7 @@ def api_weather():
         config.get("weather_api_key", ""),
         config.get("weather_city", ""),
         config.get("weather_units", "metric"),
-        config.get("weather_lang", "zh_tw"))
+        config.get("weather_lang", "en"))
     if weather:
         return jsonify(weather)
     return jsonify({"error": "No weather data. Check API key and city."}), 404
