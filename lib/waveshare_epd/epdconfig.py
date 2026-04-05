@@ -58,11 +58,15 @@ class RaspberryPi:
         self.GPIO.setwarnings(False)
         self.GPIO.setup(self.RST_PIN, GPIO.OUT)
         self.GPIO.setup(self.DC_PIN, GPIO.OUT)
-        self.GPIO.setup(self.CS_PIN, GPIO.OUT)
+        # CS_PIN (GPIO 8/CE0) is managed by SPI hardware driver
+        # On Bookworm+ lgpio backend, claiming it as GPIO causes
+        # 'GPIO not allocated' error since SPI already owns it
         self.GPIO.setup(self.PWR_PIN, GPIO.OUT)
         self.GPIO.setup(self.BUSY_PIN, GPIO.IN)
 
     def digital_write(self, pin, value):
+        if pin == self.CS_PIN:
+            return  # CS is handled by SPI hardware automatically
         self.GPIO.output(pin, value)
 
     def digital_read(self, pin):
