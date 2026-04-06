@@ -487,40 +487,61 @@ def captive_page():
 
 
 # ── Captive Portal Detection ─────────────────────────────────────────────
-# When the Pi runs as a WiFi AP, phones probe these URLs to detect
-# captive portals. Redirecting them sends the user straight to /captive.
+# When the Pi runs as a WiFi AP, phones probe specific URLs to detect
+# internet connectivity. Returning unexpected responses triggers the
+# captive portal popup which loads /captive.
 
 @app.route('/generate_204')
 @app.route('/gen_204')
 def captive_portal_android():
-    """Android captive portal detection."""
-    return redirect(url_for('captive_page'))
+    """Android captive portal detection.
+    Android expects HTTP 204. Returning a redirect (302) to /captive
+    tells Android there IS a captive portal and it opens the popup."""
+    if is_ap_active():
+        return redirect(url_for('captive_page'))
+    return '', 204
 
 
 @app.route('/hotspot-detect.html')
 def captive_portal_apple():
-    """Apple captive portal detection."""
-    return redirect(url_for('captive_page'))
+    """Apple captive portal detection.
+    Apple expects body containing 'Success'. Returning our captive page
+    instead triggers Apple's captive portal sheet."""
+    if is_ap_active():
+        return render_template('captive.html')
+    return '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>'
 
 
 @app.route('/connecttest.txt')
 def captive_portal_windows():
     """Windows captive portal detection."""
-    return redirect(url_for('captive_page'))
+    if is_ap_active():
+        return redirect(url_for('captive_page'))
+    return 'Microsoft Connect Test'
 
 
 @app.route('/ncsi.txt')
 def captive_portal_windows_ncsi():
     """Windows NCSI captive portal detection."""
-    return redirect(url_for('captive_page'))
+    if is_ap_active():
+        return redirect(url_for('captive_page'))
+    return 'Microsoft NCSI'
+
+
+@app.route('/library/test/success.html')
+def captive_portal_apple2():
+    """Apple secondary captive portal detection."""
+    if is_ap_active():
+        return render_template('captive.html')
+    return '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>'
 
 
 @app.errorhandler(404)
 def handle_404(e):
-    """When AP is active, redirect ALL unknown URLs to captive portal.
+    """When AP is active, serve captive page for ALL unknown URLs.
     This catches captive portal checks that hit random hostnames."""
     if is_ap_active():
-        return redirect(url_for('captive_page'))
+        return render_template('captive.html'), 200
     return jsonify({"error": "Not found"}), 404
 
 
@@ -561,12 +582,12 @@ def api_reset():
     logger.info("System reset to factory defaults")
     # Start AP hotspot for WiFi configuration
     start_ap_hotspot()
-    # Display QR setup on e-paper
-    if display_lock.acquire(blocking=False):
-        try:
-            display_qr_setup()
-        finally:
-            display_lock.release()
+    # Display QR setup on e-paper (blocking - must show QR)
+    display_lock.acquire()
+    try:
+        display_qr_setup()
+    finally:
+        display_lock.release()
     return jsonify({"success": True, "message": "Reset complete. QR setup displayed."})
 
 
@@ -1266,6 +1287,10 @@ def api_wifi_connect():
             logger.info(f"WiFi connected to {ssid}")
             time.sleep(2)  # Wait for IP assignment
             new_ip = _get_ip()
+            # Mark setup as complete after first WiFi connect
+            if not config.is_setup_complete:
+                config.set("setup_complete", True)
+                logger.info("Setup marked complete after WiFi connect")
             # Show the new IP on e-paper so user knows where to go
             try:
                 display_wifi_connected(ssid, new_ip)
