@@ -15,7 +15,7 @@ echo "============================================"
 
 # ── Step 1: System packages ──────────────────────────────────────────
 echo ""
-echo "[1/5] Installing system packages..."
+echo "[1/6] Installing system packages..."
 sudo apt-get update
 sudo apt-get -y upgrade
 sudo apt-get -y install \
@@ -23,11 +23,20 @@ sudo apt-get -y install \
     python3-venv \
     python3-pip \
     git \
-    tmux
+    tmux \
+    dnsmasq \
+    iptables
+
+# dnsmasq is needed for NetworkManager shared mode DNS.
+# Disable the system service so it doesn't conflict with NM's managed instance.
+echo "Disabling system dnsmasq service (NM will manage its own)..."
+sudo systemctl stop dnsmasq 2>/dev/null || true
+sudo systemctl disable dnsmasq 2>/dev/null || true
+sudo systemctl mask dnsmasq 2>/dev/null || true
 
 # ── Step 2: Enable SPI ──────────────────────────────────────────────
 echo ""
-echo "[2/5] Enabling SPI interface..."
+echo "[2/6] Enabling SPI interface..."
 if command -v raspi-config &> /dev/null; then
     sudo raspi-config nonint do_spi 0
     echo "SPI enabled."
@@ -37,7 +46,7 @@ fi
 
 # ── Step 3: Python virtual environment ──────────────────────────────
 echo ""
-echo "[3/5] Setting up Python virtual environment..."
+echo "[3/6] Setting up Python virtual environment..."
 cd "$INSTALL_DIR"
 python3 -m venv venv
 . venv/bin/activate
@@ -49,13 +58,13 @@ echo "Python packages installed."
 
 # ── Step 4: Create output directory ─────────────────────────────────
 echo ""
-echo "[4/5] Creating output directory..."
+echo "[4/6] Creating output directory..."
 cd "$INSTALL_DIR"
 mkdir -p output
 
 # ── Step 5: Install systemd service ────────────────────────────────
 echo ""
-echo "[5/5] Setting up systemd service for auto-start..."
+echo "[5/6] Setting up systemd service for auto-start..."
 
 # Create service file with correct paths
 SERVICE_FILE="/etc/systemd/system/vignette.service"

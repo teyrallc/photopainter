@@ -85,7 +85,7 @@ DNSMASQ_CAPTIVE_CONF = "/etc/NetworkManager/dnsmasq-shared.d/captive-portal.conf
 def start_ap_hotspot():
     """Start WiFi Access Point so phones can connect and configure WiFi.
     Uses nmcli to create a hotspot on wlan0 with explicit security settings.
-    Also sets up dnsmasq to redirect all DNS to the Pi for captive portal."""
+    Sets up DNS redirect (for captive portal) and iptables (for port 80)."""
     logger.info(f"Starting AP hotspot: {AP_SSID}")
     try:
         # Remove old hotspot connection if exists
@@ -126,6 +126,10 @@ def start_ap_hotspot():
             # Redirect port 80 → 5000 so captive portal detection works
             # Mobile devices probe port 80, but Flask runs on 5000
             _setup_iptables_redirect()
+
+            # Wait for NM's dnsmasq to start, then verify DNS is working
+            time.sleep(3)
+            _ensure_dns_running()
             return True
         else:
             logger.error(f"Failed to activate hotspot: {result.stderr}")
@@ -133,6 +137,11 @@ def start_ap_hotspot():
     except Exception as e:
         logger.error(f"Hotspot start error: {e}")
         return False
+
+
+# Track our fallback dnsmasq process (if we had to start one manually)
+_fallback_dnsmasq_proc = None
+FALLBACK_DNSMASQ_CONF = "/tmp/vignette-captive-dns.conf"
 
 
 def stop_ap_hotspot():
@@ -146,6 +155,7 @@ def stop_ap_hotspot():
             ["nmcli", "connection", "delete", AP_CONN_NAME],
             capture_output=True, text=True, timeout=10)
         _cleanup_captive_dns()
+        _stop_fallback_dnsmasq()
         _cleanup_iptables_redirect()
         logger.info("AP hotspot stopped")
     except Exception as e:
@@ -180,6 +190,108 @@ def _cleanup_captive_dns():
             logger.info("Captive portal DNS config removed")
     except Exception as e:
         logger.error(f"Failed to remove captive DNS config: {e}")
+
+
+def _is_dnsmasq_running():
+    """Check if any dnsmasq process is currently running."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-x", "dnsmasq"],
+            capture_output=True, text=True, timeout=5)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _ensure_dns_running():
+    """Verify DNS is working after AP startup.
+    NM's shared mode should start dnsmasq automatically, but if the
+    dnsmasq package isn't installed, DNS won't work and captive portal
+    detection will fail completely. In that case start our own instance."""
+    if _is_dnsmasq_running():
+        logger.info("✓ dnsmasq is running (managed by NetworkManager)")
+        return
+
+    logger.warning("✗ dnsmasq is NOT running after AP startup!")
+    logger.warning("  This usually means dnsmasq is not installed.")
+    logger.warning("  Run: sudo apt install dnsmasq && sudo systemctl mask dnsmasq")
+    logger.warning("  Attempting to start fallback DNS server...")
+
+    # Check if dnsmasq binary exists
+    dnsmasq_path = None
+    for path in ["/usr/sbin/dnsmasq", "/usr/bin/dnsmasq"]:
+        if os.path.exists(path):
+            dnsmasq_path = path
+            break
+
+    if dnsmasq_path:
+        _start_fallback_dnsmasq(dnsmasq_path)
+    else:
+        logger.error("dnsmasq binary not found! DNS will not work.")
+        logger.error("Captive portal will NOT auto-popup on phones.")
+        logger.error("Install with: sudo apt install dnsmasq")
+
+
+def _start_fallback_dnsmasq(dnsmasq_path="/usr/sbin/dnsmasq"):
+    """Start a standalone dnsmasq for DNS-only as a fallback.
+    NM handles DHCP, so we only need DNS resolution.
+    All queries resolve to 192.168.4.1 for captive portal."""
+    global _fallback_dnsmasq_proc
+    try:
+        # Write a minimal DNS-only config
+        with open(FALLBACK_DNSMASQ_CONF, 'w') as f:
+            f.write("# Vignette fallback DNS (captive portal)\n")
+            f.write("# DNS-only, no DHCP (NM handles DHCP)\n")
+            f.write("interface=wlan0\n")
+            f.write("listen-address=192.168.4.1\n")
+            f.write("bind-interfaces\n")
+            f.write("no-resolv\n")
+            f.write("no-hosts\n")
+            f.write("address=/#/192.168.4.1\n")
+            # Explicitly disable DHCP on all interfaces
+            f.write("no-dhcp-interface=wlan0\n")
+
+        _fallback_dnsmasq_proc = subprocess.Popen(
+            [dnsmasq_path, "-C", FALLBACK_DNSMASQ_CONF, "--no-daemon",
+             "--log-facility=-"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+        # Give it a moment to start, then check it's alive
+        time.sleep(1)
+        if _fallback_dnsmasq_proc.poll() is None:
+            logger.info("✓ Fallback dnsmasq started (DNS-only, no DHCP)")
+        else:
+            stderr_out = ""
+            if _fallback_dnsmasq_proc.stderr:
+                stderr_out = _fallback_dnsmasq_proc.stderr.read().decode()
+            logger.error(f"Fallback dnsmasq exited immediately: {stderr_out}")
+            _fallback_dnsmasq_proc = None
+    except Exception as e:
+        logger.error(f"Failed to start fallback dnsmasq: {e}")
+        _fallback_dnsmasq_proc = None
+
+
+def _stop_fallback_dnsmasq():
+    """Stop our manually started fallback dnsmasq."""
+    global _fallback_dnsmasq_proc
+    if _fallback_dnsmasq_proc:
+        try:
+            _fallback_dnsmasq_proc.terminate()
+            _fallback_dnsmasq_proc.wait(timeout=5)
+            logger.info("Fallback dnsmasq stopped")
+        except Exception as e:
+            logger.warning(f"Error stopping fallback dnsmasq: {e}")
+            try:
+                _fallback_dnsmasq_proc.kill()
+            except Exception:
+                pass
+        _fallback_dnsmasq_proc = None
+    # Clean up config
+    try:
+        if os.path.exists(FALLBACK_DNSMASQ_CONF):
+            os.remove(FALLBACK_DNSMASQ_CONF)
+    except Exception:
+        pass
 
 
 def _setup_iptables_redirect():
