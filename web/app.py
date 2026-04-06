@@ -123,6 +123,9 @@ def start_ap_hotspot():
 
         if result.returncode == 0:
             logger.info(f"AP hotspot started: SSID={AP_SSID}, Pass={AP_PASSWORD}")
+            # Redirect port 80 → 5000 so captive portal detection works
+            # Mobile devices probe port 80, but Flask runs on 5000
+            _setup_iptables_redirect()
             return True
         else:
             logger.error(f"Failed to activate hotspot: {result.stderr}")
@@ -133,7 +136,7 @@ def start_ap_hotspot():
 
 
 def stop_ap_hotspot():
-    """Stop the WiFi AP hotspot and clean up DNS redirect."""
+    """Stop the WiFi AP hotspot and clean up DNS redirect + iptables."""
     logger.info("Stopping AP hotspot")
     try:
         subprocess.run(
@@ -143,6 +146,7 @@ def stop_ap_hotspot():
             ["nmcli", "connection", "delete", AP_CONN_NAME],
             capture_output=True, text=True, timeout=10)
         _cleanup_captive_dns()
+        _cleanup_iptables_redirect()
         logger.info("AP hotspot stopped")
     except Exception as e:
         logger.error(f"Hotspot stop error: {e}")
@@ -151,14 +155,19 @@ def stop_ap_hotspot():
 def _setup_captive_dns():
     """Write dnsmasq config that resolves ALL DNS to the Pi.
     When phones do captive portal checks (e.g. connectivitycheck.gstatic.com),
-    DNS resolves to 192.168.4.1 → Flask handles → redirects to /captive."""
+    DNS resolves to 192.168.4.1 → Flask handles → redirects to /captive.
+    Also advertises captive portal URL via DHCP Option 114 (RFC 8908)
+    for modern Android 11+ and iOS devices."""
     try:
         conf_dir = os.path.dirname(DNSMASQ_CAPTIVE_CONF)
         os.makedirs(conf_dir, exist_ok=True)
         with open(DNSMASQ_CAPTIVE_CONF, 'w') as f:
             f.write("# Vignette captive portal - redirect all DNS to this Pi\n")
             f.write("address=/#/192.168.4.1\n")
-        logger.info("Captive portal DNS config written")
+            # DHCP Option 114 (RFC 8908/8910) - tell devices the captive portal URL
+            # Android 11+ and iOS use this for reliable captive portal detection
+            f.write("dhcp-option-force=114,http://192.168.4.1/.well-known/captive-portal\n")
+        logger.info("Captive portal DNS + DHCP Option 114 config written")
     except Exception as e:
         logger.error(f"Failed to write captive DNS config: {e}")
 
@@ -171,6 +180,44 @@ def _cleanup_captive_dns():
             logger.info("Captive portal DNS config removed")
     except Exception as e:
         logger.error(f"Failed to remove captive DNS config: {e}")
+
+
+def _setup_iptables_redirect():
+    """Redirect port 80 → Flask port (5000) via iptables NAT.
+    Mobile captive portal detection always probes port 80.
+    Flask runs on 5000, so we need this PREROUTING rule."""
+    try:
+        # Remove any stale rule first (ignore errors)
+        subprocess.run([
+            "iptables", "-t", "nat", "-D", "PREROUTING",
+            "-i", "wlan0", "-p", "tcp", "--dport", "80",
+            "-j", "REDIRECT", "--to-port", "5000"
+        ], capture_output=True, text=True, timeout=5)
+        # Add the rule
+        result = subprocess.run([
+            "iptables", "-t", "nat", "-A", "PREROUTING",
+            "-i", "wlan0", "-p", "tcp", "--dport", "80",
+            "-j", "REDIRECT", "--to-port", "5000"
+        ], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            logger.info("iptables: port 80 → 5000 redirect enabled")
+        else:
+            logger.error(f"iptables redirect failed: {result.stderr}")
+    except Exception as e:
+        logger.error(f"iptables redirect setup error: {e}")
+
+
+def _cleanup_iptables_redirect():
+    """Remove port 80 → 5000 iptables redirect."""
+    try:
+        subprocess.run([
+            "iptables", "-t", "nat", "-D", "PREROUTING",
+            "-i", "wlan0", "-p", "tcp", "--dport", "80",
+            "-j", "REDIRECT", "--to-port", "5000"
+        ], capture_output=True, text=True, timeout=5)
+        logger.info("iptables: port 80 → 5000 redirect removed")
+    except Exception as e:
+        logger.error(f"iptables redirect cleanup error: {e}")
 
 
 def is_ap_active():
@@ -503,10 +550,13 @@ def captive_portal_android():
 
 
 @app.route('/hotspot-detect.html')
+@app.route('/library/test/success.html')
 def captive_portal_apple():
-    """Apple captive portal detection.
-    Apple expects body containing 'Success'. Returning our captive page
-    instead triggers Apple's captive portal sheet."""
+    """Apple captive portal detection (iOS / macOS).
+    Apple probes http://captive.apple.com/hotspot-detect.html
+    and http://<ip>/library/test/success.html.
+    It expects a 200 with body containing exactly 'Success'.
+    Returning anything else triggers the Captive Network Assistant."""
     if is_ap_active():
         return render_template('captive.html')
     return '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>'
@@ -528,12 +578,28 @@ def captive_portal_windows_ncsi():
     return 'Microsoft NCSI'
 
 
-@app.route('/library/test/success.html')
-def captive_portal_apple2():
-    """Apple secondary captive portal detection."""
+@app.route('/redirect')
+@app.route('/success.txt')
+@app.route('/kindle-wifi/wifistub.html')
+def captive_portal_misc():
+    """Misc device captive portal detection (Firefox, Kindle, etc)."""
     if is_ap_active():
-        return render_template('captive.html')
-    return '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>'
+        return redirect(url_for('captive_page'))
+    return 'OK'
+
+
+@app.route('/.well-known/captive-portal')
+def captive_portal_rfc8908():
+    """RFC 8908 Captive Portal API endpoint.
+    Modern Android 11+ and iOS use DHCP Option 114 to discover this URL.
+    Returns JSON indicating whether the client is captive."""
+    if is_ap_active():
+        return jsonify({
+            "captive": True,
+            "user-portal-url": "http://192.168.4.1:5000/captive",
+            "venue-info-url": "http://192.168.4.1:5000/captive",
+        })
+    return jsonify({"captive": False})
 
 
 @app.errorhandler(404)
@@ -1464,6 +1530,8 @@ if __name__ == '__main__':
     print(f"  Setup complete: {config.is_setup_complete}")
     print(f"  Local:   http://localhost:5000")
     print(f"  Network: http://{ip}:5000")
+    if not config.is_setup_complete:
+        print(f"  AP Mode: iptables redirects port 80 → 5000")
     print("=" * 60)
 
     # On first boot, start AP hotspot and display QR setup
