@@ -127,9 +127,10 @@ def start_ap_hotspot():
             # Mobile devices probe port 80, but Flask runs on 5000
             _setup_iptables_redirect()
 
-            # Wait for NM's dnsmasq to start, then verify DNS is working
+            # Wait for NM's dnsmasq to start (handles DHCP), then start
+            # our own captive portal DNS on port 5353
             time.sleep(3)
-            _ensure_dns_running()
+            _start_captive_dnsmasq()
             return True
         else:
             logger.error(f"Failed to activate hotspot: {result.stderr}")
@@ -163,23 +164,18 @@ def stop_ap_hotspot():
 
 
 def _setup_captive_dns():
-    """Write dnsmasq config that resolves ALL DNS to the Pi.
-    When phones do captive portal checks (e.g. connectivitycheck.gstatic.com),
-    DNS resolves to 192.168.4.1 → Flask handles → redirects to /captive.
-    Also advertises captive portal URL via DHCP Option 114 (RFC 8908)
-    for modern Android 11+ and iOS devices."""
+    """Write dnsmasq shared config (used IF NM reads it - some versions don't).
+    Also advertises captive portal URL via DHCP Option 114 (RFC 8908)."""
     try:
         conf_dir = os.path.dirname(DNSMASQ_CAPTIVE_CONF)
         os.makedirs(conf_dir, exist_ok=True)
         with open(DNSMASQ_CAPTIVE_CONF, 'w') as f:
             f.write("# Vignette captive portal - redirect all DNS to this Pi\n")
             f.write("address=/#/192.168.4.1\n")
-            # DHCP Option 114 (RFC 8908/8910) - tell devices the captive portal URL
-            # Android 11+ and iOS use this for reliable captive portal detection
             f.write("dhcp-option-force=114,http://192.168.4.1/.well-known/captive-portal\n")
-        logger.info("Captive portal DNS + DHCP Option 114 config written")
+        logger.info("NM dnsmasq-shared config written (may or may not be used)")
     except Exception as e:
-        logger.error(f"Failed to write captive DNS config: {e}")
+        logger.error(f"Failed to write NM dnsmasq config: {e}")
 
 
 def _cleanup_captive_dns():
@@ -192,101 +188,86 @@ def _cleanup_captive_dns():
         logger.error(f"Failed to remove captive DNS config: {e}")
 
 
-def _is_dnsmasq_running():
-    """Check if any dnsmasq process is currently running."""
-    try:
-        result = subprocess.run(
-            ["pgrep", "-x", "dnsmasq"],
-            capture_output=True, text=True, timeout=5)
-        return result.returncode == 0
-    except Exception:
-        return False
+# ── Captive Portal DNS: our own dnsmasq on port 5353 ─────────────────
+# NM's dnsmasq often ignores /etc/NetworkManager/dnsmasq-shared.d/ config.
+# Instead of fighting NM, we run our OWN dnsmasq on a non-standard port
+# and use iptables to redirect all DNS queries from wlan0 to it.
+# This guarantees wildcard DNS works for captive portal detection.
+
+CAPTIVE_DNSMASQ_PORT = 5353
 
 
-def _ensure_dns_running():
-    """Verify DNS is working after AP startup.
-    NM's shared mode should start dnsmasq automatically, but if the
-    dnsmasq package isn't installed, DNS won't work and captive portal
-    detection will fail completely. In that case start our own instance."""
-    if _is_dnsmasq_running():
-        logger.info("✓ dnsmasq is running (managed by NetworkManager)")
-        return
+def _start_captive_dnsmasq():
+    """Start our own dnsmasq on port 5353 for captive portal DNS.
+    All DNS queries resolve to 192.168.4.1 so phones hit Flask.
+    NM's dnsmasq on port 53 is left alone (it handles DHCP)."""
+    global _fallback_dnsmasq_proc
 
-    logger.warning("✗ dnsmasq is NOT running after AP startup!")
-    logger.warning("  This usually means dnsmasq is not installed.")
-    logger.warning("  Run: sudo apt install dnsmasq && sudo systemctl mask dnsmasq")
-    logger.warning("  Attempting to start fallback DNS server...")
-
-    # Check if dnsmasq binary exists
+    # Find dnsmasq binary
     dnsmasq_path = None
     for path in ["/usr/sbin/dnsmasq", "/usr/bin/dnsmasq"]:
         if os.path.exists(path):
             dnsmasq_path = path
             break
 
-    if dnsmasq_path:
-        _start_fallback_dnsmasq(dnsmasq_path)
-    else:
-        logger.error("dnsmasq binary not found! DNS will not work.")
-        logger.error("Captive portal will NOT auto-popup on phones.")
+    if not dnsmasq_path:
+        logger.error("dnsmasq binary not found! Cannot start captive DNS.")
         logger.error("Install with: sudo apt install dnsmasq")
+        return False
 
-
-def _start_fallback_dnsmasq(dnsmasq_path="/usr/sbin/dnsmasq"):
-    """Start a standalone dnsmasq for DNS-only as a fallback.
-    NM handles DHCP, so we only need DNS resolution.
-    All queries resolve to 192.168.4.1 for captive portal."""
-    global _fallback_dnsmasq_proc
     try:
-        # Write a minimal DNS-only config
+        # Write config for our captive-portal DNS
         with open(FALLBACK_DNSMASQ_CONF, 'w') as f:
-            f.write("# Vignette fallback DNS (captive portal)\n")
-            f.write("# DNS-only, no DHCP (NM handles DHCP)\n")
-            f.write("interface=wlan0\n")
+            f.write("# Vignette captive portal DNS\n")
+            f.write("# Runs on port 5353; iptables redirects port 53 here\n")
+            f.write(f"port={CAPTIVE_DNSMASQ_PORT}\n")
             f.write("listen-address=192.168.4.1\n")
             f.write("bind-interfaces\n")
             f.write("no-resolv\n")
             f.write("no-hosts\n")
+            # Wildcard: ALL domains → 192.168.4.1
             f.write("address=/#/192.168.4.1\n")
-            # Explicitly disable DHCP on all interfaces
-            f.write("no-dhcp-interface=wlan0\n")
+            # No DHCP — NM handles that
+            f.write("no-dhcp-interface=\n")
+            f.write("log-queries\n")
 
         _fallback_dnsmasq_proc = subprocess.Popen(
             [dnsmasq_path, "-C", FALLBACK_DNSMASQ_CONF, "--no-daemon",
              "--log-facility=-"],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-        # Give it a moment to start, then check it's alive
         time.sleep(1)
         if _fallback_dnsmasq_proc.poll() is None:
-            logger.info("✓ Fallback dnsmasq started (DNS-only, no DHCP)")
+            logger.info(f"✓ Captive portal dnsmasq started on port {CAPTIVE_DNSMASQ_PORT}")
+            return True
         else:
             stderr_out = ""
             if _fallback_dnsmasq_proc.stderr:
                 stderr_out = _fallback_dnsmasq_proc.stderr.read().decode()
-            logger.error(f"Fallback dnsmasq exited immediately: {stderr_out}")
+            logger.error(f"Captive dnsmasq exited immediately: {stderr_out}")
             _fallback_dnsmasq_proc = None
+            return False
     except Exception as e:
-        logger.error(f"Failed to start fallback dnsmasq: {e}")
+        logger.error(f"Failed to start captive dnsmasq: {e}")
         _fallback_dnsmasq_proc = None
+        return False
 
 
 def _stop_fallback_dnsmasq():
-    """Stop our manually started fallback dnsmasq."""
+    """Stop our captive portal dnsmasq."""
     global _fallback_dnsmasq_proc
     if _fallback_dnsmasq_proc:
         try:
             _fallback_dnsmasq_proc.terminate()
             _fallback_dnsmasq_proc.wait(timeout=5)
-            logger.info("Fallback dnsmasq stopped")
+            logger.info("Captive portal dnsmasq stopped")
         except Exception as e:
-            logger.warning(f"Error stopping fallback dnsmasq: {e}")
+            logger.warning(f"Error stopping captive dnsmasq: {e}")
             try:
                 _fallback_dnsmasq_proc.kill()
             except Exception:
                 pass
         _fallback_dnsmasq_proc = None
-    # Clean up config
     try:
         if os.path.exists(FALLBACK_DNSMASQ_CONF):
             os.remove(FALLBACK_DNSMASQ_CONF)
@@ -294,42 +275,63 @@ def _stop_fallback_dnsmasq():
         pass
 
 
+# ── iptables: redirect DNS (53→5353) and HTTP (80→5000) ──────────────
+
 def _setup_iptables_redirect():
-    """Redirect port 80 → Flask port (5000) via iptables NAT.
-    Mobile captive portal detection always probes port 80.
-    Flask runs on 5000, so we need this PREROUTING rule."""
-    try:
-        # Remove any stale rule first (ignore errors)
-        subprocess.run([
-            "iptables", "-t", "nat", "-D", "PREROUTING",
-            "-i", "wlan0", "-p", "tcp", "--dport", "80",
-            "-j", "REDIRECT", "--to-port", "5000"
-        ], capture_output=True, text=True, timeout=5)
-        # Add the rule
-        result = subprocess.run([
-            "iptables", "-t", "nat", "-A", "PREROUTING",
-            "-i", "wlan0", "-p", "tcp", "--dport", "80",
-            "-j", "REDIRECT", "--to-port", "5000"
-        ], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            logger.info("iptables: port 80 → 5000 redirect enabled")
-        else:
-            logger.error(f"iptables redirect failed: {result.stderr}")
-    except Exception as e:
-        logger.error(f"iptables redirect setup error: {e}")
+    """Set up iptables rules for captive portal:
+    1. Redirect DNS (udp 53) → our dnsmasq on port 5353
+    2. Redirect HTTP (tcp 80) → Flask on port 5000
+    Both rules only apply to traffic coming from wlan0 (AP clients)."""
+
+    rules = [
+        # DNS redirect: clients query port 53 → our captive dnsmasq on 5353
+        {
+            "args": ["-i", "wlan0", "-p", "udp", "--dport", "53",
+                     "-j", "REDIRECT", "--to-port", str(CAPTIVE_DNSMASQ_PORT)],
+            "desc": f"DNS udp 53 → {CAPTIVE_DNSMASQ_PORT}",
+        },
+        # HTTP redirect: captive portal probes port 80 → Flask on 5000
+        {
+            "args": ["-i", "wlan0", "-p", "tcp", "--dport", "80",
+                     "-j", "REDIRECT", "--to-port", "5000"],
+            "desc": "HTTP tcp 80 → 5000",
+        },
+    ]
+
+    for rule in rules:
+        try:
+            # Remove stale rule first (ignore errors)
+            subprocess.run(
+                ["iptables", "-t", "nat", "-D", "PREROUTING"] + rule["args"],
+                capture_output=True, text=True, timeout=5)
+            # Add the rule
+            result = subprocess.run(
+                ["iptables", "-t", "nat", "-A", "PREROUTING"] + rule["args"],
+                capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                logger.info(f"iptables: {rule['desc']} redirect enabled")
+            else:
+                logger.error(f"iptables {rule['desc']} failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"iptables {rule['desc']} error: {e}")
 
 
 def _cleanup_iptables_redirect():
-    """Remove port 80 → 5000 iptables redirect."""
-    try:
-        subprocess.run([
-            "iptables", "-t", "nat", "-D", "PREROUTING",
-            "-i", "wlan0", "-p", "tcp", "--dport", "80",
-            "-j", "REDIRECT", "--to-port", "5000"
-        ], capture_output=True, text=True, timeout=5)
-        logger.info("iptables: port 80 → 5000 redirect removed")
-    except Exception as e:
-        logger.error(f"iptables redirect cleanup error: {e}")
+    """Remove all captive portal iptables rules."""
+    rules_args = [
+        ["-i", "wlan0", "-p", "udp", "--dport", "53",
+         "-j", "REDIRECT", "--to-port", str(CAPTIVE_DNSMASQ_PORT)],
+        ["-i", "wlan0", "-p", "tcp", "--dport", "80",
+         "-j", "REDIRECT", "--to-port", "5000"],
+    ]
+    for args in rules_args:
+        try:
+            subprocess.run(
+                ["iptables", "-t", "nat", "-D", "PREROUTING"] + args,
+                capture_output=True, text=True, timeout=5)
+        except Exception:
+            pass
+    logger.info("iptables captive portal rules removed")
 
 
 def is_ap_active():
