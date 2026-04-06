@@ -132,7 +132,12 @@ TRANSLATIONS = {
         "gdrive_auth_expired": "Google Drive session expired, re-authenticating...",
         "gdrive_confirm_disconnect": "Disconnect Google Drive?",
         "gdrive_setup_hint": "Setup Google Drive",
-        "gdrive_setup_instructions": "Create a project at console.cloud.google.com, enable Drive API, create OAuth 2.0 credentials (Web application type). Add your Pi's URL as authorized redirect URI: http://YOUR_PI_IP:5000/api/gdrive/callback",
+        "gdrive_setup_instructions": "Create a project at console.cloud.google.com, enable Drive API, create OAuth 2.0 credentials.",
+        "gdrive_steps_title": "Setup Steps",
+        "gdrive_step1": "Go to console.cloud.google.com > Create Project",
+        "gdrive_step2": "APIs & Services > Enable Google Drive API",
+        "gdrive_step3": "Credentials > Create OAuth Client ID (Web type)",
+        "gdrive_step4": "Add JS origin: http://YOUR_PI_IP:5000",
 
         # Setup
         "first_time_setup": "First Time Setup",
@@ -159,6 +164,24 @@ TRANSLATIONS = {
         "confirm_update": "Update software?",
         "confirm_reset": "Are you sure? This will clear ALL settings.",
         "display_busy": "Display is busy",
+
+        # Slideshow
+        "slideshow": "Slideshow",
+        "slideshow_interval": "Interval",
+        "slideshow_order": "Order",
+        "slideshow_photos": "Photos",
+        "slideshow_running": "Slideshow is running",
+        "slideshow_empty_hint": "Select none = use all photos",
+        "sequential": "Sequential",
+        "random": "Random",
+        "select_photos": "Select Photos",
+        "all_photos": "All",
+        "start": "Start",
+        "stop": "Stop",
+        "minute": "min",
+        "minutes": "min",
+        "hour": "hour",
+        "updating": "Updating",
 
         # JS app.js strings
         "sending_to_epaper": "Sending to e-paper...",
@@ -300,7 +323,12 @@ TRANSLATIONS = {
         "gdrive_auth_expired": "Google Drive \u5df2\u904e\u671f\uff0c\u91cd\u65b0\u9a57\u8b49\u4e2d...",
         "gdrive_confirm_disconnect": "\u78ba\u5b9a\u8981\u65b7\u958b Google Drive \u55ce\uff1f",
         "gdrive_setup_hint": "\u8a2d\u5b9a Google Drive",
-        "gdrive_setup_instructions": "\u5728 console.cloud.google.com \u5efa\u7acb\u5c08\u6848\uff0c\u555f\u7528 Drive API\uff0c\u5efa\u7acb OAuth 2.0 \u6191\u8b49 (\u7db2\u9801\u61c9\u7528\u7a0b\u5f0f\u985e\u578b)\u3002\u5c07 Pi \u7684 URL \u52a0\u5165\u6388\u6b0a\u91cd\u65b0\u5c0e\u5411 URI: http://YOUR_PI_IP:5000/api/gdrive/callback",
+        "gdrive_setup_instructions": "\u5728 console.cloud.google.com \u5efa\u7acb\u5c08\u6848\uff0c\u555f\u7528 Drive API\u3002",
+        "gdrive_steps_title": "\u8a2d\u5b9a\u6b65\u9a5f",
+        "gdrive_step1": "\u524d\u5f80 console.cloud.google.com > \u5efa\u7acb\u5c08\u6848",
+        "gdrive_step2": "API \u8207\u670d\u52d9 > \u555f\u7528 Google Drive API",
+        "gdrive_step3": "\u6191\u8b49 > \u5efa\u7acb OAuth \u7528\u6236\u7aef ID (\u7db2\u9801\u61c9\u7528\u7a0b\u5f0f)",
+        "gdrive_step4": "\u65b0\u589e JS \u4f86\u6e90: http://YOUR_PI_IP:5000",
 
         # Setup
         "first_time_setup": "H System \u667a\u6167\u87a2\u5e55 - \u521d\u6b21\u8a2d\u5b9a",
@@ -327,6 +355,24 @@ TRANSLATIONS = {
         "confirm_update": "\u78ba\u5b9a\u8981\u66f4\u65b0\u7a0b\u5f0f\u55ce\uff1f",
         "confirm_reset": "\u78ba\u5b9a\u8981\u5168\u90e8\u91cd\u8a2d\u55ce\uff1f\u6240\u6709\u8a2d\u5b9a\u5c07\u88ab\u6e05\u9664\u3002",
         "display_busy": "\u986f\u793a\u5668\u5fd9\u788c\u4e2d",
+
+        # Slideshow
+        "slideshow": "\u8f2a\u64ad",
+        "slideshow_interval": "\u66f4\u65b0\u9031\u671f",
+        "slideshow_order": "\u64ad\u653e\u9806\u5e8f",
+        "slideshow_photos": "\u7167\u7247",
+        "slideshow_running": "\u8f2a\u64ad\u4e2d",
+        "slideshow_empty_hint": "\u4e0d\u9078 = \u5168\u90e8\u7167\u7247",
+        "sequential": "\u9806\u5e8f",
+        "random": "\u96a8\u6a5f",
+        "select_photos": "\u9078\u64c7\u7167\u7247",
+        "all_photos": "\u5168\u90e8",
+        "start": "\u958b\u59cb",
+        "stop": "\u505c\u6b62",
+        "minute": "\u5206\u9418",
+        "minutes": "\u5206\u9418",
+        "hour": "\u5c0f\u6642",
+        "updating": "\u66f4\u65b0\u4e2d",
 
         # JS app.js strings
         "sending_to_epaper": "\u6b63\u5728\u767c\u9001\u5230\u96fb\u5b50\u7d19...",

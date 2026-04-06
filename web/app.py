@@ -401,6 +401,7 @@ def display_test_pattern():
 # ── Photo Navigation ──────────────────────────────────────────────────────
 
 def navigate_photo(direction):
+    """Navigate photos (config-only, no e-paper update)."""
     images = get_image_list()
     if not images:
         return False, "No images available"
@@ -421,17 +422,7 @@ def navigate_photo(direction):
     idx = photo_state["current_index"]
     photo_state["current_image"] = images[idx]["filename"]
     photo_state["total"] = total
-
-    # Re-render whatever page is active (home includes a photo panel too)
-    page = config.get("current_page", "photo")
-    if page == "photo":
-        filepath = os.path.join(OUTPUT_DIR, images[idx]["filename"])
-        return display_image_on_epaper(filepath)
-    elif page == "home":
-        # Home page shows a photo in the right panel; re-render it
-        return display_current_page()
-    else:
-        return True, "Photo index updated"
+    return True, "Photo index updated"
 
 
 # ── Page Routes ────────────────────────────────────────────────────────────
@@ -448,7 +439,8 @@ def index():
                            display_state=display_state,
                            photo_state=photo_state,
                            total_images=len(images),
-                           config=config.to_dict())
+                           config=config.to_dict(),
+                           now=int(time.time()))
 
 
 @app.route('/setup')
@@ -953,54 +945,34 @@ def api_photo_current():
 
 @app.route('/api/photo/next', methods=['POST'])
 def api_photo_next():
-    if not display_lock.acquire(blocking=False):
-        return jsonify({"error": "Display is busy"}), 503
-    try:
-        success, msg = navigate_photo("next")
-        if success:
-            return jsonify({"success": True, "photo": photo_state})
-        return jsonify({"error": msg}), 500
-    finally:
-        display_lock.release()
+    success, msg = navigate_photo("next")
+    if success:
+        return jsonify({"success": True, "photo": photo_state})
+    return jsonify({"error": msg}), 500
 
 
 @app.route('/api/photo/prev', methods=['POST'])
 def api_photo_prev():
-    if not display_lock.acquire(blocking=False):
-        return jsonify({"error": "Display is busy"}), 503
-    try:
-        success, msg = navigate_photo("prev")
-        if success:
-            return jsonify({"success": True, "photo": photo_state})
-        return jsonify({"error": msg}), 500
-    finally:
-        display_lock.release()
+    success, msg = navigate_photo("prev")
+    if success:
+        return jsonify({"success": True, "photo": photo_state})
+    return jsonify({"error": msg}), 500
 
 
 @app.route('/api/photo/latest', methods=['POST'])
 def api_photo_latest():
-    if not display_lock.acquire(blocking=False):
-        return jsonify({"error": "Display is busy"}), 503
-    try:
-        success, msg = navigate_photo("latest")
-        if success:
-            return jsonify({"success": True, "photo": photo_state})
-        return jsonify({"error": msg}), 500
-    finally:
-        display_lock.release()
+    success, msg = navigate_photo("latest")
+    if success:
+        return jsonify({"success": True, "photo": photo_state})
+    return jsonify({"error": msg}), 500
 
 
 @app.route('/api/photo/goto/<int:idx>', methods=['POST'])
 def api_photo_goto(idx):
-    if not display_lock.acquire(blocking=False):
-        return jsonify({"error": "Display is busy"}), 503
-    try:
-        success, msg = navigate_photo(idx)
-        if success:
-            return jsonify({"success": True, "photo": photo_state})
-        return jsonify({"error": msg}), 500
-    finally:
-        display_lock.release()
+    success, msg = navigate_photo(idx)
+    if success:
+        return jsonify({"success": True, "photo": photo_state})
+    return jsonify({"error": msg}), 500
 
 
 # ── API: Display Control ──────────────────────────────────────────────────
@@ -1048,6 +1020,155 @@ def api_sleep():
         return jsonify({"success": True, "message": "Display sleeping"})
     except Exception as e:
         return jsonify({"error": f"Sleep failed: {e}"}), 500
+
+
+# ── API: E-paper Preview (for dashboard) ──────────────────────────────────
+
+@app.route('/api/preview/current')
+def api_preview_current():
+    """Render the current page as a PNG for the dashboard preview."""
+    page = config.get("current_page", "photo")
+    weather = None
+    events = []
+    if config.get("weather_api_key") and config.get("weather_city"):
+        weather = fetch_weather(
+            config.get("weather_api_key"),
+            config.get("weather_city"),
+            config.get("weather_units", "metric"),
+            config.get("weather_lang", "en"))
+    if config.get("calendar_ical_url"):
+        events = fetch_calendar_events(config.get("calendar_ical_url"))
+
+    photo_path = get_current_photo_path()
+
+    if page == "home":
+        img = renderer.render_home_page(weather, events, photo_path, config)
+    elif page == "widget":
+        mode = config.get("widget_mode", "weather")
+        img = renderer.render_widget_page(mode, weather, events)
+    else:
+        rotation = config.get("photo_rotation", 0)
+        fit_mode = config.get("photo_fit_mode", "fit")
+        img = renderer.render_photo_page(photo_path, rotation, fit_mode)
+
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png', download_name='preview.png')
+
+
+# ── API: Slideshow ──────────────────────────────────────────────────────
+
+slideshow_thread = None
+_slideshow_stop = threading.Event()
+
+
+def _slideshow_loop():
+    """Background thread: cycle through selected photos at interval."""
+    logger.info("Slideshow started")
+    while not _slideshow_stop.is_set():
+        interval = config.get("slideshow_interval", 300)
+        _slideshow_stop.wait(interval)
+        if _slideshow_stop.is_set():
+            break
+
+        selected = config.get("slideshow_photos", [])
+        order = config.get("slideshow_order", "sequential")
+        images = get_image_list()
+        if not images:
+            continue
+
+        # Filter to selected photos (empty = all)
+        if selected:
+            pool = [img for img in images if img["filename"] in selected]
+        else:
+            pool = images
+        if not pool:
+            continue
+
+        idx = photo_state["current_index"]
+        if order == "random":
+            import random
+            new_idx_in_pool = random.randint(0, len(pool) - 1)
+        else:
+            # Find current position in pool
+            current_name = photo_state.get("current_image")
+            cur_pool_idx = -1
+            for i, p in enumerate(pool):
+                if p["filename"] == current_name:
+                    cur_pool_idx = i
+                    break
+            new_idx_in_pool = (cur_pool_idx + 1) % len(pool)
+
+        target_name = pool[new_idx_in_pool]["filename"]
+        # Find in full image list to set photo_state
+        for i, img in enumerate(images):
+            if img["filename"] == target_name:
+                photo_state["current_index"] = i
+                photo_state["current_image"] = target_name
+                photo_state["total"] = len(images)
+                break
+
+        # Update e-paper
+        if display_lock.acquire(blocking=False):
+            try:
+                display_current_page()
+            except Exception as e:
+                logger.error(f"Slideshow update failed: {e}")
+            finally:
+                display_lock.release()
+
+    logger.info("Slideshow stopped")
+
+
+@app.route('/api/slideshow/start', methods=['POST'])
+def api_slideshow_start():
+    """Start photo slideshow."""
+    global slideshow_thread
+    data = request.get_json() or {}
+
+    # Save slideshow config
+    if "photos" in data:
+        config.set("slideshow_photos", data["photos"])  # list of filenames, [] = all
+    if "interval" in data:
+        config.set("slideshow_interval", max(int(data["interval"]), 30))  # min 30s
+    if "order" in data:
+        config.set("slideshow_order", data["order"])  # "sequential" or "random"
+
+    config.set("slideshow_active", True)
+
+    # Stop existing if running
+    if slideshow_thread and slideshow_thread.is_alive():
+        _slideshow_stop.set()
+        slideshow_thread.join(timeout=5)
+
+    _slideshow_stop.clear()
+    slideshow_thread = threading.Thread(target=_slideshow_loop, daemon=True)
+    slideshow_thread.start()
+
+    return jsonify({"success": True, "message": "Slideshow started"})
+
+
+@app.route('/api/slideshow/stop', methods=['POST'])
+def api_slideshow_stop():
+    """Stop photo slideshow."""
+    global slideshow_thread
+    _slideshow_stop.set()
+    config.set("slideshow_active", False)
+    if slideshow_thread and slideshow_thread.is_alive():
+        slideshow_thread.join(timeout=5)
+    slideshow_thread = None
+    return jsonify({"success": True, "message": "Slideshow stopped"})
+
+
+@app.route('/api/slideshow/status')
+def api_slideshow_status():
+    return jsonify({
+        "active": config.get("slideshow_active", False),
+        "photos": config.get("slideshow_photos", []),
+        "interval": config.get("slideshow_interval", 300),
+        "order": config.get("slideshow_order", "sequential"),
+    })
 
 
 # ── API: Language ────────────────────────────────────────────────────────

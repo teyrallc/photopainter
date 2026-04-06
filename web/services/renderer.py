@@ -26,11 +26,11 @@ YELLOW = (255, 255, 0)
 BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
 
-# Font paths to try (system fonts on Raspberry Pi OS)
+# Font paths to try (CJK fonts first for Chinese support)
 FONT_PATHS = [
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
 ]
@@ -39,14 +39,15 @@ _font_cache = {}
 
 
 def _get_font(size):
-    """Get a font at the given size, trying CJK fonts first."""
+    """Get a font at the given size, trying CJK fonts first for Chinese support."""
     if size in _font_cache:
         return _font_cache[size]
 
     for path in FONT_PATHS:
         if os.path.exists(path):
             try:
-                font = ImageFont.truetype(path, size)
+                # TrueType Collections (.ttc) need font index 0
+                font = ImageFont.truetype(path, size, index=0)
                 _font_cache[size] = font
                 return font
             except Exception:

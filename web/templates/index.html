@@ -5,7 +5,32 @@
 <h2 class="mb-4"><i class="bi bi-house"></i> {{ t.dashboard }}</h2>
 
 <div class="row g-4">
-    <!-- Page Control (Virtual Buttons) -->
+    <!-- E-paper Preview -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-display"></i> {{ t.epaper_preview }}</span>
+                <button class="btn btn-sm btn-outline-light" onclick="refreshPreview()">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+            <div class="card-body text-center p-3" style="background:#e8e8e8;">
+                <div style="display:inline-block;border:3px solid #333;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+                    <img id="epaper-preview" src="/api/preview/current?t={{ now }}"
+                         style="width:100%;max-width:640px;height:auto;display:block;"
+                         alt="E-paper Preview">
+                </div>
+                <div class="mt-2">
+                    <small class="text-muted" id="preview-page-label">
+                        {{ config.current_page | upper }}
+                        {% if config.current_page == 'widget' %}({{ config.widget_mode }}){% endif %}
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Page Control -->
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-primary text-white">
@@ -27,15 +52,6 @@
                     </button>
                 </div>
 
-                <div class="text-center mb-3">
-                    <span class="badge bg-secondary" id="current-page-badge">
-                        {{ t.current }}: {{ config.current_page | upper }}
-                        {% if config.current_page == 'widget' %}
-                        ({{ config.widget_mode }})
-                        {% endif %}
-                    </span>
-                </div>
-
                 <!-- Widget mode buttons -->
                 <div class="d-flex justify-content-center gap-2 flex-wrap mb-3">
                     <button class="btn btn-sm btn-{{ 'info' if config.widget_mode == 'split' else 'outline-info' }}"
@@ -53,7 +69,7 @@
                 </div>
 
                 <div class="d-grid">
-                    <button class="btn btn-success" onclick="refreshPage()">
+                    <button class="btn btn-success btn-lg" onclick="updateDisplay()" id="btn-update-display">
                         <i class="bi bi-send"></i> {{ t.update_display }}
                     </button>
                 </div>
@@ -71,12 +87,12 @@
                 <div id="photo-preview" class="mb-3">
                     {% if photo_state.current_image %}
                     <div class="epaper-frame">
-                        <img src="/output/{{ photo_state.current_image }}" class="img-fluid rounded"
-                             alt="Current" style="max-height: 180px; object-fit: contain;">
+                        <img id="current-photo-img" src="/output/{{ photo_state.current_image }}" class="img-fluid rounded"
+                             alt="Current" style="max-height: 150px; object-fit: contain;">
                     </div>
-                    <p class="mt-2 mb-0 small"><strong>{{ photo_state.current_image }}</strong></p>
+                    <p class="mt-2 mb-0 small" id="current-photo-name"><strong>{{ photo_state.current_image }}</strong></p>
                     {% else %}
-                    <p class="text-muted mb-0">{{ t.no_photo }}</p>
+                    <p class="text-muted mb-0" id="current-photo-name">{{ t.no_photo }}</p>
                     {% endif %}
                 </div>
 
@@ -95,19 +111,68 @@
                         {{ t.next }} <i class="bi bi-chevron-right"></i>
                     </button>
                 </div>
-                <div class="d-flex justify-content-center gap-2">
-                    <button class="btn btn-outline-success btn-sm" onclick="photoLatest()">
-                        <i class="bi bi-camera"></i> {{ t.latest }}
-                    </button>
-                    <button class="btn btn-outline-info btn-sm" onclick="displayTest()">
-                        <i class="bi bi-grid-3x3"></i> {{ t.test_pattern }}
-                    </button>
-                </div>
+                <button class="btn btn-outline-success btn-sm" onclick="photoLatest()">
+                    <i class="bi bi-camera"></i> {{ t.latest }}
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Display Status -->
+    <!-- Slideshow -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-warning text-dark">
+                <i class="bi bi-play-circle"></i> {{ t.slideshow }}
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small">{{ t.slideshow_interval }}</label>
+                    <select class="form-select form-select-sm" id="slideshow-interval">
+                        <option value="60" {% if config.slideshow_interval == 60 %}selected{% endif %}>1 {{ t.minute }}</option>
+                        <option value="300" {% if config.slideshow_interval == 300 or not config.slideshow_interval %}selected{% endif %}>5 {{ t.minutes }}</option>
+                        <option value="600" {% if config.slideshow_interval == 600 %}selected{% endif %}>10 {{ t.minutes }}</option>
+                        <option value="1800" {% if config.slideshow_interval == 1800 %}selected{% endif %}>30 {{ t.minutes }}</option>
+                        <option value="3600" {% if config.slideshow_interval == 3600 %}selected{% endif %}>1 {{ t.hour }}</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small">{{ t.slideshow_order }}</label>
+                    <select class="form-select form-select-sm" id="slideshow-order">
+                        <option value="sequential" {% if config.slideshow_order != 'random' %}selected{% endif %}>{{ t.sequential }}</option>
+                        <option value="random" {% if config.slideshow_order == 'random' %}selected{% endif %}>{{ t.random }}</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small">{{ t.slideshow_photos }}</label>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="openSlideshowPicker()">
+                            <i class="bi bi-images"></i> {{ t.select_photos }}
+                        </button>
+                        <span class="badge bg-secondary align-self-center" id="slideshow-photo-count">
+                            {{ config.slideshow_photos | length if config.slideshow_photos else t.all_photos }}
+                        </span>
+                    </div>
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-success flex-fill" onclick="startSlideshow()" id="btn-start-slideshow"
+                            {% if config.slideshow_active %}style="display:none"{% endif %}>
+                        <i class="bi bi-play-fill"></i> {{ t.start }}
+                    </button>
+                    <button class="btn btn-danger flex-fill" onclick="stopSlideshow()" id="btn-stop-slideshow"
+                            {% if not config.slideshow_active %}style="display:none"{% endif %}>
+                        <i class="bi bi-stop-fill"></i> {{ t.stop }}
+                    </button>
+                </div>
+                {% if config.slideshow_active %}
+                <div class="alert alert-success mt-2 mb-0 py-1 text-center small">
+                    <i class="bi bi-play-circle"></i> {{ t.slideshow_running }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Display Status + Quick Actions -->
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-dark text-white">
@@ -129,12 +194,15 @@
                     <button class="btn btn-outline-secondary btn-sm" onclick="sleepDisplay()">
                         <i class="bi bi-moon"></i> {{ t.sleep }}
                     </button>
+                    <button class="btn btn-outline-info btn-sm" onclick="displayTest()">
+                        <i class="bi bi-grid-3x3"></i> {{ t.test_pattern }}
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Quick Actions -->
+    <!-- Quick Links -->
     <div class="col-md-6">
         <div class="card">
             <div class="card-header bg-secondary text-white">
@@ -186,33 +254,28 @@
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Recent Images -->
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header"><i class="bi bi-clock-history"></i> {{ t.recent_photos }}</div>
-            <div class="card-body">
-                {% if images %}
-                <div class="row g-3">
-                    {% for img in images %}
-                    <div class="col-6 col-md-4 col-lg-2">
-                        <div class="card h-100">
-                            <img src="/output/{{ img.filename }}" class="card-img-top"
-                                 alt="{{ img.filename }}" style="height: 120px; object-fit: cover;">
-                            <div class="card-body p-2">
-                                <small class="text-muted d-block text-truncate">{{ img.filename }}</small>
-                                <button class="btn btn-sm btn-primary mt-1 w-100"
-                                        onclick="displayImage('{{ img.filename }}')">
-                                    <i class="bi bi-display"></i> {{ t.display }}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
+<!-- Slideshow Photo Picker Modal -->
+<div class="modal fade" id="slideshowPickerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">{{ t.select_photos }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <button class="btn btn-sm btn-outline-primary" onclick="ssPickerSelectAll()">{{ t.select_all }}</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="ssPickerDeselectAll()">{{ t.deselect_all }}</button>
+                    <span class="ms-2 small text-muted">{{ t.slideshow_empty_hint }}</span>
                 </div>
-                {% else %}
-                <p class="text-muted mb-0">{{ t.no_photos_yet }}</p>
-                {% endif %}
+                <div id="slideshow-picker-grid" class="row g-2" style="max-height:50vh;overflow-y:auto;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="ssPickerSave()">{{ t.save }}</button>
+                <button class="btn btn-secondary" data-bs-dismiss="modal">{{ t.close }}</button>
             </div>
         </div>
     </div>
@@ -221,8 +284,8 @@
 
 {% block scripts %}
 <script>
+// ── Page / Widget switching (config only) ──
 function switchPage(page) {
-    // Deselect all, highlight the clicked one immediately
     document.querySelectorAll('[onclick^="switchPage"]').forEach(btn => {
         btn.className = btn.className.replace(/\bbtn-primary\b/, 'btn-outline-primary');
     });
@@ -234,15 +297,12 @@ function switchPage(page) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({page: page})
     }).then(r => r.json()).then(d => {
-        if (d.success) {
-            document.getElementById('current-page-badge').textContent =
-                '{{ t.current }}: ' + d.page.toUpperCase();
-        } else { showToast(d.error, 'danger'); }
+        if (d.success) refreshPreview();
+        else showToast(d.error, 'danger');
     }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 function setWidget(mode) {
-    // Deselect all, highlight the clicked one immediately
     document.querySelectorAll('[onclick^="setWidget"]').forEach(btn => {
         btn.className = btn.className.replace(/\bbtn-info\b/, 'btn-outline-info');
     });
@@ -254,18 +314,151 @@ function setWidget(mode) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({mode: mode})
     }).then(r => r.json()).then(d => {
-        if (!d.success) showToast(d.error, 'danger');
-    });
-}
-
-function refreshPage() {
-    showToast('{{ t.refresh }}...', 'info');
-    fetch('/api/page/refresh', {method: 'POST'}).then(r => r.json()).then(d => {
-        if (d.success) showToast('OK', 'success');
+        if (d.success) refreshPreview();
         else showToast(d.error, 'danger');
     });
 }
 
+// ── Preview ──
+function refreshPreview() {
+    const img = document.getElementById('epaper-preview');
+    img.src = '/api/preview/current?t=' + Date.now();
+}
+
+// ── Update Display (THE button to push to e-paper) ──
+function updateDisplay() {
+    const btn = document.getElementById('btn-update-display');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> {{ t.updating }}...';
+
+    fetch('/api/page/refresh', {method: 'POST'}).then(r => r.json()).then(d => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send"></i> {{ t.update_display }}';
+        if (d.success) {
+            showToast('{{ t.displayed_ok }}', 'success');
+            refreshPreview();
+        } else {
+            showToast(d.error, 'danger');
+        }
+    }).catch(e => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send"></i> {{ t.update_display }}';
+        showToast('Error: ' + e, 'danger');
+    });
+}
+
+// ── Photo navigation (config only, updates preview) ──
+function _photoNav(url) {
+    fetch(url, {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.success && d.photo) {
+            document.getElementById('photo-index').textContent = d.photo.current_index + 1;
+            document.getElementById('photo-total').textContent = d.photo.total;
+            const nameEl = document.getElementById('current-photo-name');
+            const imgEl = document.getElementById('current-photo-img');
+            if (d.photo.current_image) {
+                if (imgEl) imgEl.src = '/output/' + d.photo.current_image;
+                nameEl.innerHTML = '<strong>' + d.photo.current_image + '</strong>';
+            }
+            refreshPreview();
+        } else if (d.error) {
+            showToast(d.error, 'danger');
+        }
+    });
+}
+function photoNext() { _photoNav('/api/photo/next'); }
+function photoPrev() { _photoNav('/api/photo/prev'); }
+function photoLatest() { _photoNav('/api/photo/latest'); }
+
+// ── Slideshow ──
+function startSlideshow() {
+    fetch('/api/slideshow/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            interval: parseInt(document.getElementById('slideshow-interval').value),
+            order: document.getElementById('slideshow-order').value,
+        })
+    }).then(r => r.json()).then(d => {
+        if (d.success) {
+            document.getElementById('btn-start-slideshow').style.display = 'none';
+            document.getElementById('btn-stop-slideshow').style.display = '';
+            showToast('{{ t.slideshow }} started', 'success');
+        }
+    });
+}
+function stopSlideshow() {
+    fetch('/api/slideshow/stop', {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.success) {
+            document.getElementById('btn-start-slideshow').style.display = '';
+            document.getElementById('btn-stop-slideshow').style.display = 'none';
+            showToast('{{ t.slideshow }} stopped', 'info');
+        }
+    });
+}
+
+// Slideshow photo picker
+let ssPickerSelected = new Set({{ config.slideshow_photos | tojson | default('[]') }});
+
+function openSlideshowPicker() {
+    fetch('/api/images').then(r => r.json()).then(images => {
+        const grid = document.getElementById('slideshow-picker-grid');
+        grid.innerHTML = '';
+        images.forEach(img => {
+            const checked = ssPickerSelected.has(img.filename) ? 'checked' : '';
+            const sel = ssPickerSelected.has(img.filename);
+            const col = document.createElement('div');
+            col.className = 'col-4 col-md-3';
+            col.innerHTML = `
+                <div class="card h-100 ss-pick-card ${sel ? 'border-success border-2' : ''}" data-fn="${img.filename}"
+                     onclick="ssPickerToggle('${img.filename}', this)" style="cursor:pointer;">
+                    <img src="/output/${img.filename}" style="height:80px;object-fit:cover;" class="card-img-top">
+                    <div class="card-body p-1 text-center">
+                        <small class="text-truncate d-block">${img.filename}</small>
+                    </div>
+                </div>`;
+            grid.appendChild(col);
+        });
+        new bootstrap.Modal(document.getElementById('slideshowPickerModal')).show();
+    });
+}
+function ssPickerToggle(fn, card) {
+    if (ssPickerSelected.has(fn)) {
+        ssPickerSelected.delete(fn);
+        card.classList.remove('border-success', 'border-2');
+    } else {
+        ssPickerSelected.add(fn);
+        card.classList.add('border-success', 'border-2');
+    }
+}
+function ssPickerSelectAll() {
+    document.querySelectorAll('.ss-pick-card').forEach(c => {
+        ssPickerSelected.add(c.dataset.fn);
+        c.classList.add('border-success', 'border-2');
+    });
+}
+function ssPickerDeselectAll() {
+    ssPickerSelected.clear();
+    document.querySelectorAll('.ss-pick-card').forEach(c => {
+        c.classList.remove('border-success', 'border-2');
+    });
+}
+function ssPickerSave() {
+    const photos = Array.from(ssPickerSelected);
+    fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({slideshow_photos: photos})
+    }).then(r => r.json()).then(d => {
+        if (d.success) {
+            document.getElementById('slideshow-photo-count').textContent =
+                photos.length || '{{ t.all_photos }}';
+            bootstrap.Modal.getInstance(document.getElementById('slideshowPickerModal')).hide();
+            showToast('OK', 'success');
+        }
+    });
+}
+
+// ── System ──
 function loadSystemInfo() {
     fetch('/api/system/info').then(r => r.json()).then(info => {
         const div = document.getElementById('system-info');
@@ -282,7 +475,6 @@ function loadSystemInfo() {
         document.getElementById('system-info').innerHTML = '<p class="text-danger mb-0">Failed to load</p>';
     });
 }
-
 function systemUpdate() {
     if (!confirm('{{ t.confirm_update }}')) return;
     const out = document.getElementById('update-output');

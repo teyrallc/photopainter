@@ -39,8 +39,11 @@ DEFAULT_CONFIG = {
     "photo_rotation": 0,  # 0, 90, 180, 270
     "photo_fit_mode": "fit",  # fit (letterbox) or stretch
 
-    # Display settings
-    "auto_refresh_minutes": 30,
+    # Slideshow
+    "slideshow_active": False,
+    "slideshow_photos": [],  # empty = all photos
+    "slideshow_interval": 300,  # seconds
+    "slideshow_order": "sequential",  # sequential or random
 }
 
 

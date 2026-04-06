@@ -103,23 +103,38 @@
                 <i class="bi bi-google"></i> Google Drive
             </div>
             <div class="card-body">
+                {% if config.gdrive_connected %}
+                <div class="alert alert-success py-2">
+                    <i class="bi bi-check-circle"></i> {{ t.connected }}
+                </div>
+                {% endif %}
                 <div class="mb-3">
                     <label class="form-label">Client ID</label>
-                    <input type="text" class="form-control" id="s-gdrive-id"
+                    <input type="text" class="form-control form-control-sm" id="s-gdrive-id"
                            value="{{ config.gdrive_client_id }}" placeholder="xxxxxxxx.apps.googleusercontent.com">
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Client Secret</label>
-                    <input type="password" class="form-control" id="s-gdrive-secret"
+                    <input type="password" class="form-control form-control-sm" id="s-gdrive-secret"
                            value="{{ config.gdrive_client_secret }}">
                 </div>
-                <div class="form-text mb-3">{{ t.gdrive_setup_instructions }}</div>
-                <button class="btn btn-primary" onclick="saveGDrive()">
-                    <i class="bi bi-save"></i> {{ t.save }}
-                </button>
-                {% if config.gdrive_connected %}
-                <span class="badge bg-success ms-2"><i class="bi bi-check-circle"></i> {{ t.connected }}</span>
-                {% endif %}
+                <div class="alert alert-info small py-2 mb-3">
+                    <strong>{{ t.gdrive_steps_title }}:</strong><br>
+                    1. {{ t.gdrive_step1 }}<br>
+                    2. {{ t.gdrive_step2 }}<br>
+                    3. {{ t.gdrive_step3 }}<br>
+                    4. {{ t.gdrive_step4 }}
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary" onclick="saveGDrive()">
+                        <i class="bi bi-save"></i> {{ t.save }}
+                    </button>
+                    {% if config.gdrive_client_id and not config.gdrive_connected %}
+                    <button class="btn btn-success" onclick="testGDriveConnect()">
+                        <i class="bi bi-google"></i> {{ t.gdrive_connect }}
+                    </button>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>
@@ -209,6 +224,42 @@ function savePhotoSettings() {
             body: JSON.stringify({fit_mode: fitMode})
         })
     ]).then(() => showToast('OK', 'success'));
+}
+
+function testGDriveConnect() {
+    // Load GIS library and trigger sign-in
+    if (typeof google !== 'undefined' && google.accounts) {
+        _doGDriveSignIn();
+        return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.onload = _doGDriveSignIn;
+    script.onerror = () => showToast('Failed to load Google Sign-In', 'danger');
+    document.head.appendChild(script);
+}
+function _doGDriveSignIn() {
+    const clientId = document.getElementById('s-gdrive-id').value;
+    if (!clientId) { showToast('Enter Client ID first', 'warning'); return; }
+    const client = google.accounts.oauth2.initCodeClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.readonly',
+        ux_mode: 'popup',
+        callback: (response) => {
+            if (response.error) { showToast('Error: ' + response.error, 'danger'); return; }
+            fetch('/api/gdrive/auth', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ code: response.code })
+            }).then(r => r.json()).then(d => {
+                if (d.success) {
+                    showToast('Google Drive connected!', 'success');
+                    location.reload();
+                } else showToast(d.error || 'Failed', 'danger');
+            });
+        }
+    });
+    client.requestCode();
 }
 
 function saveGDrive() {
