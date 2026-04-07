@@ -561,12 +561,18 @@
                 <div class="warn-icon">
                     <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
                 </div>
-                <h3>Connection May Have Failed</h3>
+                <h3>Check Your E-Paper Display</h3>
                 <p>
-                    Could not reach the device on the new network.<br>
-                    If the password was incorrect, the <strong>Vignette-Setup</strong> hotspot will restart automatically.
+                    <strong>If WiFi connected successfully:</strong><br>
+                    The e-paper screen will show the new IP address.<br>
+                    Connect your phone to the same WiFi and open that address.
                 </p>
-                <button class="btn" onclick="location.reload()">Try Again</button>
+                <p>
+                    <strong>If the password was wrong:</strong><br>
+                    The <strong>Vignette-Setup</strong> hotspot will restart automatically.<br>
+                    Reconnect to it and try again.
+                </p>
+                <button class="btn" onclick="location.reload()">Back to Setup</button>
             </div>
         </div>
 
@@ -640,7 +646,7 @@
         document.getElementById('fallback-view').classList.toggle('hidden', phase !== 4);
     }
 
-    function startCountdown(ssid, targetUrl) {
+    function startCountdown(ssid) {
         var remaining = REDIRECT_DELAY;
         var fill = document.getElementById('countdown-fill');
         var num = document.getElementById('countdown-num');
@@ -650,20 +656,25 @@
 
         var timer = setInterval(function() {
             remaining--;
-            num.textContent = remaining;
+            num.textContent = Math.max(remaining, 0);
             fill.style.width = ((REDIRECT_DELAY - remaining) / REDIRECT_DELAY * 100) + '%';
 
             if (remaining <= 0) {
                 clearInterval(timer);
-                // Attempt to redirect to the new IP
-                if (targetUrl) {
-                    window.location.href = targetUrl;
-                } else {
-                    // No IP was received (fetch failed), show fallback
-                    setPhase(4);
-                }
+                // Countdown done — try to reach the device on the new network
+                tryReachDevice(ssid);
             }
         }, 1000);
+    }
+
+    function tryReachDevice(ssid) {
+        // The user's phone should have auto-reconnected to their home WiFi by now.
+        // The Pi should be on that same network. Try to find it via mDNS or
+        // just show the fallback with instructions.
+        // We can't easily know the Pi's new IP from the client side,
+        // so show the redirect/fallback view.
+        // The e-paper display will show the new IP address.
+        setPhase(4);
     }
 
     function connectWifi() {
@@ -674,14 +685,11 @@
             return;
         }
 
-        // Transition to Phase 2: Connecting
-        setPhase(2);
-        document.getElementById('connecting-ssid-text').textContent = 'Connecting to ' + ssid + '...';
+        var btn = document.getElementById('connect-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>Sending...';
 
-        // Fire the connect request — we expect it may fail (connection drops when AP stops)
-        var gotResponse = false;
-        var newIp = null;
-
+        // Send credentials — server responds immediately BEFORE stopping AP
         fetch('/api/wifi/connect', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -689,37 +697,25 @@
         })
         .then(function(r) { return r.json(); })
         .then(function(d) {
-            gotResponse = true;
-            if (d.success && d.ip) {
-                newIp = d.ip;
-                var url = 'http://' + d.ip + ':5000';
-                document.getElementById('new-ip').textContent = d.ip + ':5000';
-                document.getElementById('go-link').href = url;
+            if (d.success) {
+                // Server acknowledged — background thread will now stop AP and connect
+                // Transition to Phase 2: Connecting animation with countdown
+                setPhase(2);
+                document.getElementById('connecting-ssid-text').textContent = 'Connecting to ' + ssid + '...';
+                startCountdown(ssid);
+            } else {
+                // Server rejected before even trying (e.g. missing SSID)
+                btn.disabled = false;
+                btn.innerHTML = 'Connect';
+                showStatus(d.error || 'Failed to start connection.', 'danger');
             }
         })
         .catch(function() {
-            // Expected — connection to AP was lost because AP shut down
-            gotResponse = true;
+            // If even the initial request failed, something is very wrong
+            btn.disabled = false;
+            btn.innerHTML = 'Connect';
+            showStatus('Could not reach the device. Please refresh and try again.', 'danger');
         });
-
-        // Start the countdown regardless (connection attempt is async)
-        startCountdown(ssid, null);
-
-        // After countdown ends, check what happened
-        setTimeout(function() {
-            if (newIp) {
-                // We got an IP back! Show success and redirect
-                setPhase(3);
-                document.getElementById('new-ip').textContent = newIp + ':5000';
-                var url = 'http://' + newIp + ':5000';
-                document.getElementById('go-link').href = url;
-                // Auto-redirect after a short delay
-                setTimeout(function() { window.location.href = url; }, 2000);
-            } else {
-                // No response or no IP — show fallback
-                setPhase(4);
-            }
-        }, (REDIRECT_DELAY + 1) * 1000);
     }
 
     function showStatus(msg, type) {

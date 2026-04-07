@@ -1220,51 +1220,45 @@ def api_wifi_scan():
         return jsonify({"networks": [], "error": str(e)})
 
 
-@app.route('/api/wifi/connect', methods=['POST'])
-def api_wifi_connect():
-    """Connect to a WiFi network. Stops AP hotspot first if active.
-    After success, marks setup complete and ensures NM keeps the connection."""
-    data = request.get_json() or {}
-    ssid = data.get("ssid", "").strip()
-    password = data.get("password", "").strip()
-    if not ssid:
-        return jsonify({"error": "SSID is required"}), 400
+# Background WiFi connection state (shared between request handler and bg thread)
+_wifi_connect_state = {
+    "status": "idle",       # idle | connecting | success | failed
+    "ssid": "",
+    "ip": None,
+    "error": None,
+}
 
-    was_ap = is_ap_active()
 
-    # Mark setup complete BEFORE anything else — this is the critical fix.
-    # If the service crashes/restarts at any point during WiFi switch,
-    # the boot code will see setup_complete=True and NOT restart AP.
-    if not config.is_setup_complete:
-        config.set("setup_complete", True)
-        logger.info("Setup marked complete (before WiFi connect attempt)")
+def _background_wifi_connect(ssid, password):
+    """Run WiFi connection in a background thread.
+    This is necessary because stopping the AP disconnects the client (phone),
+    which would abort the HTTP request before WiFi connect is even attempted."""
+    global _wifi_connect_state
+    _wifi_connect_state.update({
+        "status": "connecting", "ssid": ssid, "ip": None, "error": None})
 
     try:
-        if was_ap:
-            # Step 1: Delete the AP connection profile first
-            logger.info("Deleting AP connection profile")
-            subprocess.run(
-                ["nmcli", "connection", "delete", AP_CONN_NAME],
-                capture_output=True, text=True, timeout=10)
+        # Step 1: Stop the AP hotspot (this disconnects all AP clients)
+        logger.info("Background WiFi: Stopping AP hotspot")
+        subprocess.run(
+            ["nmcli", "connection", "delete", AP_CONN_NAME],
+            capture_output=True, text=True, timeout=10)
+        subprocess.run(
+            ["nmcli", "device", "disconnect", "wlan0"],
+            capture_output=True, text=True, timeout=10)
 
-            # Step 2: Disconnect wlan0 cleanly so NM doesn't auto-activate anything
-            logger.info("Disconnecting wlan0")
-            subprocess.run(
-                ["nmcli", "device", "disconnect", "wlan0"],
-                capture_output=True, text=True, timeout=10)
+        # Step 2: Wait for interface to fully release
+        time.sleep(3)
 
-            # Step 3: Wait for interface to fully release
-            time.sleep(3)
-
-        # Step 4: Connect to the target WiFi
-        logger.info(f"Connecting to WiFi: {ssid}")
+        # Step 3: Connect to the target WiFi
+        logger.info(f"Background WiFi: Connecting to {ssid}")
         cmd = ["nmcli", "dev", "wifi", "connect", ssid]
         if password:
             cmd += ["password", password]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
         if result.returncode == 0:
-            logger.info(f"WiFi connected to {ssid}")
+            logger.info(f"Background WiFi: Connected to {ssid}")
 
             # Ensure NM saves this connection with autoconnect and high priority
             subprocess.run(
@@ -1273,36 +1267,76 @@ def api_wifi_connect():
                  "connection.autoconnect-priority", "100"],
                 capture_output=True, text=True, timeout=5)
 
-            # Double-check AP profile is gone (in case it was recreated)
+            # Double-check AP profile is gone
             subprocess.run(
                 ["nmcli", "connection", "delete", AP_CONN_NAME],
                 capture_output=True, text=True, timeout=5)
 
             time.sleep(3)  # Wait for DHCP/IP assignment
             new_ip = _get_ip()
-            logger.info(f"New IP: {new_ip}")
+            logger.info(f"Background WiFi: New IP = {new_ip}")
+
+            _wifi_connect_state.update({
+                "status": "success", "ip": new_ip})
 
             # Show the new IP on e-paper
             try:
                 display_wifi_connected(ssid, new_ip)
             except Exception as e:
                 logger.error(f"Could not update e-paper after WiFi connect: {e}")
-            return jsonify({"success": True, "message": f"Connected to {ssid}",
-                            "ip": new_ip})
         else:
             err = result.stderr.strip() or "Connection failed"
-            logger.error(f"WiFi connect failed: {err}")
-            # Revert and restart AP
+            logger.error(f"Background WiFi: Connect failed: {err}")
+            _wifi_connect_state.update({"status": "failed", "error": err})
+
+            # Revert: restart AP so user can try again
             config.set("setup_complete", False)
             scan_and_cache_wifi()
             start_ap_hotspot()
-            return jsonify({"success": False, "error": err})
+            logger.info("Background WiFi: AP hotspot restarted for retry")
+
     except Exception as e:
-        logger.error(f"WiFi connect error: {e}")
+        logger.error(f"Background WiFi: Error: {e}")
+        _wifi_connect_state.update({"status": "failed", "error": str(e)})
         config.set("setup_complete", False)
         scan_and_cache_wifi()
         start_ap_hotspot()
-        return jsonify({"success": False, "error": str(e)})
+        logger.info("Background WiFi: AP hotspot restarted after error")
+
+
+@app.route('/api/wifi/connect', methods=['POST'])
+def api_wifi_connect():
+    """Accept WiFi credentials and start connection in background.
+    Responds immediately so the client gets the response BEFORE the AP stops.
+    The actual AP-stop → WiFi-connect → fallback runs in a background thread."""
+    data = request.get_json() or {}
+    ssid = data.get("ssid", "").strip()
+    password = data.get("password", "").strip()
+    if not ssid:
+        return jsonify({"error": "SSID is required"}), 400
+
+    if _wifi_connect_state["status"] == "connecting":
+        return jsonify({"error": "Connection already in progress"}), 409
+
+    # Mark setup complete BEFORE starting — prevents AP restart on service crash
+    if not config.is_setup_complete:
+        config.set("setup_complete", True)
+        logger.info("Setup marked complete (before WiFi connect attempt)")
+
+    # Start background thread — respond to client FIRST, then stop AP
+    thread = threading.Thread(
+        target=_background_wifi_connect, args=(ssid, password), daemon=True)
+    thread.start()
+
+    # Return immediately while client is still connected to AP
+    return jsonify({"success": True, "message": "Connection attempt started",
+                    "status": "connecting"})
+
+
+@app.route('/api/wifi/connect/status')
+def api_wifi_connect_status():
+    """Poll the result of a background WiFi connection attempt."""
+    return jsonify(_wifi_connect_state)
 
 
 # ── API: System ──────────────────────────────────────────────────────────
