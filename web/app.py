@@ -128,7 +128,7 @@ def start_ap_hotspot():
             _setup_iptables_redirect()
 
             # Wait for NM's dnsmasq to start (handles DHCP), then start
-            # our own captive portal DNS on port 5353
+            # our own captive portal DNS on port 5354
             time.sleep(3)
             _start_captive_dnsmasq()
             return True
@@ -188,7 +188,7 @@ def _cleanup_captive_dns():
         logger.error(f"Failed to remove captive DNS config: {e}")
 
 
-# ── Captive Portal DNS: our own dnsmasq on port 5353 ─────────────────
+# ── Captive Portal DNS: our own dnsmasq on port 5354 ─────────────────
 # NM's dnsmasq often ignores /etc/NetworkManager/dnsmasq-shared.d/ config.
 # Instead of fighting NM, we run our OWN dnsmasq on a non-standard port
 # and use iptables to redirect all DNS queries from wlan0 to it.
@@ -198,7 +198,7 @@ CAPTIVE_DNSMASQ_PORT = 5354  # Avoid 5353 which conflicts with mDNS/Avahi
 
 
 def _start_captive_dnsmasq():
-    """Start our own dnsmasq on port 5353 for captive portal DNS.
+    """Start our own dnsmasq on port 5354 for captive portal DNS.
     All DNS queries resolve to 192.168.4.1 so phones hit Flask.
     NM's dnsmasq on port 53 is left alone (it handles DHCP)."""
     global _fallback_dnsmasq_proc
@@ -219,7 +219,7 @@ def _start_captive_dnsmasq():
         # Write config for our captive-portal DNS
         with open(FALLBACK_DNSMASQ_CONF, 'w') as f:
             f.write("# Vignette captive portal DNS\n")
-            f.write("# Runs on port 5353; iptables redirects port 53 here\n")
+            f.write("# Runs on port 5354; iptables redirects port 53 here\n")
             f.write(f"port={CAPTIVE_DNSMASQ_PORT}\n")
             f.write("listen-address=192.168.4.1\n")
             f.write("bind-interfaces\n")
@@ -275,11 +275,11 @@ def _stop_fallback_dnsmasq():
         pass
 
 
-# ── iptables: redirect DNS (53→5353) and HTTP (80→5000) ──────────────
+# ── iptables: redirect DNS (53→5354) and HTTP (80→5000) ──────────────
 
 def _setup_iptables_redirect():
     """Set up iptables rules for captive portal:
-    1. Redirect DNS (udp 53) → our dnsmasq on port 5353
+    1. Redirect DNS (udp 53) → our dnsmasq on port 5354
     2. Redirect HTTP (tcp 80) → Flask on port 5000
     Both rules only apply to traffic coming from wlan0 (AP clients)."""
 
@@ -1423,21 +1423,22 @@ def api_wifi_status():
         return jsonify({"connected": False, "ap_active": ap_active, "error": str(e)})
 
 
-@app.route('/api/wifi/scan')
-def api_wifi_scan():
-    """Scan for available WiFi networks.
-    When in AP mode, we must temporarily release wlan0 from AP, scan, then
-    restart AP. RPi Zero 2W has only one WiFi interface — can't AP + scan."""
-    was_ap = is_ap_active()
-    try:
-        if was_ap:
-            # Temporarily stop AP to free wlan0 for scanning
-            logger.info("Temporarily stopping AP for WiFi scan")
-            subprocess.run(
-                ["nmcli", "connection", "down", AP_CONN_NAME],
-                capture_output=True, text=True, timeout=10)
-            time.sleep(2)  # Let wlan0 switch to station mode
+# Cache scan results so the phone can fetch them after reconnecting
+_wifi_scan_results = {"networks": [], "scanning": False, "timestamp": 0}
+_wifi_scan_lock = threading.Lock()
 
+
+def _bg_wifi_scan():
+    """Background WiFi scan: drop AP, scan, restart AP, cache results."""
+    global _wifi_scan_results
+    try:
+        logger.info("Background WiFi scan: dropping AP")
+        subprocess.run(
+            ["nmcli", "connection", "down", AP_CONN_NAME],
+            capture_output=True, text=True, timeout=10)
+        time.sleep(2)
+
+        logger.info("Background WiFi scan: scanning")
         result = subprocess.run(
             ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
             capture_output=True, text=True, timeout=30)
@@ -1451,25 +1452,67 @@ def api_wifi_scan():
                                  "security": parts[2]})
         networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
 
-        if was_ap:
-            # Restart AP so phone stays connected
-            logger.info("Re-activating AP after WiFi scan")
-            subprocess.run(
-                ["nmcli", "connection", "up", AP_CONN_NAME],
-                capture_output=True, text=True, timeout=15)
-            time.sleep(1)
-
-        return jsonify({"networks": networks})
+        with _wifi_scan_lock:
+            _wifi_scan_results["networks"] = networks
+            _wifi_scan_results["timestamp"] = time.time()
     except Exception as e:
-        logger.error(f"WiFi scan error: {e}")
-        if was_ap:
-            try:
-                subprocess.run(
-                    ["nmcli", "connection", "up", AP_CONN_NAME],
-                    capture_output=True, text=True, timeout=15)
-            except Exception:
-                pass
-        return jsonify({"networks": [], "error": str(e)})
+        logger.error(f"Background WiFi scan error: {e}")
+    finally:
+        logger.info("Background WiFi scan: restarting AP")
+        subprocess.run(
+            ["nmcli", "connection", "up", AP_CONN_NAME],
+            capture_output=True, text=True, timeout=15)
+        time.sleep(1)
+        with _wifi_scan_lock:
+            _wifi_scan_results["scanning"] = False
+        logger.info("Background WiFi scan complete")
+
+
+@app.route('/api/wifi/scan')
+def api_wifi_scan():
+    """Trigger WiFi scan. In AP mode this runs in background because the AP
+    must drop (phone loses connection). Phone polls /api/wifi/scan/results
+    after reconnecting."""
+    was_ap = is_ap_active()
+
+    if not was_ap:
+        # Not in AP mode — scan directly (no connection drop)
+        try:
+            result = subprocess.run(
+                ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
+                capture_output=True, text=True, timeout=30)
+            networks = []
+            seen = set()
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split(':')
+                if len(parts) >= 3 and parts[0] and parts[0] not in seen:
+                    seen.add(parts[0])
+                    networks.append({"ssid": parts[0], "signal": parts[1] + '%',
+                                     "security": parts[2]})
+            networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
+            return jsonify({"networks": networks})
+        except Exception as e:
+            return jsonify({"networks": [], "error": str(e)})
+
+    # In AP mode — start background scan
+    with _wifi_scan_lock:
+        if _wifi_scan_results["scanning"]:
+            return jsonify({"scanning": True, "message": "Scan already in progress"})
+        _wifi_scan_results["scanning"] = True
+
+    threading.Thread(target=_bg_wifi_scan, daemon=True).start()
+    return jsonify({"scanning": True, "message": "Scan started. AP will briefly drop. Poll /api/wifi/scan/results after reconnecting."})
+
+
+@app.route('/api/wifi/scan/results')
+def api_wifi_scan_results():
+    """Get cached WiFi scan results (used after AP-mode scan)."""
+    with _wifi_scan_lock:
+        return jsonify({
+            "networks": _wifi_scan_results["networks"],
+            "scanning": _wifi_scan_results["scanning"],
+            "timestamp": _wifi_scan_results["timestamp"],
+        })
 
 
 @app.route('/api/wifi/connect', methods=['POST'])

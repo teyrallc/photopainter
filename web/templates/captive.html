@@ -174,56 +174,79 @@
     function scanNetworks() {
         var scanBtn = document.getElementById('scan-btn');
         scanBtn.disabled = true;
-        scanBtn.innerHTML = '<span class="spinner-dark"></span>Scanning... (you may briefly disconnect)';
-        showStatus('Scanning for WiFi networks. The hotspot will briefly pause. Please wait...', 'info');
+        scanBtn.innerHTML = '<span class="spinner-dark"></span>Scanning...';
+        showStatus('Scanning for WiFi networks...<br>The hotspot will briefly pause. You may disconnect for ~10 seconds.', 'info');
 
-        // Long timeout: AP drops during scan, phone reconnects after
-        var done = false;
-        var retries = 0;
-        var maxRetries = 3;
+        // Phase 1: Tell server to start background scan
+        fetch('/api/wifi/scan')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.networks) {
+                // Not in AP mode — got results immediately
+                showScanResults(d.networks);
+                return;
+            }
+            // AP mode: scan started in background. Poll for results.
+            showStatus('WiFi is being scanned. Reconnecting to hotspot...', 'info');
+            pollScanResults(0);
+        })
+        .catch(function() {
+            // Expected: AP dropped, we lost connection. Poll after reconnect.
+            showStatus('Reconnecting to hotspot and fetching results...', 'info');
+            pollScanResults(0);
+        });
+    }
 
-        function doFetch() {
-            fetch('/api/wifi/scan', {signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined})
+    function pollScanResults(attempt) {
+        if (attempt > 12) {
+            // ~60 seconds of polling — give up
+            var scanBtn = document.getElementById('scan-btn');
+            scanBtn.disabled = false;
+            scanBtn.innerHTML = 'Scan for WiFi Networks';
+            showStatus('Scan timed out. Please enter your WiFi name manually, or try again.', 'warning');
+            return;
+        }
+        // Wait 5 seconds between polls (phone needs time to reconnect to AP)
+        setTimeout(function() {
+            fetch('/api/wifi/scan/results')
             .then(function(r) { return r.json(); })
             .then(function(d) {
-                done = true;
-                scanBtn.disabled = false;
-                scanBtn.innerHTML = 'Scan Again';
-                document.getElementById('status').classList.add('hidden');
-
-                var sel = document.getElementById('ssid-select');
-                sel.innerHTML = '<option value="">-- Select WiFi --</option>';
-                if (d.networks && d.networks.length) {
-                    d.networks.forEach(function(n) {
-                        var opt = document.createElement('option');
-                        opt.value = n.ssid;
-                        opt.textContent = n.ssid + ' (' + n.signal + ')';
-                        sel.appendChild(opt);
-                    });
-                    // Show dropdown, hide text input
-                    sel.classList.remove('hidden');
-                    document.getElementById('ssid').classList.add('hidden');
-                    scanMode = true;
+                if (d.scanning) {
+                    // Still scanning, keep polling
+                    showStatus('Still scanning... please wait.', 'info');
+                    pollScanResults(attempt + 1);
                 } else {
-                    showStatus('No networks found. Enter your WiFi name manually above.', 'warning');
+                    showScanResults(d.networks || []);
                 }
             })
             .catch(function() {
-                retries++;
-                if (retries < maxRetries && !done) {
-                    // Retry after delay — AP may still be restarting
-                    setTimeout(doFetch, 5000);
-                } else if (!done) {
-                    done = true;
-                    scanBtn.disabled = false;
-                    scanBtn.innerHTML = 'Scan for WiFi Networks';
-                    showStatus('Scan timed out. Please enter your WiFi name manually above, or try scanning again.', 'warning');
-                }
+                // Still disconnected, retry
+                pollScanResults(attempt + 1);
             });
-        }
+        }, 5000);
+    }
 
-        // Give the server a moment to start the scan
-        setTimeout(doFetch, 1000);
+    function showScanResults(networks) {
+        var scanBtn = document.getElementById('scan-btn');
+        scanBtn.disabled = false;
+        scanBtn.innerHTML = 'Scan Again';
+        document.getElementById('status').classList.add('hidden');
+
+        var sel = document.getElementById('ssid-select');
+        sel.innerHTML = '<option value="">-- Select WiFi --</option>';
+        if (networks.length) {
+            networks.forEach(function(n) {
+                var opt = document.createElement('option');
+                opt.value = n.ssid;
+                opt.textContent = n.ssid + ' (' + n.signal + ')';
+                sel.appendChild(opt);
+            });
+            sel.classList.remove('hidden');
+            document.getElementById('ssid').classList.add('hidden');
+            scanMode = true;
+        } else {
+            showStatus('No networks found. Enter your WiFi name manually above.', 'warning');
+        }
     }
 
     function connectWifi() {
