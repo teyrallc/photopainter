@@ -194,7 +194,7 @@ def _cleanup_captive_dns():
 # and use iptables to redirect all DNS queries from wlan0 to it.
 # This guarantees wildcard DNS works for captive portal detection.
 
-CAPTIVE_DNSMASQ_PORT = 5353
+CAPTIVE_DNSMASQ_PORT = 5354  # Avoid 5353 which conflicts with mDNS/Avahi
 
 
 def _start_captive_dnsmasq():
@@ -1425,8 +1425,19 @@ def api_wifi_status():
 
 @app.route('/api/wifi/scan')
 def api_wifi_scan():
-    """Scan for available WiFi networks."""
+    """Scan for available WiFi networks.
+    When in AP mode, we must temporarily release wlan0 from AP, scan, then
+    restart AP. RPi Zero 2W has only one WiFi interface — can't AP + scan."""
+    was_ap = is_ap_active()
     try:
+        if was_ap:
+            # Temporarily stop AP to free wlan0 for scanning
+            logger.info("Temporarily stopping AP for WiFi scan")
+            subprocess.run(
+                ["nmcli", "connection", "down", AP_CONN_NAME],
+                capture_output=True, text=True, timeout=10)
+            time.sleep(2)  # Let wlan0 switch to station mode
+
         result = subprocess.run(
             ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
             capture_output=True, text=True, timeout=30)
@@ -1439,9 +1450,25 @@ def api_wifi_scan():
                 networks.append({"ssid": parts[0], "signal": parts[1] + '%',
                                  "security": parts[2]})
         networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
+
+        if was_ap:
+            # Restart AP so phone stays connected
+            logger.info("Re-activating AP after WiFi scan")
+            subprocess.run(
+                ["nmcli", "connection", "up", AP_CONN_NAME],
+                capture_output=True, text=True, timeout=15)
+            time.sleep(1)
+
         return jsonify({"networks": networks})
     except Exception as e:
         logger.error(f"WiFi scan error: {e}")
+        if was_ap:
+            try:
+                subprocess.run(
+                    ["nmcli", "connection", "up", AP_CONN_NAME],
+                    capture_output=True, text=True, timeout=15)
+            except Exception:
+                pass
         return jsonify({"networks": [], "error": str(e)})
 
 

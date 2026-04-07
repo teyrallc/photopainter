@@ -43,15 +43,6 @@
             background: none; border: none; font-size: 18px; cursor: pointer;
             color: #6c757d; padding: 4px 8px;
         }
-        .ssid-row { display: flex; gap: 8px; }
-        .ssid-row input { flex: 1; }
-        .ssid-row select { flex: 1; }
-        .btn-scan {
-            padding: 12px 14px; font-size: 14px; font-weight: 600;
-            color: #fff; background: #6c757d; border: none;
-            border-radius: 8px; cursor: pointer; white-space: nowrap;
-        }
-        .btn-scan:hover { background: #5c636a; }
         .btn {
             display: block; width: 100%; padding: 14px; font-size: 16px;
             font-weight: 600; color: #fff; background: #0d6efd;
@@ -62,12 +53,27 @@
         .btn:disabled { background: #6c757d; cursor: wait; }
         .btn-success { background: #198754; }
         .btn-success:hover { background: #157347; }
+        .btn-scan {
+            display: block; width: 100%; padding: 10px; font-size: 13px;
+            font-weight: 600; color: #0d6efd; background: #e7f1ff;
+            border: 2px solid #0d6efd; border-radius: 8px; cursor: pointer;
+            transition: background 0.2s; margin-top: 6px; text-align: center;
+        }
+        .btn-scan:hover { background: #cfe2ff; }
+        .btn-scan:disabled { color: #6c757d; border-color: #6c757d; background: #e9ecef; cursor: wait; }
         .spinner {
             display: inline-block; width: 16px; height: 16px;
             border: 2px solid rgba(255,255,255,0.3);
             border-top-color: #fff; border-radius: 50%;
             animation: spin 0.6s linear infinite;
             margin-right: 8px; vertical-align: middle;
+        }
+        .spinner-dark {
+            display: inline-block; width: 14px; height: 14px;
+            border: 2px solid rgba(0,0,0,0.15);
+            border-top-color: #0d6efd; border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-right: 6px; vertical-align: middle;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
         .alert {
@@ -90,7 +96,7 @@
         .success-view .hint { color: #6c757d; font-size: 12px; margin: 10px 0 14px; line-height: 1.6; }
         .footer { text-align: center; color: #6c757d; font-size: 11px; margin-top: 14px; }
         .hidden { display: none !important; }
-        .or-manual { text-align: center; color: #6c757d; font-size: 12px; margin: 6px 0; }
+        .scan-note { font-size: 11px; color: #6c757d; text-align: center; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -103,16 +109,17 @@
 
         <div id="wifi-form">
             <div class="field">
-                <label>WiFi Network</label>
-                <select id="ssid-select" onchange="onSelectSSID()">
-                    <option value="">-- Scanning... --</option>
+                <label>WiFi Network Name (SSID)</label>
+                <!-- Default: manual text input (always works) -->
+                <input type="text" id="ssid" placeholder="Enter your WiFi name" autocomplete="off">
+                <!-- Scan dropdown (hidden by default, shown after scan) -->
+                <select id="ssid-select" class="hidden" onchange="onSelectSSID()">
+                    <option value="">-- Select WiFi --</option>
                 </select>
-                <div id="ssid-manual-row" class="hidden" style="margin-top:8px;">
-                    <input type="text" id="ssid" placeholder="Enter WiFi name manually" autocomplete="off">
-                </div>
-                <div class="or-manual">
-                    <a href="#" onclick="toggleManualSSID(); return false;" id="toggle-manual-link">Enter manually</a>
-                </div>
+                <button class="btn-scan" id="scan-btn" onclick="scanNetworks()">
+                    Scan for WiFi Networks
+                </button>
+                <p class="scan-note">Scanning briefly disconnects you (~10s). You'll reconnect automatically.</p>
             </div>
             <div class="field">
                 <label>Password</label>
@@ -142,61 +149,92 @@
     </div>
 
     <script>
-    var manualMode = false;
+    var scanMode = false;
 
     function togglePass() {
         var inp = document.getElementById('password');
         inp.type = inp.type === 'password' ? 'text' : 'password';
     }
 
-    function toggleManualSSID() {
-        manualMode = !manualMode;
-        document.getElementById('ssid-manual-row').classList.toggle('hidden', !manualMode);
-        document.getElementById('ssid-select').classList.toggle('hidden', manualMode);
-        document.getElementById('toggle-manual-link').textContent =
-            manualMode ? 'Select from list' : 'Enter manually';
-    }
-
     function onSelectSSID() {
-        // If user selected a network, use it
+        var val = document.getElementById('ssid-select').value;
+        if (val) {
+            document.getElementById('ssid').value = val;
+        }
     }
 
     function getSSID() {
-        if (manualMode) {
-            return document.getElementById('ssid').value.trim();
+        if (scanMode) {
+            var sel = document.getElementById('ssid-select');
+            return sel.value || document.getElementById('ssid').value.trim();
         }
-        return document.getElementById('ssid-select').value;
+        return document.getElementById('ssid').value.trim();
     }
 
     function scanNetworks() {
-        var sel = document.getElementById('ssid-select');
-        sel.innerHTML = '<option value="">-- Scanning... --</option>';
-        fetch('/api/wifi/scan').then(function(r) { return r.json(); }).then(function(d) {
-            sel.innerHTML = '<option value="">-- Select WiFi --</option>';
-            if (d.networks && d.networks.length) {
-                d.networks.forEach(function(n) {
-                    var opt = document.createElement('option');
-                    opt.value = n.ssid;
-                    opt.textContent = n.ssid + ' (' + n.signal + ')';
-                    sel.appendChild(opt);
-                });
-            } else {
-                sel.innerHTML = '<option value="">-- No networks found --</option>';
-            }
-        }).catch(function() {
-            sel.innerHTML = '<option value="">-- Scan failed --</option>';
-        });
+        var scanBtn = document.getElementById('scan-btn');
+        scanBtn.disabled = true;
+        scanBtn.innerHTML = '<span class="spinner-dark"></span>Scanning... (you may briefly disconnect)';
+        showStatus('Scanning for WiFi networks. The hotspot will briefly pause. Please wait...', 'info');
+
+        // Long timeout: AP drops during scan, phone reconnects after
+        var done = false;
+        var retries = 0;
+        var maxRetries = 3;
+
+        function doFetch() {
+            fetch('/api/wifi/scan', {signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined})
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                done = true;
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = 'Scan Again';
+                document.getElementById('status').classList.add('hidden');
+
+                var sel = document.getElementById('ssid-select');
+                sel.innerHTML = '<option value="">-- Select WiFi --</option>';
+                if (d.networks && d.networks.length) {
+                    d.networks.forEach(function(n) {
+                        var opt = document.createElement('option');
+                        opt.value = n.ssid;
+                        opt.textContent = n.ssid + ' (' + n.signal + ')';
+                        sel.appendChild(opt);
+                    });
+                    // Show dropdown, hide text input
+                    sel.classList.remove('hidden');
+                    document.getElementById('ssid').classList.add('hidden');
+                    scanMode = true;
+                } else {
+                    showStatus('No networks found. Enter your WiFi name manually above.', 'warning');
+                }
+            })
+            .catch(function() {
+                retries++;
+                if (retries < maxRetries && !done) {
+                    // Retry after delay — AP may still be restarting
+                    setTimeout(doFetch, 5000);
+                } else if (!done) {
+                    done = true;
+                    scanBtn.disabled = false;
+                    scanBtn.innerHTML = 'Scan for WiFi Networks';
+                    showStatus('Scan timed out. Please enter your WiFi name manually above, or try scanning again.', 'warning');
+                }
+            });
+        }
+
+        // Give the server a moment to start the scan
+        setTimeout(doFetch, 1000);
     }
 
     function connectWifi() {
         var ssid = getSSID();
         var password = document.getElementById('password').value;
-        if (!ssid) { showStatus('Please select or enter a WiFi network.', 'warning'); return; }
+        if (!ssid) { showStatus('Please enter a WiFi network name.', 'warning'); return; }
 
         var btn = document.getElementById('connect-btn');
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>Connecting...';
-        showStatus('Connecting to WiFi...<br>This may take 15-30 seconds.<br>You may briefly lose connection.', 'info');
+        showStatus('Connecting to WiFi...<br>The hotspot will close. You may lose connection.<br>Check the e-paper display for your new IP.', 'info');
 
         fetch('/api/wifi/connect', {
             method: 'POST',
@@ -223,7 +261,12 @@
         .catch(function() {
             btn.disabled = false;
             btn.innerHTML = 'Connect';
-            showStatus('Lost connection to device. If WiFi connected successfully, the e-paper display will show your new IP. Otherwise reconnect to Vignette-Setup and try again.', 'warning');
+            showStatus(
+                'Lost connection to device.<br>' +
+                'If WiFi connected successfully, the e-paper display will show your new IP address.<br>' +
+                'Otherwise, reconnect to <strong>Vignette-Setup</strong> and try again.',
+                'warning'
+            );
         });
     }
 
@@ -237,9 +280,6 @@
     document.getElementById('password').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') connectWifi();
     });
-
-    // Auto-scan networks on page load
-    scanNetworks();
     </script>
 </body>
 </html>
