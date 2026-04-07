@@ -80,6 +80,34 @@ AP_SSID = "Vignette-Setup"
 AP_PASSWORD = "vignette123"
 AP_CONN_NAME = "Vignette-Hotspot"
 
+# Cached WiFi scan results (scanned before AP starts)
+_cached_wifi_networks = []
+
+
+def scan_and_cache_wifi():
+    """Scan WiFi networks BEFORE starting AP. Cache results for the setup page.
+    Must be called while wlan0 is in station mode (not AP)."""
+    global _cached_wifi_networks
+    try:
+        logger.info("Scanning WiFi networks before starting AP...")
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
+            capture_output=True, text=True, timeout=30)
+        networks = []
+        seen = set()
+        for line in result.stdout.strip().split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 3 and parts[0] and parts[0] not in seen:
+                seen.add(parts[0])
+                networks.append({"ssid": parts[0], "signal": parts[1] + '%',
+                                 "security": parts[2]})
+        networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
+        _cached_wifi_networks = networks
+        logger.info(f"Cached {len(networks)} WiFi networks")
+    except Exception as e:
+        logger.error(f"WiFi pre-scan error: {e}")
+        _cached_wifi_networks = []
+
 
 def start_ap_hotspot():
     """Start WiFi Access Point so phones can connect and configure WiFi.
@@ -415,6 +443,23 @@ def setup_page():
     if not config.is_setup_complete:
         return render_template('wifi_setup.html')
     return render_template('setup.html', config=config.to_dict())
+
+
+@app.route('/api/qr/<path:data>')
+def api_qr_code(data):
+    """Generate a QR code PNG for any text/URL."""
+    try:
+        import qrcode
+        qr = qrcode.QRCode(version=1, box_size=8, border=2)
+        qr.add_data(data)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        qr_img.save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png')
+    except ImportError:
+        return "qrcode module not installed", 500
 
 
 @app.route('/upload')
@@ -1153,11 +1198,10 @@ def api_wifi_status():
 
 @app.route('/api/wifi/scan')
 def api_wifi_scan():
-    """Scan for available WiFi networks. Not available in AP mode
-    (single wlan0 can't be AP and scan simultaneously)."""
+    """Return available WiFi networks. In AP mode, returns pre-cached results
+    (scanned before AP started). Otherwise does a live scan."""
     if is_ap_active():
-        return jsonify({"networks": [],
-                         "note": "WiFi scan unavailable in AP mode. Enter SSID manually."})
+        return jsonify({"networks": _cached_wifi_networks, "cached": True})
     try:
         result = subprocess.run(
             ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
@@ -1179,7 +1223,7 @@ def api_wifi_scan():
 @app.route('/api/wifi/connect', methods=['POST'])
 def api_wifi_connect():
     """Connect to a WiFi network. Stops AP hotspot first if active.
-    After success, marks setup complete and restarts the service."""
+    After success, marks setup complete and ensures NM keeps the connection."""
     data = request.get_json() or {}
     ssid = data.get("ssid", "").strip()
     password = data.get("password", "").strip()
@@ -1187,10 +1231,17 @@ def api_wifi_connect():
         return jsonify({"error": "SSID is required"}), 400
     try:
         was_ap = is_ap_active()
+
+        # Mark setup complete BEFORE stopping AP — this prevents the boot
+        # code from restarting AP if the service restarts during WiFi switch
+        if not config.is_setup_complete:
+            config.set("setup_complete", True)
+            logger.info("Setup marked complete (before WiFi connect attempt)")
+
         # Stop AP hotspot before connecting (can't do both on single wlan0)
         if was_ap:
             stop_ap_hotspot()
-            time.sleep(2)  # Give wlan0 time to release AP mode
+            time.sleep(3)  # Give wlan0 time to fully release AP mode
 
         cmd = ["nmcli", "dev", "wifi", "connect", ssid]
         if password:
@@ -1198,12 +1249,21 @@ def api_wifi_connect():
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             logger.info(f"WiFi connected to {ssid}")
+
+            # Ensure NM saves this connection with autoconnect enabled
+            # so it reconnects after reboot and doesn't fall back to AP
+            subprocess.run(
+                ["nmcli", "connection", "modify", ssid, "connection.autoconnect", "yes"],
+                capture_output=True, text=True, timeout=5)
+
+            # Make sure the AP connection profile is fully gone
+            subprocess.run(
+                ["nmcli", "connection", "delete", AP_CONN_NAME],
+                capture_output=True, text=True, timeout=5)
+
             time.sleep(2)  # Wait for IP assignment
             new_ip = _get_ip()
-            # Mark setup as complete after first WiFi connect
-            if not config.is_setup_complete:
-                config.set("setup_complete", True)
-                logger.info("Setup marked complete after WiFi connect")
+
             # Show the new IP on e-paper so user knows where to go
             try:
                 display_wifi_connected(ssid, new_ip)
@@ -1212,16 +1272,16 @@ def api_wifi_connect():
             return jsonify({"success": True, "message": f"Connected to {ssid}",
                             "ip": new_ip})
         else:
-            # Connection failed - restart AP if we were in setup mode
+            # Connection failed - revert setup_complete and restart AP
             err = result.stderr.strip() or "Connection failed"
             logger.error(f"WiFi connect failed: {err}")
-            if was_ap and not config.is_setup_complete:
-                start_ap_hotspot()
+            config.set("setup_complete", False)
+            start_ap_hotspot()
             return jsonify({"success": False, "error": err})
     except Exception as e:
         logger.error(f"WiFi connect error: {e}")
-        if not config.is_setup_complete:
-            start_ap_hotspot()
+        config.set("setup_complete", False)
+        start_ap_hotspot()
         return jsonify({"success": False, "error": str(e)})
 
 
@@ -1381,9 +1441,10 @@ if __name__ == '__main__':
         print(f"  AP Mode: Connect to '{AP_SSID}' then open http://192.168.4.1:5000")
     print("=" * 60)
 
-    # On first boot, start AP hotspot and display QR setup
+    # On first boot: scan WiFi (while in station mode), then start AP
     if not config.is_setup_complete:
-        logger.info("First boot - starting AP hotspot and displaying QR setup")
+        logger.info("First boot - scanning WiFi, starting AP, displaying QR setup")
+        scan_and_cache_wifi()  # Scan BEFORE starting AP (wlan0 still in station mode)
         start_ap_hotspot()
         try:
             display_qr_setup()

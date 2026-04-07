@@ -19,22 +19,25 @@
             background: #fff;
             border-radius: 16px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 420px;
+            max-width: 440px;
             width: 100%;
             padding: 28px 24px 16px;
         }
-        .brand { text-align: center; margin-bottom: 20px; }
-        .brand svg { width: 44px; height: 44px; fill: #0d6efd; }
+        .brand { text-align: center; margin-bottom: 16px; }
+        .brand svg { width: 40px; height: 40px; fill: #0d6efd; }
         .brand h3 { font-size: 22px; margin: 6px 0 2px; }
         .brand p { color: #6c757d; font-size: 13px; }
+        .qr-section { text-align: center; margin-bottom: 16px; }
+        .qr-section img { width: 140px; height: 140px; border: 2px solid #dee2e6; border-radius: 8px; }
+        .qr-section .qr-label { font-size: 11px; color: #6c757d; margin-top: 4px; }
         label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
-        input[type="text"], input[type="password"] {
+        input[type="text"], input[type="password"], select {
             width: 100%; padding: 12px 14px; font-size: 16px;
             border: 2px solid #dee2e6; border-radius: 8px;
             outline: none; transition: border-color 0.2s;
-            background: #fff;
+            background: #fff; -webkit-appearance: none;
         }
-        input:focus { border-color: #0d6efd; }
+        input:focus, select:focus { border-color: #0d6efd; }
         .field { margin-bottom: 14px; }
         .pass-wrap { position: relative; }
         .pass-wrap input { padding-right: 48px; }
@@ -81,6 +84,9 @@
         .success-view .hint { color: #6c757d; font-size: 12px; margin: 10px 0 14px; line-height: 1.6; }
         .footer { text-align: center; color: #6c757d; font-size: 11px; margin-top: 14px; }
         .hidden { display: none !important; }
+        .manual-toggle { font-size: 12px; color: #0d6efd; text-decoration: none; cursor: pointer; }
+        .manual-toggle:hover { text-decoration: underline; }
+        .toggle-row { text-align: right; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -91,10 +97,23 @@
             <p>Connect your display to WiFi</p>
         </div>
 
+        <div class="qr-section">
+            <img src="/api/qr/http://192.168.4.1:5000" alt="QR Code">
+            <div class="qr-label">http://192.168.4.1:5000</div>
+        </div>
+
         <div id="wifi-form">
             <div class="field">
-                <label>WiFi Network Name (SSID)</label>
-                <input type="text" id="ssid" placeholder="Enter your WiFi name" autocomplete="off" autofocus>
+                <label>WiFi Network</label>
+                <select id="ssid-select" onchange="onSelectSSID()">
+                    <option value="">-- Loading networks... --</option>
+                </select>
+                <div id="ssid-manual-row" class="hidden" style="margin-top:8px;">
+                    <input type="text" id="ssid-manual" placeholder="Enter WiFi name" autocomplete="off">
+                </div>
+                <div class="toggle-row">
+                    <a class="manual-toggle" onclick="toggleManual();" id="toggle-link">Enter manually</a>
+                </div>
             </div>
             <div class="field">
                 <label>Password</label>
@@ -124,15 +143,60 @@
     </div>
 
     <script>
+    var manualMode = false;
+
     function togglePass() {
         var inp = document.getElementById('password');
         inp.type = inp.type === 'password' ? 'text' : 'password';
     }
 
+    function toggleManual() {
+        manualMode = !manualMode;
+        document.getElementById('ssid-manual-row').classList.toggle('hidden', !manualMode);
+        document.getElementById('ssid-select').classList.toggle('hidden', manualMode);
+        document.getElementById('toggle-link').textContent = manualMode ? 'Select from list' : 'Enter manually';
+    }
+
+    function onSelectSSID() {
+        // Nothing needed — value is read on connect
+    }
+
+    function getSSID() {
+        if (manualMode) {
+            return document.getElementById('ssid-manual').value.trim();
+        }
+        return document.getElementById('ssid-select').value;
+    }
+
+    function loadNetworks() {
+        var sel = document.getElementById('ssid-select');
+        fetch('/api/wifi/scan')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.networks && d.networks.length) {
+                sel.innerHTML = '<option value="">-- Select WiFi network --</option>';
+                d.networks.forEach(function(n) {
+                    var opt = document.createElement('option');
+                    opt.value = n.ssid;
+                    opt.textContent = n.ssid + ' (' + n.signal + ')';
+                    sel.appendChild(opt);
+                });
+            } else {
+                sel.innerHTML = '<option value="">-- No networks found --</option>';
+                // Auto-switch to manual mode
+                toggleManual();
+            }
+        })
+        .catch(function() {
+            sel.innerHTML = '<option value="">-- Could not load --</option>';
+            toggleManual();
+        });
+    }
+
     function connectWifi() {
-        var ssid = document.getElementById('ssid').value.trim();
+        var ssid = getSSID();
         var password = document.getElementById('password').value;
-        if (!ssid) { showStatus('Please enter a WiFi network name.', 'warning'); return; }
+        if (!ssid) { showStatus('Please select or enter a WiFi network.', 'warning'); return; }
 
         var btn = document.getElementById('connect-btn');
         btn.disabled = true;
@@ -159,7 +223,7 @@
                 document.getElementById('go-link').href = url;
                 document.getElementById('go-link').textContent = url;
             } else {
-                showStatus(d.error || 'Connection failed. Check SSID and password.', 'danger');
+                showStatus(d.error || 'Connection failed. Check password and try again.', 'danger');
             }
         })
         .catch(function() {
@@ -184,6 +248,9 @@
     document.getElementById('password').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') connectWifi();
     });
+
+    // Load pre-cached WiFi networks on page load
+    loadNetworks();
     </script>
 </body>
 </html>
