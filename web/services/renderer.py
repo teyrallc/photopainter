@@ -182,11 +182,11 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
         "",
         "2. Join the WiFi hotspot",
         "",
-        "3. Setup page will open",
-        "   automatically",
+        "3. Open your browser:",
+        "   192.168.4.1:5000",
         "",
         "4. Enter your home WiFi",
-        "   SSID & password",
+        "   name & password",
     ]
     for step in steps:
         if step:

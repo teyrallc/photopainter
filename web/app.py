@@ -79,23 +79,18 @@ display_lock = threading.Lock()
 AP_SSID = "Vignette-Setup"
 AP_PASSWORD = "vignette123"
 AP_CONN_NAME = "Vignette-Hotspot"
-DNSMASQ_CAPTIVE_CONF = "/etc/NetworkManager/dnsmasq-shared.d/captive-portal.conf"
 
 
 def start_ap_hotspot():
     """Start WiFi Access Point so phones can connect and configure WiFi.
-    Uses nmcli to create a hotspot on wlan0 with explicit security settings.
-    Sets up DNS redirect (for captive portal) and iptables (for port 80)."""
+    Uses nmcli to create a hotspot on wlan0. No captive portal — user
+    manually opens http://192.168.4.1:5000 in their browser."""
     logger.info(f"Starting AP hotspot: {AP_SSID}")
     try:
         # Remove old hotspot connection if exists
         subprocess.run(
             ["nmcli", "connection", "delete", AP_CONN_NAME],
             capture_output=True, text=True, timeout=10)
-
-        # Write dnsmasq config to redirect all DNS queries to this Pi
-        # This enables captive portal detection on phones
-        _setup_captive_dns()
 
         # Create connection profile with explicit settings
         result = subprocess.run([
@@ -123,14 +118,6 @@ def start_ap_hotspot():
 
         if result.returncode == 0:
             logger.info(f"AP hotspot started: SSID={AP_SSID}, Pass={AP_PASSWORD}")
-            # Redirect port 80 → 5000 so captive portal detection works
-            # Mobile devices probe port 80, but Flask runs on 5000
-            _setup_iptables_redirect()
-
-            # Wait for NM's dnsmasq to start (handles DHCP), then start
-            # our own captive portal DNS on port 5354
-            time.sleep(3)
-            _start_captive_dnsmasq()
             return True
         else:
             logger.error(f"Failed to activate hotspot: {result.stderr}")
@@ -140,13 +127,8 @@ def start_ap_hotspot():
         return False
 
 
-# Track our fallback dnsmasq process (if we had to start one manually)
-_fallback_dnsmasq_proc = None
-FALLBACK_DNSMASQ_CONF = "/tmp/vignette-captive-dns.conf"
-
-
 def stop_ap_hotspot():
-    """Stop the WiFi AP hotspot and clean up DNS redirect + iptables."""
+    """Stop the WiFi AP hotspot."""
     logger.info("Stopping AP hotspot")
     try:
         subprocess.run(
@@ -155,183 +137,9 @@ def stop_ap_hotspot():
         subprocess.run(
             ["nmcli", "connection", "delete", AP_CONN_NAME],
             capture_output=True, text=True, timeout=10)
-        _cleanup_captive_dns()
-        _stop_fallback_dnsmasq()
-        _cleanup_iptables_redirect()
         logger.info("AP hotspot stopped")
     except Exception as e:
         logger.error(f"Hotspot stop error: {e}")
-
-
-def _setup_captive_dns():
-    """Write dnsmasq shared config (used IF NM reads it - some versions don't).
-    Also advertises captive portal URL via DHCP Option 114 (RFC 8908)."""
-    try:
-        conf_dir = os.path.dirname(DNSMASQ_CAPTIVE_CONF)
-        os.makedirs(conf_dir, exist_ok=True)
-        with open(DNSMASQ_CAPTIVE_CONF, 'w') as f:
-            f.write("# Vignette captive portal - redirect all DNS to this Pi\n")
-            f.write("address=/#/192.168.4.1\n")
-            f.write("dhcp-option-force=114,http://192.168.4.1/.well-known/captive-portal\n")
-        logger.info("NM dnsmasq-shared config written (may or may not be used)")
-    except Exception as e:
-        logger.error(f"Failed to write NM dnsmasq config: {e}")
-
-
-def _cleanup_captive_dns():
-    """Remove captive portal DNS redirect config."""
-    try:
-        if os.path.exists(DNSMASQ_CAPTIVE_CONF):
-            os.remove(DNSMASQ_CAPTIVE_CONF)
-            logger.info("Captive portal DNS config removed")
-    except Exception as e:
-        logger.error(f"Failed to remove captive DNS config: {e}")
-
-
-# ── Captive Portal DNS: our own dnsmasq on port 5354 ─────────────────
-# NM's dnsmasq often ignores /etc/NetworkManager/dnsmasq-shared.d/ config.
-# Instead of fighting NM, we run our OWN dnsmasq on a non-standard port
-# and use iptables to redirect all DNS queries from wlan0 to it.
-# This guarantees wildcard DNS works for captive portal detection.
-
-CAPTIVE_DNSMASQ_PORT = 5354  # Avoid 5353 which conflicts with mDNS/Avahi
-
-
-def _start_captive_dnsmasq():
-    """Start our own dnsmasq on port 5354 for captive portal DNS.
-    All DNS queries resolve to 192.168.4.1 so phones hit Flask.
-    NM's dnsmasq on port 53 is left alone (it handles DHCP)."""
-    global _fallback_dnsmasq_proc
-
-    # Find dnsmasq binary
-    dnsmasq_path = None
-    for path in ["/usr/sbin/dnsmasq", "/usr/bin/dnsmasq"]:
-        if os.path.exists(path):
-            dnsmasq_path = path
-            break
-
-    if not dnsmasq_path:
-        logger.error("dnsmasq binary not found! Cannot start captive DNS.")
-        logger.error("Install with: sudo apt install dnsmasq")
-        return False
-
-    try:
-        # Write config for our captive-portal DNS
-        with open(FALLBACK_DNSMASQ_CONF, 'w') as f:
-            f.write("# Vignette captive portal DNS\n")
-            f.write("# Runs on port 5354; iptables redirects port 53 here\n")
-            f.write(f"port={CAPTIVE_DNSMASQ_PORT}\n")
-            f.write("listen-address=192.168.4.1\n")
-            f.write("bind-interfaces\n")
-            f.write("no-resolv\n")
-            f.write("no-hosts\n")
-            # Wildcard: ALL domains → 192.168.4.1
-            f.write("address=/#/192.168.4.1\n")
-            # No DHCP — NM handles that
-            f.write("no-dhcp-interface=\n")
-            f.write("log-queries\n")
-
-        _fallback_dnsmasq_proc = subprocess.Popen(
-            [dnsmasq_path, "-C", FALLBACK_DNSMASQ_CONF, "--no-daemon",
-             "--log-facility=-"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
-        time.sleep(1)
-        if _fallback_dnsmasq_proc.poll() is None:
-            logger.info(f"✓ Captive portal dnsmasq started on port {CAPTIVE_DNSMASQ_PORT}")
-            return True
-        else:
-            stderr_out = ""
-            if _fallback_dnsmasq_proc.stderr:
-                stderr_out = _fallback_dnsmasq_proc.stderr.read().decode()
-            logger.error(f"Captive dnsmasq exited immediately: {stderr_out}")
-            _fallback_dnsmasq_proc = None
-            return False
-    except Exception as e:
-        logger.error(f"Failed to start captive dnsmasq: {e}")
-        _fallback_dnsmasq_proc = None
-        return False
-
-
-def _stop_fallback_dnsmasq():
-    """Stop our captive portal dnsmasq."""
-    global _fallback_dnsmasq_proc
-    if _fallback_dnsmasq_proc:
-        try:
-            _fallback_dnsmasq_proc.terminate()
-            _fallback_dnsmasq_proc.wait(timeout=5)
-            logger.info("Captive portal dnsmasq stopped")
-        except Exception as e:
-            logger.warning(f"Error stopping captive dnsmasq: {e}")
-            try:
-                _fallback_dnsmasq_proc.kill()
-            except Exception:
-                pass
-        _fallback_dnsmasq_proc = None
-    try:
-        if os.path.exists(FALLBACK_DNSMASQ_CONF):
-            os.remove(FALLBACK_DNSMASQ_CONF)
-    except Exception:
-        pass
-
-
-# ── iptables: redirect DNS (53→5354) and HTTP (80→5000) ──────────────
-
-def _setup_iptables_redirect():
-    """Set up iptables rules for captive portal:
-    1. Redirect DNS (udp 53) → our dnsmasq on port 5354
-    2. Redirect HTTP (tcp 80) → Flask on port 5000
-    Both rules only apply to traffic coming from wlan0 (AP clients)."""
-
-    rules = [
-        # DNS redirect: clients query port 53 → our captive dnsmasq on 5353
-        {
-            "args": ["-i", "wlan0", "-p", "udp", "--dport", "53",
-                     "-j", "REDIRECT", "--to-port", str(CAPTIVE_DNSMASQ_PORT)],
-            "desc": f"DNS udp 53 → {CAPTIVE_DNSMASQ_PORT}",
-        },
-        # HTTP redirect: captive portal probes port 80 → Flask on 5000
-        {
-            "args": ["-i", "wlan0", "-p", "tcp", "--dport", "80",
-                     "-j", "REDIRECT", "--to-port", "5000"],
-            "desc": "HTTP tcp 80 → 5000",
-        },
-    ]
-
-    for rule in rules:
-        try:
-            # Remove stale rule first (ignore errors)
-            subprocess.run(
-                ["iptables", "-t", "nat", "-D", "PREROUTING"] + rule["args"],
-                capture_output=True, text=True, timeout=5)
-            # Add the rule
-            result = subprocess.run(
-                ["iptables", "-t", "nat", "-A", "PREROUTING"] + rule["args"],
-                capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                logger.info(f"iptables: {rule['desc']} redirect enabled")
-            else:
-                logger.error(f"iptables {rule['desc']} failed: {result.stderr}")
-        except Exception as e:
-            logger.error(f"iptables {rule['desc']} error: {e}")
-
-
-def _cleanup_iptables_redirect():
-    """Remove all captive portal iptables rules."""
-    rules_args = [
-        ["-i", "wlan0", "-p", "udp", "--dport", "53",
-         "-j", "REDIRECT", "--to-port", str(CAPTIVE_DNSMASQ_PORT)],
-        ["-i", "wlan0", "-p", "tcp", "--dport", "80",
-         "-j", "REDIRECT", "--to-port", "5000"],
-    ]
-    for args in rules_args:
-        try:
-            subprocess.run(
-                ["iptables", "-t", "nat", "-D", "PREROUTING"] + args,
-                capture_output=True, text=True, timeout=5)
-        except Exception:
-            pass
-    logger.info("iptables captive portal rules removed")
 
 
 def is_ap_active():
@@ -590,10 +398,8 @@ def navigate_photo(direction):
 
 @app.route('/')
 def index():
-    if is_ap_active():
-        return redirect(url_for('captive_page'))
     if not config.is_setup_complete:
-        return redirect(url_for('setup_page'))
+        return render_template('wifi_setup.html')
     images = get_image_list()
     return render_template('index.html',
                            images=images[:5],
@@ -606,8 +412,8 @@ def index():
 
 @app.route('/setup')
 def setup_page():
-    if is_ap_active():
-        return redirect(url_for('captive_page'))
+    if not config.is_setup_complete:
+        return render_template('wifi_setup.html')
     return render_template('setup.html', config=config.to_dict())
 
 
@@ -641,87 +447,8 @@ def wifi_page():
     return render_template('wifi.html', config=config.to_dict())
 
 
-@app.route('/captive')
-def captive_page():
-    """Minimal captive portal page - only WiFi SSID + password input."""
-    return render_template('captive.html')
-
-
-# ── Captive Portal Detection ─────────────────────────────────────────────
-# When the Pi runs as a WiFi AP, phones probe specific URLs to detect
-# internet connectivity. Returning unexpected responses triggers the
-# captive portal popup which loads /captive.
-
-@app.route('/generate_204')
-@app.route('/gen_204')
-def captive_portal_android():
-    """Android captive portal detection.
-    Android expects HTTP 204. Returning a redirect (302) to /captive
-    tells Android there IS a captive portal and it opens the popup."""
-    if is_ap_active():
-        return redirect(url_for('captive_page'))
-    return '', 204
-
-
-@app.route('/hotspot-detect.html')
-@app.route('/library/test/success.html')
-def captive_portal_apple():
-    """Apple captive portal detection (iOS / macOS).
-    Apple probes http://captive.apple.com/hotspot-detect.html
-    and http://<ip>/library/test/success.html.
-    It expects a 200 with body containing exactly 'Success'.
-    Returning anything else triggers the Captive Network Assistant."""
-    if is_ap_active():
-        return render_template('captive.html')
-    return '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>'
-
-
-@app.route('/connecttest.txt')
-def captive_portal_windows():
-    """Windows captive portal detection."""
-    if is_ap_active():
-        return redirect(url_for('captive_page'))
-    return 'Microsoft Connect Test'
-
-
-@app.route('/ncsi.txt')
-def captive_portal_windows_ncsi():
-    """Windows NCSI captive portal detection."""
-    if is_ap_active():
-        return redirect(url_for('captive_page'))
-    return 'Microsoft NCSI'
-
-
-@app.route('/redirect')
-@app.route('/success.txt')
-@app.route('/kindle-wifi/wifistub.html')
-def captive_portal_misc():
-    """Misc device captive portal detection (Firefox, Kindle, etc)."""
-    if is_ap_active():
-        return redirect(url_for('captive_page'))
-    return 'OK'
-
-
-@app.route('/.well-known/captive-portal')
-def captive_portal_rfc8908():
-    """RFC 8908 Captive Portal API endpoint.
-    Modern Android 11+ and iOS use DHCP Option 114 to discover this URL.
-    Returns JSON indicating whether the client is captive."""
-    if is_ap_active():
-        return jsonify({
-            "captive": True,
-            "user-portal-url": "http://192.168.4.1:5000/captive",
-            "venue-info-url": "http://192.168.4.1:5000/captive",
-        })
-    return jsonify({"captive": False})
-
-
 @app.errorhandler(404)
 def handle_404(e):
-    """When AP is active, serve captive page for ALL unknown URLs.
-    This catches captive portal checks that hit random hostnames."""
-    if is_ap_active():
-        return render_template('captive.html'), 200
     return jsonify({"error": "Not found"}), 404
 
 
@@ -1423,22 +1150,15 @@ def api_wifi_status():
         return jsonify({"connected": False, "ap_active": ap_active, "error": str(e)})
 
 
-# Cache scan results so the phone can fetch them after reconnecting
-_wifi_scan_results = {"networks": [], "scanning": False, "timestamp": 0}
-_wifi_scan_lock = threading.Lock()
 
-
-def _bg_wifi_scan():
-    """Background WiFi scan: drop AP, scan, restart AP, cache results."""
-    global _wifi_scan_results
+@app.route('/api/wifi/scan')
+def api_wifi_scan():
+    """Scan for available WiFi networks. Not available in AP mode
+    (single wlan0 can't be AP and scan simultaneously)."""
+    if is_ap_active():
+        return jsonify({"networks": [],
+                         "note": "WiFi scan unavailable in AP mode. Enter SSID manually."})
     try:
-        logger.info("Background WiFi scan: dropping AP")
-        subprocess.run(
-            ["nmcli", "connection", "down", AP_CONN_NAME],
-            capture_output=True, text=True, timeout=10)
-        time.sleep(2)
-
-        logger.info("Background WiFi scan: scanning")
         result = subprocess.run(
             ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
             capture_output=True, text=True, timeout=30)
@@ -1451,81 +1171,24 @@ def _bg_wifi_scan():
                 networks.append({"ssid": parts[0], "signal": parts[1] + '%',
                                  "security": parts[2]})
         networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
-
-        with _wifi_scan_lock:
-            _wifi_scan_results["networks"] = networks
-            _wifi_scan_results["timestamp"] = time.time()
+        return jsonify({"networks": networks})
     except Exception as e:
-        logger.error(f"Background WiFi scan error: {e}")
-    finally:
-        logger.info("Background WiFi scan: restarting AP")
-        subprocess.run(
-            ["nmcli", "connection", "up", AP_CONN_NAME],
-            capture_output=True, text=True, timeout=15)
-        time.sleep(1)
-        with _wifi_scan_lock:
-            _wifi_scan_results["scanning"] = False
-        logger.info("Background WiFi scan complete")
-
-
-@app.route('/api/wifi/scan')
-def api_wifi_scan():
-    """Trigger WiFi scan. In AP mode this runs in background because the AP
-    must drop (phone loses connection). Phone polls /api/wifi/scan/results
-    after reconnecting."""
-    was_ap = is_ap_active()
-
-    if not was_ap:
-        # Not in AP mode — scan directly (no connection drop)
-        try:
-            result = subprocess.run(
-                ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
-                capture_output=True, text=True, timeout=30)
-            networks = []
-            seen = set()
-            for line in result.stdout.strip().split('\n'):
-                parts = line.split(':')
-                if len(parts) >= 3 and parts[0] and parts[0] not in seen:
-                    seen.add(parts[0])
-                    networks.append({"ssid": parts[0], "signal": parts[1] + '%',
-                                     "security": parts[2]})
-            networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
-            return jsonify({"networks": networks})
-        except Exception as e:
-            return jsonify({"networks": [], "error": str(e)})
-
-    # In AP mode — start background scan
-    with _wifi_scan_lock:
-        if _wifi_scan_results["scanning"]:
-            return jsonify({"scanning": True, "message": "Scan already in progress"})
-        _wifi_scan_results["scanning"] = True
-
-    threading.Thread(target=_bg_wifi_scan, daemon=True).start()
-    return jsonify({"scanning": True, "message": "Scan started. AP will briefly drop. Poll /api/wifi/scan/results after reconnecting."})
-
-
-@app.route('/api/wifi/scan/results')
-def api_wifi_scan_results():
-    """Get cached WiFi scan results (used after AP-mode scan)."""
-    with _wifi_scan_lock:
-        return jsonify({
-            "networks": _wifi_scan_results["networks"],
-            "scanning": _wifi_scan_results["scanning"],
-            "timestamp": _wifi_scan_results["timestamp"],
-        })
+        return jsonify({"networks": [], "error": str(e)})
 
 
 @app.route('/api/wifi/connect', methods=['POST'])
 def api_wifi_connect():
-    """Connect to a WiFi network. Stops AP hotspot first if active."""
+    """Connect to a WiFi network. Stops AP hotspot first if active.
+    After success, marks setup complete and restarts the service."""
     data = request.get_json() or {}
     ssid = data.get("ssid", "").strip()
     password = data.get("password", "").strip()
     if not ssid:
         return jsonify({"error": "SSID is required"}), 400
     try:
+        was_ap = is_ap_active()
         # Stop AP hotspot before connecting (can't do both on single wlan0)
-        if is_ap_active():
+        if was_ap:
             stop_ap_hotspot()
             time.sleep(2)  # Give wlan0 time to release AP mode
 
@@ -1552,7 +1215,7 @@ def api_wifi_connect():
             # Connection failed - restart AP if we were in setup mode
             err = result.stderr.strip() or "Connection failed"
             logger.error(f"WiFi connect failed: {err}")
-            if not config.is_setup_complete:
+            if was_ap and not config.is_setup_complete:
                 start_ap_hotspot()
             return jsonify({"success": False, "error": err})
     except Exception as e:
@@ -1715,7 +1378,7 @@ if __name__ == '__main__':
     print(f"  Local:   http://localhost:5000")
     print(f"  Network: http://{ip}:5000")
     if not config.is_setup_complete:
-        print(f"  AP Mode: iptables redirects port 80 → 5000")
+        print(f"  AP Mode: Connect to '{AP_SSID}' then open http://192.168.4.1:5000")
     print("=" * 60)
 
     # On first boot, start AP hotspot and display QR setup

@@ -28,13 +28,13 @@
         .brand h3 { font-size: 22px; margin: 6px 0 2px; }
         .brand p { color: #6c757d; font-size: 13px; }
         label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
-        input[type="text"], input[type="password"], select {
+        input[type="text"], input[type="password"] {
             width: 100%; padding: 12px 14px; font-size: 16px;
             border: 2px solid #dee2e6; border-radius: 8px;
             outline: none; transition: border-color 0.2s;
             background: #fff;
         }
-        input:focus, select:focus { border-color: #0d6efd; }
+        input:focus { border-color: #0d6efd; }
         .field { margin-bottom: 14px; }
         .pass-wrap { position: relative; }
         .pass-wrap input { padding-right: 48px; }
@@ -53,27 +53,12 @@
         .btn:disabled { background: #6c757d; cursor: wait; }
         .btn-success { background: #198754; }
         .btn-success:hover { background: #157347; }
-        .btn-scan {
-            display: block; width: 100%; padding: 10px; font-size: 13px;
-            font-weight: 600; color: #0d6efd; background: #e7f1ff;
-            border: 2px solid #0d6efd; border-radius: 8px; cursor: pointer;
-            transition: background 0.2s; margin-top: 6px; text-align: center;
-        }
-        .btn-scan:hover { background: #cfe2ff; }
-        .btn-scan:disabled { color: #6c757d; border-color: #6c757d; background: #e9ecef; cursor: wait; }
         .spinner {
             display: inline-block; width: 16px; height: 16px;
             border: 2px solid rgba(255,255,255,0.3);
             border-top-color: #fff; border-radius: 50%;
             animation: spin 0.6s linear infinite;
             margin-right: 8px; vertical-align: middle;
-        }
-        .spinner-dark {
-            display: inline-block; width: 14px; height: 14px;
-            border: 2px solid rgba(0,0,0,0.15);
-            border-top-color: #0d6efd; border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-            margin-right: 6px; vertical-align: middle;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
         .alert {
@@ -96,7 +81,6 @@
         .success-view .hint { color: #6c757d; font-size: 12px; margin: 10px 0 14px; line-height: 1.6; }
         .footer { text-align: center; color: #6c757d; font-size: 11px; margin-top: 14px; }
         .hidden { display: none !important; }
-        .scan-note { font-size: 11px; color: #6c757d; text-align: center; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -104,22 +88,13 @@
         <div class="brand">
             <svg viewBox="0 0 24 24"><path d="M21 2H3a1 1 0 00-1 1v14a1 1 0 001 1h7v2H7v2h10v-2h-3v-2h7a1 1 0 001-1V3a1 1 0 00-1-1zm-1 14H4V4h16v12z"/></svg>
             <h3>Vignette</h3>
-            <p>Connect to WiFi to get started</p>
+            <p>Connect your display to WiFi</p>
         </div>
 
         <div id="wifi-form">
             <div class="field">
                 <label>WiFi Network Name (SSID)</label>
-                <!-- Default: manual text input (always works) -->
-                <input type="text" id="ssid" placeholder="Enter your WiFi name" autocomplete="off">
-                <!-- Scan dropdown (hidden by default, shown after scan) -->
-                <select id="ssid-select" class="hidden" onchange="onSelectSSID()">
-                    <option value="">-- Select WiFi --</option>
-                </select>
-                <button class="btn-scan" id="scan-btn" onclick="scanNetworks()">
-                    Scan for WiFi Networks
-                </button>
-                <p class="scan-note">Scanning briefly disconnects you (~10s). You'll reconnect automatically.</p>
+                <input type="text" id="ssid" placeholder="Enter your WiFi name" autocomplete="off" autofocus>
             </div>
             <div class="field">
                 <label>Password</label>
@@ -134,130 +109,35 @@
 
         <div id="success-view" class="success-view hidden">
             <div class="success-icon">&#10003;</div>
-            <h4>Connected!</h4>
-            <p>WiFi connected successfully.</p>
+            <h4>WiFi Connected!</h4>
+            <p>Successfully connected to <strong id="connected-ssid"></strong></p>
             <p><strong>New IP:</strong> <span id="new-ip" class="ip"></span></p>
             <p class="hint">
-                The hotspot is now closed.<br>
-                Connect your phone to the same WiFi,<br>
-                then open the address below:
+                The e-paper display will show the new IP.<br>
+                Connect your phone to the same WiFi network,<br>
+                then open the address below to control Vignette:
             </p>
-            <a id="go-link" href="#" class="btn btn-success">Open Vignette</a>
+            <a id="go-link" href="#" class="btn btn-success">Open Vignette Dashboard</a>
         </div>
 
         <div class="footer">&copy; 2026 Teyra LLC W.Weng</div>
     </div>
 
     <script>
-    var scanMode = false;
-
     function togglePass() {
         var inp = document.getElementById('password');
         inp.type = inp.type === 'password' ? 'text' : 'password';
     }
 
-    function onSelectSSID() {
-        var val = document.getElementById('ssid-select').value;
-        if (val) {
-            document.getElementById('ssid').value = val;
-        }
-    }
-
-    function getSSID() {
-        if (scanMode) {
-            var sel = document.getElementById('ssid-select');
-            return sel.value || document.getElementById('ssid').value.trim();
-        }
-        return document.getElementById('ssid').value.trim();
-    }
-
-    function scanNetworks() {
-        var scanBtn = document.getElementById('scan-btn');
-        scanBtn.disabled = true;
-        scanBtn.innerHTML = '<span class="spinner-dark"></span>Scanning...';
-        showStatus('Scanning for WiFi networks...<br>The hotspot will briefly pause. You may disconnect for ~10 seconds.', 'info');
-
-        // Phase 1: Tell server to start background scan
-        fetch('/api/wifi/scan')
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-            if (d.networks) {
-                // Not in AP mode — got results immediately
-                showScanResults(d.networks);
-                return;
-            }
-            // AP mode: scan started in background. Poll for results.
-            showStatus('WiFi is being scanned. Reconnecting to hotspot...', 'info');
-            pollScanResults(0);
-        })
-        .catch(function() {
-            // Expected: AP dropped, we lost connection. Poll after reconnect.
-            showStatus('Reconnecting to hotspot and fetching results...', 'info');
-            pollScanResults(0);
-        });
-    }
-
-    function pollScanResults(attempt) {
-        if (attempt > 12) {
-            // ~60 seconds of polling — give up
-            var scanBtn = document.getElementById('scan-btn');
-            scanBtn.disabled = false;
-            scanBtn.innerHTML = 'Scan for WiFi Networks';
-            showStatus('Scan timed out. Please enter your WiFi name manually, or try again.', 'warning');
-            return;
-        }
-        // Wait 5 seconds between polls (phone needs time to reconnect to AP)
-        setTimeout(function() {
-            fetch('/api/wifi/scan/results')
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d.scanning) {
-                    // Still scanning, keep polling
-                    showStatus('Still scanning... please wait.', 'info');
-                    pollScanResults(attempt + 1);
-                } else {
-                    showScanResults(d.networks || []);
-                }
-            })
-            .catch(function() {
-                // Still disconnected, retry
-                pollScanResults(attempt + 1);
-            });
-        }, 5000);
-    }
-
-    function showScanResults(networks) {
-        var scanBtn = document.getElementById('scan-btn');
-        scanBtn.disabled = false;
-        scanBtn.innerHTML = 'Scan Again';
-        document.getElementById('status').classList.add('hidden');
-
-        var sel = document.getElementById('ssid-select');
-        sel.innerHTML = '<option value="">-- Select WiFi --</option>';
-        if (networks.length) {
-            networks.forEach(function(n) {
-                var opt = document.createElement('option');
-                opt.value = n.ssid;
-                opt.textContent = n.ssid + ' (' + n.signal + ')';
-                sel.appendChild(opt);
-            });
-            sel.classList.remove('hidden');
-            document.getElementById('ssid').classList.add('hidden');
-            scanMode = true;
-        } else {
-            showStatus('No networks found. Enter your WiFi name manually above.', 'warning');
-        }
-    }
-
     function connectWifi() {
-        var ssid = getSSID();
+        var ssid = document.getElementById('ssid').value.trim();
         var password = document.getElementById('password').value;
         if (!ssid) { showStatus('Please enter a WiFi network name.', 'warning'); return; }
 
         var btn = document.getElementById('connect-btn');
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>Connecting...';
-        showStatus('Connecting to WiFi...<br>The hotspot will close. You may lose connection.<br>Check the e-paper display for your new IP.', 'info');
+        showStatus('Connecting to WiFi... This may take up to 30 seconds.', 'info');
 
         fetch('/api/wifi/connect', {
             method: 'POST',
@@ -272,6 +152,7 @@
                 document.getElementById('wifi-form').classList.add('hidden');
                 document.getElementById('status').classList.add('hidden');
                 document.getElementById('success-view').classList.remove('hidden');
+                document.getElementById('connected-ssid').textContent = ssid;
                 var ip = d.ip || '...';
                 document.getElementById('new-ip').textContent = ip;
                 var url = 'http://' + ip + ':5000';
@@ -285,9 +166,9 @@
             btn.disabled = false;
             btn.innerHTML = 'Connect';
             showStatus(
-                'Lost connection to device.<br>' +
-                'If WiFi connected successfully, the e-paper display will show your new IP address.<br>' +
-                'Otherwise, reconnect to <strong>Vignette-Setup</strong> and try again.',
+                'Lost connection to device. This is expected when WiFi changes.<br><br>' +
+                'If the connection succeeded, the e-paper display will show the new IP address.<br>' +
+                'Otherwise, reconnect to <strong>Vignette-Setup</strong> WiFi and try again.',
                 'warning'
             );
         });
