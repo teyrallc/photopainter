@@ -1328,15 +1328,26 @@ def api_wifi_connect():
         target=_background_wifi_connect, args=(ssid, password), daemon=True)
     thread.start()
 
+    # Get hostname for mDNS auto-redirect (client will try http://hostname.local:5000)
+    try:
+        hostname = subprocess.check_output(["hostname"], text=True, timeout=5).strip()
+    except Exception:
+        hostname = "vignette"
+
     # Return immediately while client is still connected to AP
     return jsonify({"success": True, "message": "Connection attempt started",
-                    "status": "connecting"})
+                    "status": "connecting", "hostname": hostname})
 
 
 @app.route('/api/wifi/connect/status')
 def api_wifi_connect_status():
-    """Poll the result of a background WiFi connection attempt."""
-    return jsonify(_wifi_connect_state)
+    """Poll the result of a background WiFi connection attempt.
+    Needs CORS because the client page was loaded from 192.168.4.1 (AP)
+    but polls this endpoint on hostname.local (new network)."""
+    resp = jsonify(_wifi_connect_state)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET'
+    return resp
 
 
 # ── API: System ──────────────────────────────────────────────────────────
