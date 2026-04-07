@@ -1229,42 +1229,60 @@ def api_wifi_connect():
     password = data.get("password", "").strip()
     if not ssid:
         return jsonify({"error": "SSID is required"}), 400
+
+    was_ap = is_ap_active()
+
+    # Mark setup complete BEFORE anything else — this is the critical fix.
+    # If the service crashes/restarts at any point during WiFi switch,
+    # the boot code will see setup_complete=True and NOT restart AP.
+    if not config.is_setup_complete:
+        config.set("setup_complete", True)
+        logger.info("Setup marked complete (before WiFi connect attempt)")
+
     try:
-        was_ap = is_ap_active()
-
-        # Mark setup complete BEFORE stopping AP — this prevents the boot
-        # code from restarting AP if the service restarts during WiFi switch
-        if not config.is_setup_complete:
-            config.set("setup_complete", True)
-            logger.info("Setup marked complete (before WiFi connect attempt)")
-
-        # Stop AP hotspot before connecting (can't do both on single wlan0)
         if was_ap:
-            stop_ap_hotspot()
-            time.sleep(3)  # Give wlan0 time to fully release AP mode
+            # Step 1: Delete the AP connection profile first
+            logger.info("Deleting AP connection profile")
+            subprocess.run(
+                ["nmcli", "connection", "delete", AP_CONN_NAME],
+                capture_output=True, text=True, timeout=10)
 
+            # Step 2: Disconnect wlan0 cleanly so NM doesn't auto-activate anything
+            logger.info("Disconnecting wlan0")
+            subprocess.run(
+                ["nmcli", "device", "disconnect", "wlan0"],
+                capture_output=True, text=True, timeout=10)
+
+            # Step 3: Wait for interface to fully release
+            time.sleep(3)
+
+        # Step 4: Connect to the target WiFi
+        logger.info(f"Connecting to WiFi: {ssid}")
         cmd = ["nmcli", "dev", "wifi", "connect", ssid]
         if password:
             cmd += ["password", password]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
         if result.returncode == 0:
             logger.info(f"WiFi connected to {ssid}")
 
-            # Ensure NM saves this connection with autoconnect enabled
-            # so it reconnects after reboot and doesn't fall back to AP
+            # Ensure NM saves this connection with autoconnect and high priority
             subprocess.run(
-                ["nmcli", "connection", "modify", ssid, "connection.autoconnect", "yes"],
+                ["nmcli", "connection", "modify", ssid,
+                 "connection.autoconnect", "yes",
+                 "connection.autoconnect-priority", "100"],
                 capture_output=True, text=True, timeout=5)
 
-            # Make sure the AP connection profile is fully gone
+            # Double-check AP profile is gone (in case it was recreated)
             subprocess.run(
                 ["nmcli", "connection", "delete", AP_CONN_NAME],
                 capture_output=True, text=True, timeout=5)
 
-            time.sleep(2)  # Wait for IP assignment
+            time.sleep(3)  # Wait for DHCP/IP assignment
             new_ip = _get_ip()
+            logger.info(f"New IP: {new_ip}")
 
-            # Show the new IP on e-paper so user knows where to go
+            # Show the new IP on e-paper
             try:
                 display_wifi_connected(ssid, new_ip)
             except Exception as e:
@@ -1272,15 +1290,17 @@ def api_wifi_connect():
             return jsonify({"success": True, "message": f"Connected to {ssid}",
                             "ip": new_ip})
         else:
-            # Connection failed - revert setup_complete and restart AP
             err = result.stderr.strip() or "Connection failed"
             logger.error(f"WiFi connect failed: {err}")
+            # Revert and restart AP
             config.set("setup_complete", False)
+            scan_and_cache_wifi()
             start_ap_hotspot()
             return jsonify({"success": False, "error": err})
     except Exception as e:
         logger.error(f"WiFi connect error: {e}")
         config.set("setup_complete", False)
+        scan_and_cache_wifi()
         start_ap_hotspot()
         return jsonify({"success": False, "error": str(e)})
 

@@ -129,78 +129,85 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
 def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password="vignette123"):
     """Render QR code WiFi setup page on e-paper.
 
-    Layout: Left side = QR code, Right side = instructions.
+    Layout: Two QR codes side by side.
+      Left = WiFi QR (scan to join AP)
+      Right = URL QR (scan to open setup page)
+      Bottom = manual info
     """
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
     wifi_qr_str = f"WIFI:T:WPA;S:{ap_ssid};P:{ap_password};;"
+    url_str = f"http://192.168.4.1:{port}"
 
-    font_title = _get_font(32)
-    font_body = _get_font(18)
-    font_info = _get_font(16)
-    font_small = _get_font(13)
+    font_title = _get_font(28)
+    font_body = _get_font(16)
+    font_info = _get_font(14)
+    font_small = _get_font(12)
+    font_tiny = _get_font(11)
 
     # Header bar
-    draw.rectangle([0, 0, EPD_W, 50], fill=BLUE)
-    draw.text((EPD_W // 2, 25), "Vignette - WiFi Setup",
+    draw.rectangle([0, 0, EPD_W, 44], fill=BLUE)
+    draw.text((EPD_W // 2, 22), "Vignette - WiFi Setup",
               fill=WHITE, font=font_title, anchor="mm")
 
-    # Left side: QR code
-    qr_size = 280
-    qr_x = 40
-    qr_y = 70
+    qr_size = 200
+
     try:
         import qrcode
+
+        # ── Left QR: WiFi connection ──
+        qr1_x = 55
+        qr1_y = 60
         qr = qrcode.QRCode(version=1, box_size=8, border=2)
         qr.add_data(wifi_qr_str)
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        # Scale to fit
         qr_img = qr_img.resize((qr_size, qr_size), _lanczos())
-        img.paste(qr_img, (qr_x, qr_y))
+        img.paste(qr_img, (qr1_x, qr1_y))
+
+        # Label under left QR
+        draw.text((qr1_x + qr_size // 2, qr1_y - 10),
+                  "Step 1: Connect WiFi", fill=BLUE, font=font_body, anchor="mb")
+        draw.text((qr1_x + qr_size // 2, qr1_y + qr_size + 8),
+                  f"{ap_ssid}", fill=BLACK, font=font_info, anchor="mt")
+        draw.text((qr1_x + qr_size // 2, qr1_y + qr_size + 24),
+                  f"Password: {ap_password}", fill=BLACK, font=font_small, anchor="mt")
+
+        # ── Right QR: URL to open ──
+        qr2_x = EPD_W - 55 - qr_size
+        qr2_y = 60
+        qr2 = qrcode.QRCode(version=1, box_size=8, border=2)
+        qr2.add_data(url_str)
+        qr2.make(fit=True)
+        qr2_img = qr2.make_image(fill_color="black", back_color="white").convert("RGB")
+        qr2_img = qr2_img.resize((qr_size, qr_size), _lanczos())
+        img.paste(qr2_img, (qr2_x, qr2_y))
+
+        # Label under right QR
+        draw.text((qr2_x + qr_size // 2, qr2_y - 10),
+                  "Step 2: Open Browser", fill=BLUE, font=font_body, anchor="mb")
+        draw.text((qr2_x + qr_size // 2, qr2_y + qr_size + 8),
+                  url_str, fill=BLACK, font=font_info, anchor="mt")
+        draw.text((qr2_x + qr_size // 2, qr2_y + qr_size + 24),
+                  "Enter your home WiFi info", fill=BLACK, font=font_small, anchor="mt")
+
     except ImportError:
-        draw.rectangle([qr_x, qr_y, qr_x + qr_size, qr_y + qr_size],
-                       outline=BLACK, width=2)
-        draw.text((qr_x + qr_size // 2, qr_y + qr_size // 2),
-                  "QR Code\n(install qrcode)", fill=RED, font=font_body, anchor="mm")
+        draw.text((EPD_W // 2, EPD_H // 2),
+                  "QR Code\n(install qrcode module)", fill=RED, font=font_body, anchor="mm")
 
-    draw.text((qr_x + qr_size // 2, qr_y + qr_size + 12),
-              "Scan with phone camera", fill=BLACK, font=font_small, anchor="mt")
+    # Divider arrow between the two QR codes
+    mid_x = EPD_W // 2
+    arrow_y = 60 + qr_size // 2
+    draw.text((mid_x, arrow_y), ">", fill=RED, font=_get_font(36), anchor="mm")
 
-    # Right side: instructions
-    rx = 360
-    ry = 80
-    line_h = 32
-
-    draw.text((rx, ry), "How to connect:", fill=BLACK, font=font_body, anchor="lt")
-    ry += line_h + 8
-
-    steps = [
-        "1. Scan QR code with",
-        "   your phone camera",
-        "",
-        "2. Join the WiFi hotspot",
-        "",
-        "3. Open your browser:",
-        "   192.168.4.1:5000",
-        "",
-        "4. Enter your home WiFi",
-        "   name & password",
-    ]
-    for step in steps:
-        if step:
-            draw.text((rx, ry), step, fill=BLACK, font=font_info, anchor="lt")
-        ry += 22
-
-    # Bottom: manual connection info
-    draw.line([(30, EPD_H - 70), (EPD_W - 30, EPD_H - 70)], fill=BLACK, width=1)
-    draw.text((EPD_W // 2, EPD_H - 55),
-              f"Manual:  WiFi: {ap_ssid}", fill=BLUE, font=font_small, anchor="mt")
-    draw.text((EPD_W // 2, EPD_H - 37),
-              f"Password: {ap_password}", fill=BLUE, font=font_small, anchor="mt")
-    draw.text((EPD_W // 2, EPD_H - 12),
-              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=_get_font(11), anchor="mb")
+    # Bottom info
+    draw.line([(30, EPD_H - 40), (EPD_W - 30, EPD_H - 40)], fill=BLACK, width=1)
+    draw.text((EPD_W // 2, EPD_H - 22),
+              f"Or manually: connect to WiFi \"{ap_ssid}\" then open {url_str}",
+              fill=BLACK, font=font_tiny, anchor="mt")
+    draw.text((EPD_W // 2, EPD_H - 5),
+              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_tiny, anchor="mb")
 
     return img
 
