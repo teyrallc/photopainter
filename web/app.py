@@ -73,6 +73,8 @@ def enforce_auth():
         return
     if request.path.startswith('/api/wifi/'):
         return
+    if request.path.startswith('/output/'):
+        return
 
     # If AP mode is active (setup_complete is False), we let people use the local network setup portal
     if not config.is_setup_complete:
@@ -1259,7 +1261,7 @@ def _background_wifi_connect(ssid, password):
     which would abort the HTTP request before WiFi connect is even attempted."""
     global _wifi_connect_state
     _wifi_connect_state.update({
-        "status": "connecting", "ssid": ssid, "ip": None, "error": None})
+        "status": "connecting", "ssid": ssid, "ip": None, "error": None, "redirect_url": None})
 
     try:
         # Step 1: Stop the AP hotspot gracefully (this dismantles the NM iptables NAT correctly)
@@ -1269,19 +1271,38 @@ def _background_wifi_connect(ssid, password):
         # Step 2: Wait for interface to fully release
         time.sleep(3)
 
-        # Step 3: Connect to the target WiFi
+        # Step 3: Connect to the target WiFi using non-interactive method
+        # Using 'nmcli connection add' + 'nmcli connection up' avoids the
+        # interactive agent authentication prompt that blocks headless devices.
         logger.info(f"Background WiFi: Connecting to {ssid}")
         
         # Remove any existing connection for this SSID (prevents bad saved password issues)
         subprocess.run(["nmcli", "connection", "delete", ssid],
                        capture_output=True, text=True, timeout=5)
 
-        cmd = ["nmcli", "dev", "wifi", "connect", ssid]
+        # Build the connection profile non-interactively
+        add_cmd = [
+            "nmcli", "connection", "add",
+            "type", "wifi",
+            "ifname", "wlan0",
+            "con-name", ssid,
+            "ssid", ssid,
+        ]
         if password:
-            cmd += ["password", password]
-            
+            add_cmd += [
+                "wifi-sec.key-mgmt", "wpa-psk",
+                "wifi-sec.psk", password,
+            ]
+        
+        add_result = subprocess.run(add_cmd, capture_output=True, text=True, timeout=10)
+        logger.info(f"Background WiFi: nmcli add result: {add_result.stdout.strip()} {add_result.stderr.strip()}")
+
+        # Activate the connection (non-interactive, no agent needed)
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+            result = subprocess.run(
+                ["nmcli", "connection", "up", ssid],
+                capture_output=True, text=True, timeout=30)
+            logger.info(f"Background WiFi: nmcli up result: {result.stdout.strip()} {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
             logger.warning("Background WiFi: nmcli timed out, checking connection status")
             result = None
@@ -1291,7 +1312,6 @@ def _background_wifi_connect(ssid, password):
         for _ in range(5):  # Poll up to 10 seconds
             check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
                                    capture_output=True, text=True, timeout=5)
-            # Find a line starting with "yes:{ssid}" (allows for potential trailing spaces, though nmcli -t usually trims)
             if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
                 is_connected = True
                 break
@@ -1315,26 +1335,30 @@ def _background_wifi_connect(ssid, password):
             new_ip = _get_ip()
             logger.info(f"Background WiFi: New IP = {new_ip}")
 
-            _wifi_connect_state.update({
-                "status": "success", "ip": new_ip})
-
             # Mark setup complete upon ACTUAL success
             config.set("setup_complete", True)
 
-            # Show the new IP or ngrok URL on e-paper
+            # Start ngrok tunnel and get the public URL
+            redirect_url = f"http://{new_ip}:5000"
             try:
                 from pyngrok import ngrok
                 logger.info("Initializing ngrok tunnel after setup...")
                 ngrok.set_auth_token("3By64a7MxTOJAWF3eD8TGoLcaIl_5tprPKw4ftjjRSTWU1eVM")
                 public_url = ngrok.connect(5000).public_url
                 logger.info(f"Ngrok Tunnel Active: {public_url}")
-                display_wifi_connected(ssid, public_url.replace("https://", ""))
+                redirect_url = public_url
+                real_ssid = get_active_ssid() or ssid
+                display_wifi_connected(real_ssid, public_url.replace("https://", ""))
             except Exception as e:
                 logger.error(f"Failed to start ngrok in background: {e}")
                 try:
-                    display_wifi_connected(ssid, new_ip)
+                    real_ssid = get_active_ssid() or ssid
+                    display_wifi_connected(real_ssid, new_ip)
                 except Exception:
                     pass
+
+            _wifi_connect_state.update({
+                "status": "success", "ip": new_ip, "redirect_url": redirect_url})
         else:
             err = "Timeout" if result is None else (result.stderr.strip() or "Connection failed")
             logger.error(f"Background WiFi: Connect failed: {err}")

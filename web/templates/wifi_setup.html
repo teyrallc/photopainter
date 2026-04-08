@@ -675,7 +675,7 @@
         var baseUrl = 'http://' + hostname + '.local:5000';
         var statusUrl = baseUrl + '/api/wifi/connect/status';
         var attempts = 0;
-        var maxAttempts = 5;
+        var maxAttempts = 8;
 
         document.getElementById('connecting-ssid-text').textContent = 'Looking for device on network...';
 
@@ -684,14 +684,15 @@
             fetch(statusUrl, {mode: 'cors', cache: 'no-cache'})
             .then(function(r) { return r.json(); })
             .then(function(d) {
-                if (d.status === 'success' && d.ip) {
-                    // Pi connected to WiFi! Redirect to dashboard
-                    var dashUrl = 'http://' + d.ip + ':5000';
+                if (d.status === 'success' && (d.redirect_url || d.ip)) {
+                    // Pi connected to WiFi! Use the ngrok URL if available
+                    var dashUrl = d.redirect_url || ('http://' + d.ip + ':5000');
+                    var displayAddr = d.redirect_url || (d.ip + ':5000');
                     setPhase(3);
-                    document.getElementById('new-ip').textContent = d.ip + ':5000';
+                    document.getElementById('new-ip').textContent = displayAddr;
                     document.getElementById('go-link').href = dashUrl;
-                    // Auto-redirect after 2 seconds
-                    setTimeout(function() { window.location.href = dashUrl; }, 2000);
+                    // Auto-redirect after 3 seconds
+                    setTimeout(function() { window.location.href = dashUrl; }, 3000);
                 } else if (d.status === 'connecting' && attempts < maxAttempts) {
                     // Still connecting, try again in 3 seconds
                     setTimeout(poll, 3000);
