@@ -67,30 +67,54 @@
             <p>First-time Device Registration</p>
         </div>
         <div class="card">
-            <div class="info">
-                This smart display supports a single owner account. Once registered, this screen will be permanently locked.
+            <!-- Phase 1: Account Info -->
+            <div id="phase1">
+                <div class="info">
+                    This smart display supports a single owner account. Once registered, this screen will be permanently locked.
+                </div>
+                <form id="setupForm">
+                    <div class="form-group">
+                        <label>Admin Email</label>
+                        <input type="email" id="email" required placeholder="you@example.com" />
+                    </div>
+                    <div class="form-group">
+                        <label>Secure Password (min 6 chars)</label>
+                        <input type="password" id="password" required placeholder="••••••••" minlength="6" />
+                    </div>
+                    <div class="error" id="errorMsg1"></div>
+                    <button type="submit" class="btn-primary" style="margin-top: 10px;">Initialize Device</button>
+                </form>
             </div>
-            <form id="setupForm">
-                <div class="form-group">
-                    <label>Admin Email</label>
-                    <input type="email" id="email" required placeholder="you@example.com" />
+
+            <!-- Phase 2: Hardware OTP -->
+            <div id="phase2" style="display: none;">
+                <div class="info" style="color: #10b981; font-weight: 600;">
+                    <i class="bi bi-display"></i> Check your E-Paper display!<br>
+                    <span style="font-weight: 400; color: #cbd5e1;">A 6-digit verification code has been shown on the device.</span>
                 </div>
-                <div class="form-group">
-                    <label>Secure Password (min 6 chars)</label>
-                    <input type="password" id="password" required placeholder="••••••••" minlength="6" />
-                </div>
-                <div class="error" id="errorMsg"></div>
-                <button type="submit" class="btn-primary" style="margin-top: 10px;">Initialize Device</button>
-            </form>
+                <form id="verifyForm">
+                    <div class="form-group">
+                        <label>6-Digit Verification Code</label>
+                        <input type="text" id="otpCode" required placeholder="000000" maxlength="6" inputmode="numeric" 
+                               style="text-align: center; font-size: 24px; letter-spacing: 8px; font-weight: 700;" />
+                    </div>
+                    <div class="error" id="errorMsg2"></div>
+                    <button type="submit" class="btn-primary" style="margin-top: 10px;">Verify & Complete</button>
+                    <button type="button" class="btn-primary" onclick="location.reload()" 
+                            style="margin-top: 12px; background: rgba(255,255,255,0.1); box-shadow: none;">Back</button>
+                </form>
+            </div>
         </div>
     </div>
 
     <script>
+        // Phase 1: Registration data submission
         document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const btn = e.target.querySelector('button');
-            const errorMsg = document.getElementById('errorMsg');
-            btn.textContent = 'Registering...';
+            const errorMsg = document.getElementById('errorMsg1');
+            btn.disabled = true;
+            btn.textContent = 'Preparing Hardware Check...';
             errorMsg.style.display = 'none';
 
             try {
@@ -103,17 +127,56 @@
                     })
                 });
                 const data = await res.json();
-                if(data.success) {
-                    window.location.href = '/';
+                if(data.success && data.needs_otp) {
+                    document.getElementById('phase1').style.display = 'none';
+                    document.getElementById('phase2').style.display = 'block';
                 } else {
                     errorMsg.textContent = data.error || 'Setup failed';
                     errorMsg.style.display = 'block';
+                    btn.disabled = false;
                     btn.textContent = 'Initialize Device';
                 }
             } catch(err) {
                 errorMsg.textContent = 'Network error';
                 errorMsg.style.display = 'block';
+                btn.disabled = false;
                 btn.textContent = 'Initialize Device';
+            }
+        });
+
+        // Phase 2: OTP Verification
+        document.getElementById('verifyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const errorMsg = document.getElementById('errorMsg2');
+            btn.disabled = true;
+            btn.textContent = 'Verifying...';
+            errorMsg.style.display = 'none';
+
+            try {
+                const res = await fetch('/auth/setup-verify', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        code: document.getElementById('otpCode').value
+                    })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    btn.textContent = 'Success! Redirecting...';
+                    btn.style.background = '#059669';
+                    setTimeout(() => { window.location.href = '/'; }, 1500);
+                } else {
+                    errorMsg.textContent = data.error || 'Invalid code';
+                    errorMsg.style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = 'Verify & Complete';
+                }
+            } catch(err) {
+                errorMsg.textContent = 'Network error';
+                errorMsg.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Verify & Complete';
             }
         });
     </script>

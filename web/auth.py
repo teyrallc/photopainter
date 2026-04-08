@@ -27,16 +27,52 @@ def setup_admin():
     if not email or not password or len(password) < 6:
         return jsonify({"error": "Invalid email or password (min 6 chars)."}), 400
 
-    auth_mgr.config.set("admin_email", email)
-    auth_mgr.config.set("admin_password_hash", generate_password_hash(password))
+    # Store pending registration in session
+    session['pending_setup'] = {
+        'email': email,
+        'password_hash': generate_password_hash(password)
+    }
     
+    # Generate hardware OTP!
+    generate_otp(email)
+
+    return jsonify({"success": True, "needs_otp": True})
+
+
+@bp.route('/setup-verify', methods=['POST'])
+def setup_verify():
+    if auth_mgr.config.get("admin_email"):
+        return jsonify({"error": "Setup already complete."}), 403
+
+    pending = session.get('pending_setup')
+    if not pending:
+        return jsonify({"error": "No registration in progress."}), 400
+
+    data = request.json or request.form
+    code = data.get('code', '').strip()
+
+    if not verify_otp(pending['email'], code):
+        return jsonify({"error": "Invalid or expired OTP."}), 401
+
+    # OTP verified! Now save the admin account
+    auth_mgr.config.set("admin_email", pending['email'])
+    auth_mgr.config.set("admin_password_hash", pending['password_hash'])
+    
+    # Clear pending data and log in
+    session.pop('pending_setup', None)
     session['logged_in'] = True
-    session['email'] = email
+    session['email'] = pending['email']
     
-    # Check if we should respond with json (fetch) or redirect
-    if request.is_json:
-        return jsonify({"success": True})
-    return redirect(url_for('index'))
+    # Mark setup as complete in config
+    auth_mgr.config.set("setup_complete", True)
+    
+    from app import display_current_page
+    try:
+        display_current_page()
+    except Exception as e:
+        logger.error(f"Failed to restore display: {e}")
+
+    return jsonify({"success": True})
 
 
 @bp.route('/login', methods=['GET', 'POST'])

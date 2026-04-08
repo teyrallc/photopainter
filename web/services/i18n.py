@@ -12,6 +12,7 @@ TRANSLATIONS = {
         "settings": "Settings",
         "manual": "Manual",
         "wifi_setup": "WiFi Setup",
+        "logout": "Logout",
 
         # Dashboard
         "display_page": "Display Page",
@@ -203,6 +204,7 @@ TRANSLATIONS = {
         "settings": "\u8a2d\u5b9a",
         "manual": "\u624b\u518a",
         "wifi_setup": "WiFi \u8a2d\u5b9a",
+        "logout": "\u767b\u51fa",
 
         # Dashboard
         "display_page": "\u986f\u793a\u9801\u9762",

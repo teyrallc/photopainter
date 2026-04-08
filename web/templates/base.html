@@ -47,10 +47,17 @@
                 </ul>
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <button class="btn btn-sm btn-outline-light" onclick="toggleLang()" id="lang-toggle">
+                        <button class="btn btn-sm btn-outline-light me-2" onclick="toggleLang()" id="lang-toggle">
                             {{ 'EN' if current_lang == 'zh' else '中文' }}
                         </button>
                     </li>
+                    {% if session.get('logged_in') %}
+                    <li class="nav-item">
+                        <a class="nav-link text-danger" href="/auth/logout">
+                            <i class="bi bi-box-arrow-right"></i> {{ t.logout or 'Logout' }}
+                        </a>
+                    </li>
+                    {% endif %}
                 </ul>
             </div>
         </div>
