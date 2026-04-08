@@ -107,7 +107,7 @@ def handle_exception(e):
     raise e
 
 
-display_lock = threading.Lock()
+display_lock = threading.RLock()
 
 # ── WiFi AP Hotspot Management ────────────────────────────────────────────
 
@@ -333,24 +333,40 @@ def process_upload(file_storage, rotation=0, fit_mode="fit"):
 # ── E-Paper Display Functions ──────────────────────────────────────────────
 
 def display_pil_image(img):
-    """Send a PIL Image to the e-paper display."""
-    display_state["status"] = "displaying"
-    logger.info("Sending image to e-paper...")
-    try:
-        from waveshare_epd import epd7in3e
-        epd = epd7in3e.EPD()
-        epd.init()
-        buf = epd.getbuffer(img)
-        epd.display(buf)
-        epd.sleep()
-        display_state["status"] = "idle"
-        display_state["last_update"] = datetime.now().isoformat()
-        logger.info("Display update complete!")
-        return True, "OK"
-    except Exception as e:
-        logger.error(f"Display failed: {e}", exc_info=True)
+    """Send a PIL Image to the e-paper display with thread safety and retry logic."""
+    with display_lock:
+        display_state["status"] = "displaying"
+        logger.info("Sending image to e-paper...")
+        
+        # Try up to 3 times to initialize and display
+        last_error = None
+        for attempt in range(3):
+            try:
+                from waveshare_epd import epd7in3e
+                epd = epd7in3e.EPD()
+                
+                # Hardware init
+                epd.init()
+                
+                # Render and show
+                buf = epd.getbuffer(img)
+                epd.display(buf)
+                
+                # Power off
+                epd.sleep()
+                
+                display_state["status"] = "idle"
+                display_state["last_update"] = datetime.now().isoformat()
+                logger.info(f"Display update complete! (Attempt {attempt + 1})")
+                return True, "OK"
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Display attempt {attempt + 1} failed: {e}")
+                time.sleep(1) # Wait a bit before retry
+                
+        logger.error(f"Display failed after 3 attempts: {last_error}", exc_info=True)
         display_state["status"] = "error"
-        return False, str(e)
+        return False, str(last_error)
 
 
 def display_image_on_epaper(image_path):
@@ -560,12 +576,8 @@ def api_reset():
     logger.info("System reset to factory defaults")
     # Start AP hotspot for WiFi configuration
     start_ap_hotspot()
-    # Display QR setup on e-paper (blocking - must show QR)
-    display_lock.acquire()
-    try:
-        display_qr_setup()
-    finally:
-        display_lock.release()
+    # Display QR setup on e-paper
+    display_qr_setup()
     return jsonify({"success": True, "message": "Reset complete. QR setup displayed."})
 
 
@@ -595,6 +607,7 @@ def api_page_switch():
 @app.route('/api/page/refresh', methods=['POST'])
 def api_page_refresh():
     """Re-render and display the current page (refreshes weather/calendar data)."""
+    # Check if busy without blocking forever
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
     try:
