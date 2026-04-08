@@ -1222,14 +1222,9 @@ def _background_wifi_connect(ssid, password):
         "status": "connecting", "ssid": ssid, "ip": None, "error": None})
 
     try:
-        # Step 1: Stop the AP hotspot (this disconnects all AP clients)
-        logger.info("Background WiFi: Stopping AP hotspot")
-        subprocess.run(
-            ["nmcli", "connection", "delete", AP_CONN_NAME],
-            capture_output=True, text=True, timeout=10)
-        subprocess.run(
-            ["nmcli", "device", "disconnect", "wlan0"],
-            capture_output=True, text=True, timeout=10)
+        # Step 1: Stop the AP hotspot gracefully (this dismantles the NM iptables NAT correctly)
+        logger.info("Background WiFi: Stopping AP hotspot gracefully")
+        stop_ap_hotspot()
 
         # Step 2: Wait for interface to fully release
         time.sleep(3)
