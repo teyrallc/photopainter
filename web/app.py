@@ -1639,14 +1639,26 @@ def verify_or_connect_wifi_on_boot():
 
 if __name__ == '__main__':
     # --- TESTING MODE: Factory Reset on Boot ---
-    logger.info("TESTING MODE RESTART: Wiping config for fresh test.")
+    logger.info("TESTING MODE RESTART: Wiping ALL config for fresh test.")
     config.set("setup_complete", False)
     config.set("wifi_ssid", "")
     config.set("wifi_password", "")
     config.set("admin_email", "")
     config.set("admin_password_hash", "")
+    config.set("session_secret", "")  # Invalidate all browser sessions
+    # Re-generate a fresh secret key for this boot
+    import secrets
+    new_secret = secrets.token_hex(24)
+    app.secret_key = new_secret
+    config.set("session_secret", new_secret)
     try:
         stop_ap_hotspot()
+    except Exception:
+        pass
+    # Also disconnect any existing WiFi so AP mode starts fresh
+    try:
+        subprocess.run(["nmcli", "device", "disconnect", "wlan0"],
+                       capture_output=True, text=True, timeout=5)
     except Exception:
         pass
     # ---------------------------------------------
