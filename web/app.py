@@ -1455,6 +1455,18 @@ def _get_ip():
         return "localhost"
 
 
+def get_active_ssid():
+    """Dynamically get the currently active WiFi from NetworkManager."""
+    try:
+        check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+                               capture_output=True, text=True, timeout=5)
+        for line in check.stdout.strip().split('\n'):
+            if line.startswith("yes:"):
+                return line.split(':', 1)[1].strip()
+    except Exception:
+        pass
+    return None
+
 def get_system_info():
     info = {
         "hostname": "", "ip_addresses": [], "cpu_temp": None,
@@ -1602,6 +1614,19 @@ def verify_or_connect_wifi_on_boot():
 
 
 if __name__ == '__main__':
+    # --- TESTING MODE: Factory Reset on Boot ---
+    logger.info("TESTING MODE RESTART: Wiping config for fresh test.")
+    config.set("setup_complete", False)
+    config.set("wifi_ssid", "")
+    config.set("wifi_password", "")
+    config.set("admin_email", "")
+    config.set("admin_password_hash", "")
+    try:
+        stop_ap_hotspot()
+    except Exception:
+        pass
+    # ---------------------------------------------
+
     # Do boot connectivity check first if we have a saved WiFi configuration
     if config.get("wifi_ssid"):
         if verify_or_connect_wifi_on_boot():
@@ -1643,13 +1668,13 @@ if __name__ == '__main__':
             logger.info(f"Ngrok Tunnel Active: {public_url}")
             
             # Display ngrok URL on e-paper
-            ssid = config.get("wifi_ssid", "WiFi")
+            ssid = get_active_ssid() or config.get("wifi_ssid", "WiFi")
             # We can override the IP display to show the ngrok tunnel so the user knows remote access is ready
             display_wifi_connected(ssid, ip_address=public_url.replace("https://", ""))
         except Exception as e:
             logger.error(f"Failed to start ngrok: {e}")
             try:
-                ssid = config.get("wifi_ssid", "WiFi")
+                ssid = get_active_ssid() or config.get("wifi_ssid", "WiFi")
                 display_wifi_connected(ssid, ip)
             except Exception as e2:
                 pass
