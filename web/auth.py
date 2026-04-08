@@ -4,7 +4,8 @@ Handles registration (1st user only), login, and hardware OTP verification.
 """
 import logging
 from flask import Blueprint, request, jsonify, session, render_template, redirect, url_for
-from services.auth_mgr import generate_otp, verify_otp, config
+from services import auth_mgr
+from services.auth_mgr import generate_otp, verify_otp
 from werkzeug.security import generate_password_hash, check_password_hash
 
 logger = logging.getLogger("vignette.auth")
@@ -12,7 +13,7 @@ bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 @bp.route('/setup', methods=['GET', 'POST'])
 def setup_admin():
-    if config.get("admin_email"):
+    if auth_mgr.config.get("admin_email"):
         return redirect(url_for('auth.login'))
 
     if request.method == 'GET':
@@ -26,8 +27,8 @@ def setup_admin():
     if not email or not password or len(password) < 6:
         return jsonify({"error": "Invalid email or password (min 6 chars)."}), 400
 
-    config.set("admin_email", email)
-    config.set("admin_password_hash", generate_password_hash(password))
+    auth_mgr.config.set("admin_email", email)
+    auth_mgr.config.set("admin_password_hash", generate_password_hash(password))
     
     session['logged_in'] = True
     session['email'] = email
@@ -43,7 +44,7 @@ def login():
     if session.get('logged_in'):
         return redirect(url_for('index'))
 
-    if not config.get("admin_email"):
+    if not auth_mgr.config.get("admin_email"):
         return redirect(url_for('auth.setup_admin'))
 
     if request.method == 'GET':
@@ -54,8 +55,8 @@ def login():
     email = data.get('email', '').strip()
     password = data.get('password', '')
 
-    saved_email = config.get("admin_email")
-    saved_hash = config.get("admin_password_hash")
+    saved_email = auth_mgr.config.get("admin_email")
+    saved_hash = auth_mgr.config.get("admin_password_hash")
 
     if email != saved_email or not check_password_hash(saved_hash, password):
         return jsonify({"error": "Invalid credentials."}), 401
@@ -82,7 +83,7 @@ def forgot_password():
     data = request.json or request.form
     email = data.get('email', '').strip()
 
-    if email != config.get("admin_email"):
+    if email != auth_mgr.config.get("admin_email"):
         return jsonify({"error": "Unrecognized email."}), 404
 
     # Generate hardware OTP!
@@ -110,7 +111,7 @@ def verify_reset():
     if not new_password or len(new_password) < 6:
         return jsonify({"error": "Password too short."}), 400
 
-    config.set("admin_password_hash", generate_password_hash(new_password))
+    auth_mgr.config.set("admin_password_hash", generate_password_hash(new_password))
     
     from app import display_current_page, logger
     try:

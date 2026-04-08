@@ -1321,11 +1321,20 @@ def _background_wifi_connect(ssid, password):
             # Mark setup complete upon ACTUAL success
             config.set("setup_complete", True)
 
-            # Show the new IP on e-paper
+            # Show the new IP or ngrok URL on e-paper
             try:
-                display_wifi_connected(ssid, new_ip)
+                from pyngrok import ngrok
+                logger.info("Initializing ngrok tunnel after setup...")
+                ngrok.set_auth_token("3By64a7MxTOJAWF3eD8TGoLcaIl_5tprPKw4ftjjRSTWU1eVM")
+                public_url = ngrok.connect(5000).public_url
+                logger.info(f"Ngrok Tunnel Active: {public_url}")
+                display_wifi_connected(ssid, public_url.replace("https://", ""))
             except Exception as e:
-                logger.error(f"Could not update e-paper after WiFi connect: {e}")
+                logger.error(f"Failed to start ngrok in background: {e}")
+                try:
+                    display_wifi_connected(ssid, new_ip)
+                except Exception:
+                    pass
         else:
             err = "Timeout" if result is None else (result.stderr.strip() or "Connection failed")
             logger.error(f"Background WiFi: Connect failed: {err}")
@@ -1436,8 +1445,12 @@ def api_calendar():
 
 def _get_ip():
     try:
-        return subprocess.check_output(
-            ["hostname", "-I"], text=True, timeout=5).strip().split()[0]
+        ips = subprocess.check_output(
+            ["hostname", "-I"], text=True, timeout=5).strip().split()
+        for ip in ips:
+            if ip != "192.168.4.1":
+                return ip
+        return ips[0] if ips else "localhost"
     except Exception:
         return "localhost"
 
@@ -1550,17 +1563,17 @@ def verify_or_connect_wifi_on_boot():
 
     logger.info(f"Boot check: Verifying connection to {ssid}...")
     
-    # 1. Wait up to 15 seconds for NM auto-connect
-    for _ in range(15):
-        try:
-            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
-                                   capture_output=True, text=True, timeout=5)
-            if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
-                logger.info(f"Boot check: Auto-connected to {ssid} successfully.")
-                return True
-        except Exception:
-            pass
-        time.sleep(1)
+        # 1. Wait up to 15 seconds for NM auto-connect
+        for _ in range(15):
+            try:
+                check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+                                       capture_output=True, text=True, timeout=5)
+                if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
+                    logger.info(f"Boot check: Auto-connected to {ssid} successfully.")
+                    return True
+            except Exception as e:
+                pass
+            time.sleep(1)
         
     # 2. Try a manual connection using the document record
     logger.warning(f"Boot check: Auto-connect timed out for {ssid}. Trying manual connection.")

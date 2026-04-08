@@ -227,7 +227,11 @@ def render_wifi_connected(ssid, ip_address, port=5000):
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    url = f"http://{ip_address}:{port}"
+    if "ngrok" in ip_address or "ngrok-free.app" in ip_address:
+        # ngrok urls don't need port 5000 appended
+        url = f"https://{ip_address}"
+    else:
+        url = f"http://{ip_address}:{port}"
 
     font_title = _get_font(36)
     font_big = _get_font(28)
