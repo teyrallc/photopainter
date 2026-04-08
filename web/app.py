@@ -1575,17 +1575,17 @@ def verify_or_connect_wifi_on_boot():
 
     logger.info(f"Boot check: Verifying connection to {ssid}...")
     
-        # 1. Wait up to 15 seconds for NM auto-connect
-        for _ in range(15):
-            try:
-                check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
-                                       capture_output=True, text=True, timeout=5)
-                if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
-                    logger.info(f"Boot check: Auto-connected to {ssid} successfully.")
-                    return True
-            except Exception as e:
-                pass
-            time.sleep(1)
+    # 1. Wait up to 15 seconds for NM auto-connect
+    for _ in range(15):
+        try:
+            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+                                   capture_output=True, text=True, timeout=5)
+            if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
+                logger.info(f"Boot check: Auto-connected to {ssid} successfully.")
+                return True
+        except Exception as e:
+            pass
+        time.sleep(1)
         
     # 2. Try a manual connection using the document record
     logger.warning(f"Boot check: Auto-connect timed out for {ssid}. Trying manual connection.")
