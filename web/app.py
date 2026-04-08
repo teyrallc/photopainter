@@ -1283,6 +1283,9 @@ def _background_wifi_connect(ssid, password):
             _wifi_connect_state.update({
                 "status": "success", "ip": new_ip})
 
+            # Mark setup complete upon ACTUAL success
+            config.set("setup_complete", True)
+
             # Show the new IP on e-paper
             try:
                 display_wifi_connected(ssid, new_ip)
@@ -1322,10 +1325,15 @@ def api_wifi_connect():
     if _wifi_connect_state["status"] == "connecting":
         return jsonify({"error": "Connection already in progress"}), 409
 
-    # Mark setup complete BEFORE starting — prevents AP restart on service crash
-    if not config.is_setup_complete:
-        config.set("setup_complete", True)
-        logger.info("Setup marked complete (before WiFi connect attempt)")
+    # Record the credentials in the document BEFORE starting the thread
+    config.set("wifi_ssid", ssid)
+    if password:
+        config.set("wifi_password", password)
+    else:
+        config.set("wifi_password", "")
+    
+    # We DO NOT set setup_complete=True here anymore. 
+    # It will only be set to True if the background thread succeeds in connecting.
 
     # Start background thread — respond to client FIRST, then stop AP
     thread = threading.Thread(
@@ -1498,7 +1506,65 @@ def serve_image(filename):
     return send_from_directory(OUTPUT_DIR, filename)
 
 
+def verify_or_connect_wifi_on_boot():
+    ssid = config.get("wifi_ssid", "")
+    password = config.get("wifi_password", "")
+    
+    if not ssid:
+        return False
+
+    logger.info(f"Boot check: Verifying connection to {ssid}...")
+    
+    # 1. Wait up to 15 seconds for NM auto-connect
+    for _ in range(15):
+        try:
+            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+                                   capture_output=True, text=True, timeout=5)
+            if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
+                logger.info(f"Boot check: Auto-connected to {ssid} successfully.")
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+        
+    # 2. Try a manual connection using the document record
+    logger.warning(f"Boot check: Auto-connect timed out for {ssid}. Trying manual connection.")
+    cmd = ["nmcli", "dev", "wifi", "connect", ssid]
+    if password:
+        cmd += ["password", password]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        pass
+        
+    # 3. Check again for 10 seconds
+    for _ in range(10):
+        try:
+            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+                                   capture_output=True, text=True, timeout=5)
+            if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
+                logger.info(f"Boot check: Manually connected to {ssid} successfully.")
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+        
+    logger.error(f"Boot check: Failed to connect to saved WiFi {ssid} after reboot.")
+    return False
+
+
 if __name__ == '__main__':
+    # Do boot connectivity check first if we have a saved WiFi configuration
+    if config.get("wifi_ssid"):
+        if verify_or_connect_wifi_on_boot():
+            logger.info("Boot check success. Marking setup as complete.")
+            config.set("setup_complete", True)
+        else:
+            logger.error("Could not reach saved WiFi. Reverting to setup mode.")
+            config.set("setup_complete", False)
+    else:
+        config.set("setup_complete", False)
+
     ip = _get_ip()
     print("=" * 60)
     print("  Vignette - H System Smart Display")
@@ -1510,14 +1576,21 @@ if __name__ == '__main__':
         print(f"  AP Mode: Connect to '{AP_SSID}' then open http://192.168.4.1:5000")
     print("=" * 60)
 
-    # On first boot: scan WiFi (while in station mode), then start AP
+    # On first boot or failed reconnect: scan WiFi, then start AP
     if not config.is_setup_complete:
-        logger.info("First boot - scanning WiFi, starting AP, displaying QR setup")
+        logger.info("System in setup mode - scanning WiFi, starting AP, displaying QR setup")
         scan_and_cache_wifi()  # Scan BEFORE starting AP (wlan0 still in station mode)
         start_ap_hotspot()
         try:
             display_qr_setup()
         except Exception as e:
             logger.error(f"Could not display QR setup: {e}")
+    else:
+        # Display the IP on the e-paper when starting normally
+        try:
+            ssid = config.get("wifi_ssid", "WiFi")
+            display_wifi_connected(ssid, ip)
+        except Exception as e:
+            pass
 
     app.run(host='0.0.0.0', port=5000, debug=False)

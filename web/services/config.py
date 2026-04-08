@@ -11,6 +11,8 @@ logger = logging.getLogger("vignette.config")
 
 DEFAULT_CONFIG = {
     "setup_complete": False,
+    "wifi_ssid": "",
+    "wifi_password": "",
 
     # Language
     "lang": "en",  # en, zh
