@@ -100,8 +100,8 @@ def inject_globals():
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    if request.path.startswith('/api/'):
-        logger.error(f"API error: {e}", exc_info=True)
+    logger.error(f"Unhandled error on {request.path}: {e}", exc_info=True)
+    if request.path.startswith('/api/') or request.path.startswith('/auth/'):
         code = getattr(e, 'code', 500)
         return jsonify({"error": str(e)}), code
     raise e

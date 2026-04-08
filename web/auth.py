@@ -113,8 +113,9 @@ def verify_reset():
 
     auth_mgr.config.set("admin_password_hash", generate_password_hash(new_password))
     
-    from app import display_current_page, logger
+    # Restore e-paper display after OTP was shown
     try:
+        from app import display_current_page
         display_current_page()
     except Exception as e:
         logger.error(f"Failed to restore display: {e}")

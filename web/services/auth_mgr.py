@@ -29,10 +29,8 @@ def generate_otp(email):
     
     # Display the OTP on the physical e-paper device instead of sending email!
     try:
-        from services import renderer
-        from app import display_lock
-        with display_lock:
-            renderer.render_otp_code(code)
+        from app import display_otp_code
+        display_otp_code(code)
         logger.info(f"Hardware OTP displayed on E-Paper for {email}")
     except Exception as e:
         logger.error(f"Failed to display OTP on e-paper: {e}")
