@@ -5,6 +5,7 @@ Handles registration (1st user only), login, and hardware OTP verification.
 import logging
 from flask import Blueprint, request, jsonify, session, render_template, redirect, url_for
 from services import auth_mgr
+from services import display_mgr
 from services.auth_mgr import generate_otp, verify_otp
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -66,11 +67,15 @@ def setup_verify():
     # Mark setup as complete in config
     auth_mgr.config.set("setup_complete", True)
     
-    from app import display_current_page
+    # Restore display asynchronously
     try:
-        display_current_page()
+        import threading
+        thread = threading.Thread(target=display_mgr.display_current_page)
+        thread.daemon = True
+        thread.start()
+        logger.info("Dashboard display thread started after setup.")
     except Exception as e:
-        logger.error(f"Failed to restore display: {e}")
+        logger.error(f"Failed to start display thread: {e}")
 
     return jsonify({"success": True})
 
@@ -150,11 +155,15 @@ def verify_reset():
     auth_mgr.config.set("admin_password_hash", generate_password_hash(new_password))
     
     # Restore e-paper display after OTP was shown
+    # Restore e-paper display asynchronously
     try:
-        from app import display_current_page
-        display_current_page()
+        import threading
+        thread = threading.Thread(target=display_mgr.display_current_page)
+        thread.daemon = True
+        thread.start()
+        logger.info("Restore display thread started after password reset.")
     except Exception as e:
-        logger.error(f"Failed to restore display: {e}")
+        logger.error(f"Failed to start restore display thread: {e}")
 
     if request.is_json:
         return jsonify({"success": True})

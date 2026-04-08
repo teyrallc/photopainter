@@ -9,8 +9,7 @@ logger = logging.getLogger("vignette.auth")
 
 config = None
 
-# We will import the renderer lazily to avoid circular imports if needed.
-# from services import renderer
+from services import display_mgr
 
 # Caches for OTP mechanism
 _otp_cache = {}  # Format: { 'email': {'code': '123456', 'expiry': timestamp} }
@@ -27,13 +26,15 @@ def generate_otp(email):
         'expiry': time.time() + 600 # 10 minutes
     }
     
-    # Display the OTP on the physical e-paper device instead of sending email!
+    # Display the OTP on the physical e-paper device asynchronously
     try:
-        from app import display_otp_code
-        display_otp_code(code)
-        logger.info(f"Hardware OTP displayed on E-Paper for {email}")
+        import threading
+        thread = threading.Thread(target=display_mgr.display_otp_code, args=(code,))
+        thread.daemon = True
+        thread.start()
+        logger.info(f"Hardware OTP display thread started for {email}")
     except Exception as e:
-        logger.error(f"Failed to display OTP on e-paper: {e}")
+        logger.error(f"Failed to start OTP display thread: {e}")
         
     return code
 
