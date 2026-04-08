@@ -1236,13 +1236,34 @@ def _background_wifi_connect(ssid, password):
 
         # Step 3: Connect to the target WiFi
         logger.info(f"Background WiFi: Connecting to {ssid}")
+        
+        # Remove any existing connection for this SSID (prevents bad saved password issues)
+        subprocess.run(["nmcli", "connection", "delete", ssid],
+                       capture_output=True, text=True, timeout=5)
+
         cmd = ["nmcli", "dev", "wifi", "connect", ssid]
         if password:
             cmd += ["password", password]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        except subprocess.TimeoutExpired:
+            logger.warning("Background WiFi: nmcli timed out, checking connection status")
+            result = None
 
-        if result.returncode == 0:
-            logger.info(f"Background WiFi: Connected to {ssid}")
+        # Step 4: Verify connection (nmcli can return failure/timeout but still connect)
+        is_connected = False
+        for _ in range(5):  # Poll up to 10 seconds
+            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+                                   capture_output=True, text=True, timeout=5)
+            # Find a line starting with "yes:{ssid}" (allows for potential trailing spaces, though nmcli -t usually trims)
+            if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
+                is_connected = True
+                break
+            time.sleep(2)
+
+        if is_connected:
+            logger.info(f"Background WiFi: Successfully connected to {ssid}")
 
             # Ensure NM saves this connection with autoconnect and high priority
             subprocess.run(
@@ -1256,7 +1277,6 @@ def _background_wifi_connect(ssid, password):
                 ["nmcli", "connection", "delete", AP_CONN_NAME],
                 capture_output=True, text=True, timeout=5)
 
-            time.sleep(3)  # Wait for DHCP/IP assignment
             new_ip = _get_ip()
             logger.info(f"Background WiFi: New IP = {new_ip}")
 
@@ -1269,7 +1289,7 @@ def _background_wifi_connect(ssid, password):
             except Exception as e:
                 logger.error(f"Could not update e-paper after WiFi connect: {e}")
         else:
-            err = result.stderr.strip() or "Connection failed"
+            err = "Timeout" if result is None else (result.stderr.strip() or "Connection failed")
             logger.error(f"Background WiFi: Connect failed: {err}")
             _wifi_connect_state.update({"status": "failed", "error": err})
 
