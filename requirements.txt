@@ -4,3 +4,4 @@ numpy
 spidev
 RPi.GPIO
 qrcode[pil]
+pyngrok

@@ -13,6 +13,14 @@ DEFAULT_CONFIG = {
     "setup_complete": False,
     "wifi_ssid": "",
     "wifi_password": "",
+    
+    # Auth System
+    "admin_email": "",
+    "admin_password_hash": "",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "smtp_email": "",
+    "smtp_password": "",
 
     # Language
     "lang": "en",  # en, zh

@@ -270,6 +270,35 @@ def render_wifi_connected(ssid, ip_address, port=5000):
     return img
 
 
+def render_otp_page(code):
+    """Render the 6-digit OTP code on the e-paper for Hardware 2FA."""
+    img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
+    draw = ImageDraw.Draw(img)
+
+    font_title = _get_font(42)
+    font_code = _get_font(120)
+    font_desc = _get_font(24)
+    font_small = _get_font(16)
+
+    # Header
+    draw.rectangle([0, 0, EPD_W, 70], fill=RED)
+    draw.text((EPD_W // 2, 35), "Authentication Required", fill=WHITE, font=font_title, anchor="mm")
+
+    # Code
+    draw.text((EPD_W // 2, EPD_H // 2 - 20), code, fill=BLACK, font=font_code, anchor="mm")
+
+    # Description
+    draw.text((EPD_W // 2, EPD_H // 2 + 80), "Enter this 6-digit code on the web interface.", fill=BLACK, font=font_desc, anchor="mm")
+    
+    # Expiry warning
+    draw.text((EPD_W // 2, EPD_H // 2 + 130), "This code will expire in 10 minutes.", fill=RED, font=font_small, anchor="mm")
+
+    draw.text((EPD_W // 2, EPD_H - 20),
+              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
+
+    return img
+
+
 # ── Internal Drawing Functions ────────────────────────────────────────────
 
 

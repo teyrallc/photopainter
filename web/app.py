@@ -53,7 +53,40 @@ from services import gdrive
 config = Config(CONFIG_PATH)
 
 app = Flask(__name__)
+app.secret_key = config.get("session_secret", os.urandom(24).hex())
+if not config.get("session_secret"):
+    config.set("session_secret", app.secret_key)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+# ── Auth System ────────────────────────────────────────────────────────
+from services import auth_mgr
+auth_mgr.set_config_ref(config)
+
+from auth import bp as auth_bp
+app.register_blueprint(auth_bp)
+
+@app.before_request
+def enforce_auth():
+    """Globally protect routes. Exceptions are static files, wifi setup forms, and the auth blueprint itself."""
+    # Allow unauthenticated access to setup, static, auth pages, and wifi connection/status
+    if request.path.startswith('/static') or request.path.startswith('/auth'):
+        return
+    if request.path.startswith('/api/wifi/'):
+        return
+
+    # If AP mode is active (setup_complete is False), we let people use the local network setup portal
+    if not config.is_setup_complete:
+        return
+
+    if not config.get("admin_email"):
+        if request.path.startswith('/api/'):
+            return jsonify({"error": "Setup required."}), 401
+        return redirect(url_for('auth.setup_admin'))
+        
+    if not session.get('logged_in'):
+        if request.path.startswith('/api/'):
+            return jsonify({"error": "Unauthorized.", "redirect": "/auth/login"}), 401
+        return redirect(url_for('auth.login', next=request.url))
 
 
 @app.context_processor
@@ -370,6 +403,13 @@ def display_wifi_connected(ssid, ip_address):
     """Display 'WiFi Connected' confirmation on e-paper with new IP."""
     img = renderer.render_wifi_connected(ssid, ip_address)
     display_state["current_image"] = "[WiFi connected]"
+    return display_pil_image(img)
+
+
+def display_otp_code(code):
+    """Display 6-digit Hardware Auth OTP on e-paper."""
+    img = renderer.render_otp_page(code)
+    display_state["current_image"] = "[OTP Code]"
     return display_pil_image(img)
 
 
@@ -1581,11 +1621,24 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"Could not display QR setup: {e}")
     else:
-        # Display the IP on the e-paper when starting normally
+        # Start ngrok tunnel since network is available
         try:
+            from pyngrok import ngrok
+            logger.info("Initializing ngrok tunnel...")
+            ngrok.set_auth_token("3By64a7MxTOJAWF3eD8TGoLcaIl_5tprPKw4ftjjRSTWU1eVM")
+            public_url = ngrok.connect(5000).public_url
+            logger.info(f"Ngrok Tunnel Active: {public_url}")
+            
+            # Display ngrok URL on e-paper
             ssid = config.get("wifi_ssid", "WiFi")
-            display_wifi_connected(ssid, ip)
+            # We can override the IP display to show the ngrok tunnel so the user knows remote access is ready
+            display_wifi_connected(ssid, ip_address=public_url.replace("https://", ""))
         except Exception as e:
-            pass
+            logger.error(f"Failed to start ngrok: {e}")
+            try:
+                ssid = config.get("wifi_ssid", "WiFi")
+                display_wifi_connected(ssid, ip)
+            except Exception as e2:
+                pass
 
     app.run(host='0.0.0.0', port=5000, debug=False)
