@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import (Flask, jsonify, make_response, redirect, render_template,
-                   request, send_file, send_from_directory, url_for)
+                   request, send_file, send_from_directory, session, url_for)
 from PIL import Image, ImageDraw, ImageFont
 
 # Pillow compatibility
