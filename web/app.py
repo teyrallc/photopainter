@@ -445,22 +445,6 @@ def setup_page():
     return render_template('setup.html', config=config.to_dict())
 
 
-@app.route('/api/qr/<path:data>')
-def api_qr_code(data):
-    """Generate a QR code PNG for any text/URL."""
-    try:
-        import qrcode
-        qr = qrcode.QRCode(version=1, box_size=8, border=2)
-        qr.add_data(data)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white")
-        buf = io.BytesIO()
-        qr_img.save(buf, format="PNG")
-        buf.seek(0)
-        return send_file(buf, mimetype='image/png')
-    except ImportError:
-        return "qrcode module not installed", 500
-
 
 @app.route('/upload')
 def upload_page():
