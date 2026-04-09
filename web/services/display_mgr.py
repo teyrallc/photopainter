@@ -3,10 +3,23 @@ import threading
 import os
 import time
 from datetime import datetime
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from services import renderer
 from services.weather import fetch_weather
 from services.calendar_svc import fetch_calendar_events
+
+# Amsterdam Three logo font path
+_LOGO_FONT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "static", "img", "Amsterdam_Three.ttf"
+)
+_logo_font = None
+
+def _get_logo_font(size):
+    try:
+        return ImageFont.truetype(_LOGO_FONT_PATH, size)
+    except Exception:
+        return ImageFont.load_default()
 
 logger = logging.getLogger("vignette.display")
 display_lock = threading.RLock()
@@ -134,8 +147,11 @@ def display_test_pattern():
         draw.rectangle([x0, 0, x1, EPD_HEIGHT], fill=color)
         tc = (255, 255, 255) if color in [(0, 0, 0), (0, 0, 255)] else (0, 0, 0)
         draw.text((x0 + 10, EPD_HEIGHT // 2), name, fill=tc)
-    draw.rectangle([0, 0, EPD_WIDTH, 40], fill=(0, 0, 0))
-    draw.text((10, 10), "Vignette - E-Paper Test Pattern", fill=(255, 255, 255))
+    draw.rectangle([0, 0, EPD_WIDTH, 48], fill=(0, 0, 0))
+    draw.text((12, 24), "Vignette", fill=(255, 255, 255),
+              font=_get_logo_font(34), anchor="lm")
+    draw.text((240, 24), "— E-Paper Test Pattern", fill=(255, 255, 255),
+              font=ImageFont.load_default(), anchor="lm")
     display_state["current_image"] = "[test pattern]"
     return display_pil_image(img)
 

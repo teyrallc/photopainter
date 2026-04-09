@@ -37,6 +37,30 @@ FONT_PATHS = [
 
 _font_cache = {}
 
+# Amsterdam Three logo font (same file used by the SVG logo)
+_LOGO_FONT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "static", "img", "Amsterdam_Three.ttf"
+)
+_logo_font_cache = {}
+
+
+def _get_logo_font(size):
+    """Get Amsterdam Three font for the Vignette logo wordmark."""
+    if size in _logo_font_cache:
+        return _logo_font_cache[size]
+    try:
+        font = ImageFont.truetype(_LOGO_FONT_PATH, size)
+        _logo_font_cache[size] = font
+        return font
+    except Exception:
+        return _get_font(size)  # graceful fallback
+
+
+def _draw_logo(draw, cx, cy, size, fill):
+    """Draw 'Vignette' wordmark centered at (cx, cy)."""
+    draw.text((cx, cy), "Vignette", fill=fill, font=_get_logo_font(size), anchor="mm")
+
 
 def _get_font(size):
     """Get a font at the given size, trying CJK fonts first for Chinese support."""
@@ -150,9 +174,9 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
     font_small = _get_font(12)
 
     # ── Header bar ──
-    draw.rectangle([0, 0, EPD_W, 42], fill=BLUE)
-    draw.text((EPD_W // 2, 21), "Vignette - WiFi Setup",
-              fill=WHITE, font=font_title, anchor="mm")
+    draw.rectangle([0, 0, EPD_W, 50], fill=BLUE)
+    _draw_logo(draw, 190, 25, 36, WHITE)
+    draw.text((430, 25), "WiFi Setup", fill=WHITE, font=font_title, anchor="lm")
 
     # Layout constants
     qr_size = 240
@@ -164,9 +188,9 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
         import qrcode
 
         # ── Step labels ──
-        draw.text((left_cx, 50), "Step 1: Connect WiFi",
+        draw.text((left_cx, 56), "Step 1: Connect WiFi",
                   fill=RED, font=font_step, anchor="mt")
-        draw.text((right_cx, 50), "Step 2: Open Browser",
+        draw.text((right_cx, 56), "Step 2: Open Browser",
                   fill=RED, font=font_step, anchor="mt")
 
         # ── Left QR: WiFi ──
@@ -214,8 +238,9 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
               f"Scan left QR to join WiFi \"{ap_ssid}\", then scan right QR to open setup page",
               fill=BLACK, font=font_small, anchor="mt")
 
-    # ── Copyright ──
-    draw.text((EPD_W // 2, EPD_H - 10),
+    # ── Logo + Copyright ──
+    _draw_logo(draw, EPD_W // 2, EPD_H - 26, 20, BLACK)
+    draw.text((EPD_W // 2, EPD_H - 4),
               "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=_get_font(11), anchor="mb")
 
     return img
@@ -268,7 +293,8 @@ def render_wifi_connected(ssid, ip_address, port=5000):
               "Connect your phone to the same WiFi, then scan QR or type the URL",
               fill=BLACK, font=font_small, anchor="mt")
 
-    draw.text((EPD_W // 2, EPD_H - 18),
+    _draw_logo(draw, EPD_W // 2, EPD_H - 34, 22, BLACK)
+    draw.text((EPD_W // 2, EPD_H - 8),
               "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
 
     return img
@@ -297,7 +323,8 @@ def render_otp_page(code):
     # Expiry warning
     draw.text((EPD_W // 2, EPD_H // 2 + 130), "This code will expire in 10 minutes.", fill=RED, font=font_small, anchor="mm")
 
-    draw.text((EPD_W // 2, EPD_H - 20),
+    _draw_logo(draw, EPD_W // 2, EPD_H - 38, 22, BLACK)
+    draw.text((EPD_W // 2, EPD_H - 10),
               "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
 
     return img
