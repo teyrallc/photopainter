@@ -151,4 +151,6 @@ photopainter/
 
 MIT License
 
+![Vignette](web/static/img/vignette-logo.svg)
+
 &copy; 2026 Teyra LLC W.Weng
