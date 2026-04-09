@@ -97,19 +97,22 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     draw.line([(400, 0), (400, EPD_H)], fill=BLACK, width=2)
     draw.line([(0, 240), (400, 240)], fill=BLACK, width=1)
 
-    # Right: Photo (400x480)
+    # Right: Photo panel (x=402–798, 396×480)
+    PANEL_CX = 402 + 396 // 2   # 600
+    PANEL_CY = EPD_H // 2       # 240
+
     if photo_path and os.path.exists(photo_path):
         photo = _prepare_photo(photo_path, 396, 478,
                                config.get("photo_rotation", 0),
                                config.get("photo_fit_mode", "fit"))
-        # Center photo in right panel
         px = 402 + (396 - photo.width) // 2
         py = 1 + (478 - photo.height) // 2
         img.paste(photo, (px, py))
     else:
-        # No photo placeholder
-        font = _get_font(20)
-        draw.text((500, 220), "No Photo", fill=BLACK, font=font, anchor="mm")
+        # Default: Vignette logo as placeholder
+        _draw_logo(draw, PANEL_CX, PANEL_CY - 20, 82, BLACK)
+        draw.text((PANEL_CX, PANEL_CY + 62),
+                  "Smart Display", fill=BLACK, font=_get_font(14), anchor="mt")
 
     return img
 
