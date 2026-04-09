@@ -37,6 +37,30 @@ FONT_PATHS = [
 
 _font_cache = {}
 
+# Amsterdam Three logo font (same file used by the SVG logo)
+_LOGO_FONT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "static", "img", "Amsterdam_Three.ttf"
+)
+_logo_font_cache = {}
+
+
+def _get_logo_font(size):
+    """Get Amsterdam Three font for the Vignette logo wordmark."""
+    if size in _logo_font_cache:
+        return _logo_font_cache[size]
+    try:
+        font = ImageFont.truetype(_LOGO_FONT_PATH, size)
+        _logo_font_cache[size] = font
+        return font
+    except Exception:
+        return _get_font(size)  # graceful fallback
+
+
+def _draw_logo(draw, cx, cy, size, fill):
+    """Draw 'Vignette' wordmark centered at (cx, cy)."""
+    draw.text((cx, cy), "Vignette", fill=fill, font=_get_logo_font(size), anchor="mm")
+
 
 def _get_font(size):
     """Get a font at the given size, trying CJK fonts first for Chinese support."""
@@ -73,19 +97,22 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     draw.line([(400, 0), (400, EPD_H)], fill=BLACK, width=2)
     draw.line([(0, 240), (400, 240)], fill=BLACK, width=1)
 
-    # Right: Photo (400x480)
+    # Right: Photo panel (x=402–798, 396×480)
+    PANEL_CX = 402 + 396 // 2   # 600
+    PANEL_CY = EPD_H // 2       # 240
+
     if photo_path and os.path.exists(photo_path):
         photo = _prepare_photo(photo_path, 396, 478,
                                config.get("photo_rotation", 0),
                                config.get("photo_fit_mode", "fit"))
-        # Center photo in right panel
         px = 402 + (396 - photo.width) // 2
         py = 1 + (478 - photo.height) // 2
         img.paste(photo, (px, py))
     else:
-        # No photo placeholder
-        font = _get_font(20)
-        draw.text((500, 220), "No Photo", fill=BLACK, font=font, anchor="mm")
+        # Default: Vignette logo as placeholder
+        _draw_logo(draw, PANEL_CX, PANEL_CY - 20, 82, BLACK)
+        draw.text((PANEL_CX, PANEL_CY + 62),
+                  "Smart Display", fill=BLACK, font=_get_font(14), anchor="mt")
 
     return img
 
@@ -128,14 +155,7 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
 
 def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password="vignette123"):
     """Render QR code WiFi setup page on e-paper (800x480).
-
-    Layout (800x480):
-      Row 1 (0-42):   Blue header "Vignette - WiFi Setup"
-      Row 2 (48-68):  "Step 1" label  |  "Step 2" label
-      Row 3 (70-310): WiFi QR code    |  URL QR code
-      Row 4 (315-350): SSID/pass info |  URL info
-      Row 5 (380-430): Instructions text
-      Row 6 (440-480): Copyright
+    Modern two-column layout: WiFi QR | URL QR.
     """
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
@@ -143,133 +163,136 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
     wifi_qr_str = f"WIFI:T:WPA;S:{ap_ssid};P:{ap_password};;"
     url_str = f"http://192.168.4.1:{port}"
 
-    font_title = _get_font(26)
-    font_step = _get_font(20)
-    font_label = _get_font(15)
-    font_info = _get_font(14)
-    font_small = _get_font(12)
+    font_header = _get_font(22)
+    font_step   = _get_font(15)
+    font_info   = _get_font(14)
+    font_small  = _get_font(12)
+    font_tiny   = _get_font(10)
 
-    # ── Header bar ──
-    draw.rectangle([0, 0, EPD_W, 42], fill=BLUE)
-    draw.text((EPD_W // 2, 21), "Vignette - WiFi Setup",
-              fill=WHITE, font=font_title, anchor="mm")
+    # ── Header (0–60): logo left · divider · "WiFi Setup" right ──
+    draw.rectangle([0, 0, EPD_W, 60], fill=BLUE)
+    _draw_logo(draw, EPD_W // 2 - 80, 30, 38, WHITE)
+    draw.line([(EPD_W // 2 - 8, 14), (EPD_W // 2 - 8, 46)],
+              fill=(180, 180, 220), width=1)
+    draw.text((EPD_W // 2 + 52, 30), "WiFi Setup",
+              fill=WHITE, font=font_header, anchor="mm")
 
-    # Layout constants
-    qr_size = 240
-    left_cx = 200   # center x of left half
-    right_cx = 600  # center x of right half
-    qr_top = 72
+    # ── Column centers ──
+    L = EPD_W // 4        # 200
+    R = 3 * EPD_W // 4   # 600
+    QR_SIZE = 210
+    QR_TOP  = 88
+
+    # Vertical divider between columns
+    draw.line([(EPD_W // 2, 64), (EPD_W // 2, EPD_H - 80)],
+              fill=(180, 180, 180), width=1)
+
+    # ── Step indicators (64–86) ──
+    for i, (cx, label) in enumerate([(L, "Connect to WiFi"), (R, "Open Browser")], 1):
+        draw.ellipse([cx - 36, 68, cx - 16, 84], fill=BLUE)
+        draw.text((cx - 26, 76), str(i), fill=WHITE, font=font_tiny, anchor="mm")
+        draw.text((cx - 6,  76), label, fill=BLACK, font=font_step, anchor="lm")
 
     try:
         import qrcode
 
-        # ── Step labels ──
-        draw.text((left_cx, 50), "Step 1: Connect WiFi",
-                  fill=RED, font=font_step, anchor="mt")
-        draw.text((right_cx, 50), "Step 2: Open Browser",
-                  fill=RED, font=font_step, anchor="mt")
-
-        # ── Left QR: WiFi ──
-        qr1_x = left_cx - qr_size // 2
-        qr = qrcode.QRCode(version=1, box_size=8, border=2)
+        # Left QR — WiFi credentials
+        qr = qrcode.QRCode(box_size=7, border=2)
         qr.add_data(wifi_qr_str)
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        qr_img = qr_img.resize((qr_size, qr_size), _lanczos())
-        img.paste(qr_img, (qr1_x, qr_top))
+        qr_img = qr_img.resize((QR_SIZE, QR_SIZE), _lanczos())
+        img.paste(qr_img, (L - QR_SIZE // 2, QR_TOP))
 
-        # ── Right QR: URL ──
-        qr2_x = right_cx - qr_size // 2
-        qr2 = qrcode.QRCode(version=1, box_size=8, border=2)
+        # Right QR — setup URL
+        qr2 = qrcode.QRCode(box_size=7, border=2)
         qr2.add_data(url_str)
         qr2.make(fit=True)
         qr2_img = qr2.make_image(fill_color="black", back_color="white").convert("RGB")
-        qr2_img = qr2_img.resize((qr_size, qr_size), _lanczos())
-        img.paste(qr2_img, (qr2_x, qr_top))
+        qr2_img = qr2_img.resize((QR_SIZE, QR_SIZE), _lanczos())
+        img.paste(qr2_img, (R - QR_SIZE // 2, QR_TOP))
 
-        # ── Info below QRs ──
-        below_qr = qr_top + qr_size + 6
-        draw.text((left_cx, below_qr),
-                  f"WiFi: {ap_ssid}", fill=BLACK, font=font_info, anchor="mt")
-        draw.text((left_cx, below_qr + 18),
-                  f"Password: {ap_password}", fill=BLACK, font=font_small, anchor="mt")
-
-        draw.text((right_cx, below_qr),
-                  url_str, fill=BLUE, font=font_info, anchor="mt")
-        draw.text((right_cx, below_qr + 18),
-                  "Set up your home WiFi", fill=BLACK, font=font_small, anchor="mt")
+        # Info below QRs
+        info_y = QR_TOP + QR_SIZE + 8   # 306
+        draw.text((L, info_y),      ap_ssid,     fill=BLACK, font=font_info,  anchor="mt")
+        draw.text((L, info_y + 17), ap_password, fill=BLACK, font=font_small, anchor="mt")
+        draw.text((R, info_y),      url_str,     fill=BLUE,  font=font_info,  anchor="mt")
 
     except ImportError:
-        draw.text((EPD_W // 2, EPD_H // 2),
-                  "QR Code\n(install qrcode module)", fill=RED, font=font_step, anchor="mm")
+        draw.text((EPD_W // 2, 240),
+                  "Install qrcode module", fill=RED, font=font_header, anchor="mm")
 
-    # ── Arrow between QRs ──
-    arrow_y = qr_top + qr_size // 2
-    draw.text((EPD_W // 2, arrow_y), "->",
-              fill=RED, font=_get_font(30), anchor="mm")
-
-    # ── Bottom instructions ──
-    inst_y = EPD_H - 60
-    draw.text((EPD_W // 2, inst_y),
-              f"Scan left QR to join WiFi \"{ap_ssid}\", then scan right QR to open setup page",
-              fill=BLACK, font=font_small, anchor="mt")
-
-    # ── Copyright ──
-    draw.text((EPD_W // 2, EPD_H - 10),
-              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=_get_font(11), anchor="mb")
+    # ── Footer ──
+    FT = EPD_H - 80   # 400
+    draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
+    draw.text((EPD_W // 2, FT + 6),
+              f'\u2460 Scan left QR  \u2192  Join "{ap_ssid}"'
+              f'     \u2461 Scan right QR  \u2192  Open browser',
+              fill=BLACK, font=font_tiny, anchor="mt")
+    _draw_logo(draw, EPD_W // 2, FT + 38, 18, BLACK)
+    draw.text((EPD_W // 2, FT + 60),
+              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 
 
 def render_wifi_connected(ssid, ip_address, port=5000):
-    """Render 'WiFi Connected' confirmation page on e-paper.
-    Shows the new IP address so the user knows where to access the web UI."""
+    """Render 'WiFi Connected' confirmation page on e-paper (800x480).
+    Clean centered layout: header · network · URL · QR · footer.
+    """
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    if "ngrok" in ip_address or "ngrok-free.app" in ip_address:
-        # ngrok urls don't need port 5000 appended
-        url = f"https://{ip_address}"
-    else:
-        url = f"http://{ip_address}:{port}"
+    url = (f"https://{ip_address}"
+           if ("ngrok" in ip_address or "ngrok-free.app" in ip_address)
+           else f"http://{ip_address}:{port}")
 
-    font_title = _get_font(36)
-    font_big = _get_font(28)
-    font_body = _get_font(22)
-    font_info = _get_font(18)
-    font_small = _get_font(14)
+    font_title = _get_font(34)
+    font_label = _get_font(18)
+    font_small = _get_font(13)
+    font_tiny  = _get_font(10)
 
-    # Success header
-    draw.rectangle([0, 0, EPD_W, 60], fill=GREEN)
-    draw.text((EPD_W // 2, 30), "WiFi Connected!", fill=WHITE, font=font_title, anchor="mm")
+    # ── Header (0–58) ──
+    draw.rectangle([0, 0, EPD_W, 58], fill=GREEN)
+    draw.text((EPD_W // 2, 29), "WiFi Connected!",
+              fill=WHITE, font=font_title, anchor="mm")
 
-    # WiFi network name
-    draw.text((EPD_W // 2, 100), f"Network: {ssid}", fill=BLACK, font=font_body, anchor="mt")
+    # ── Network name ──
+    draw.text((EPD_W // 2, 72), f"Network:  {ssid}",
+              fill=BLACK, font=font_label, anchor="mt")
 
-    # Big URL - this is the most important info
-    draw.text((EPD_W // 2, 160), "Open in browser:", fill=BLACK, font=font_info, anchor="mt")
-    draw.text((EPD_W // 2, 200), url, fill=BLUE, font=font_big, anchor="mt")
+    # ── URL (adaptive font: shorter URL = larger text) ──
+    url_fs = 22 if len(url) <= 35 else 18 if len(url) <= 50 else 13
+    draw.text((EPD_W // 2, 100), "Open in your browser:",
+              fill=BLACK, font=font_small, anchor="mt")
+    draw.text((EPD_W // 2, 120), url,
+              fill=BLUE, font=_get_font(url_fs), anchor="mt")
 
-    # QR code for the URL
+    # ── QR code (fixed 210 px, centered) ──
+    QR_SIZE = 210
+    QR_TOP  = 150
     try:
         import qrcode
-        qr = qrcode.QRCode(version=1, box_size=5, border=2)
+        qr = qrcode.QRCode(box_size=6, border=2)
         qr.add_data(url)
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        qr_x = (EPD_W - qr_img.width) // 2
-        img.paste(qr_img, (qr_x, 250))
-        qr_bottom = 250 + qr_img.height + 10
+        qr_img = qr_img.resize((QR_SIZE, QR_SIZE), _lanczos())
+        img.paste(qr_img, ((EPD_W - QR_SIZE) // 2, QR_TOP))
     except ImportError:
-        qr_bottom = 260
+        pass
 
-    # Instructions
-    draw.text((EPD_W // 2, max(qr_bottom, 420)),
-              "Connect your phone to the same WiFi, then scan QR or type the URL",
-              fill=BLACK, font=font_small, anchor="mt")
+    # ── Instructions ──
+    draw.text((EPD_W // 2, QR_TOP + QR_SIZE + 10),
+              "Scan the QR code or type the URL in your browser",
+              fill=BLACK, font=font_tiny, anchor="mt")
 
-    draw.text((EPD_W // 2, EPD_H - 18),
-              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
+    # ── Footer ──
+    FT = EPD_H - 74   # 406
+    draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
+    _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
+    draw.text((EPD_W // 2, FT + 52),
+              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 
@@ -279,26 +302,37 @@ def render_otp_page(code):
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    font_title = _get_font(42)
-    font_code = _get_font(120)
-    font_desc = _get_font(24)
-    font_small = _get_font(16)
+    font_title = _get_font(38)
+    font_code  = _get_font(100)
+    font_desc  = _get_font(22)
+    font_small = _get_font(15)
+    font_tiny  = _get_font(10)
 
-    # Header
-    draw.rectangle([0, 0, EPD_W, 70], fill=RED)
-    draw.text((EPD_W // 2, 35), "Authentication Required", fill=WHITE, font=font_title, anchor="mm")
+    # ── Header (0–65) ──
+    draw.rectangle([0, 0, EPD_W, 65], fill=RED)
+    draw.text((EPD_W // 2, 32), "Authentication Required",
+              fill=WHITE, font=font_title, anchor="mm")
 
-    # Code
-    draw.text((EPD_W // 2, EPD_H // 2 - 20), code, fill=BLACK, font=font_code, anchor="mm")
+    # ── Sub-label ──
+    draw.text((EPD_W // 2, 82), "Hardware Verification Code",
+              fill=BLACK, font=_get_font(16), anchor="mt")
 
-    # Description
-    draw.text((EPD_W // 2, EPD_H // 2 + 80), "Enter this 6-digit code on the web interface.", fill=BLACK, font=font_desc, anchor="mm")
-    
-    # Expiry warning
-    draw.text((EPD_W // 2, EPD_H // 2 + 130), "This code will expire in 10 minutes.", fill=RED, font=font_small, anchor="mm")
+    # ── OTP Code ──
+    draw.text((EPD_W // 2, 228), code,
+              fill=BLACK, font=font_code, anchor="mm")
 
-    draw.text((EPD_W // 2, EPD_H - 20),
-              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
+    # ── Description + expiry ──
+    draw.text((EPD_W // 2, 320), "Enter this code on the web interface.",
+              fill=BLACK, font=font_desc, anchor="mt")
+    draw.text((EPD_W // 2, 356), "Expires in 10 minutes.",
+              fill=RED, font=font_small, anchor="mt")
+
+    # ── Footer (consistent with other pages) ──
+    FT = EPD_H - 74   # 406
+    draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
+    _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
+    draw.text((EPD_W // 2, FT + 52),
+              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 

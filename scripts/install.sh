@@ -71,7 +71,7 @@ SERVICE_FILE="/etc/systemd/system/vignette.service"
 sudo bash -c "cat > $SERVICE_FILE" << SVCEOF
 [Unit]
 Description=Vignette - H System Smart Display Web Interface
-Documentation=https://github.com/teyrallc/photopainter
+Documentation=https://github.com/teyrallc/Vignette
 After=network-online.target
 Wants=network-online.target
 
