@@ -1,13 +1,12 @@
 # Vignette - H System Smart Display
 
-基於 Waveshare 7.3 吋 6 色電子紙的智慧螢幕系統。
-A smart display system based on the Waveshare 7.3" 6-color e-paper display.
+A smart display system based on the Waveshare 7.3" 6-color e-paper display, running on Raspberry Pi Zero 2 W.
 
-## 系統架構 / Architecture
+## Architecture
 
 ```
 ┌──────────────────────────────────┐
-│  手機 / 平板 / 電腦               │
+│  Phone / Tablet / Computer        │
 │  Browser → http://<Pi-IP>:5000   │
 └──────────────┬───────────────────┘
                │ WiFi
@@ -28,18 +27,18 @@ A smart display system based on the Waveshare 7.3" 6-color e-paper display.
 └────────────────────────────────────┘
 ```
 
-## 功能 / Features
+## Features
 
-- **Web 遠端控制** - 任何裝置透過瀏覽器操作（響應式介面）
-- **上傳圖片** - 拖曳上傳、即時預覽電子紙 7 色效果
-- **照片導航** - Web 虛擬按鍵瀏覽照片（上一張/下一張/最新）
-- **測試圖案** - 一鍵發送 7 色測試圖案驗證硬體
-- **遠端管理** - 更新程式、重啟、關機
-- **系統監控** - CPU 溫度、記憶體、磁碟、運行時間
+- **Web Remote Control** - Operate from any device via browser (responsive UI)
+- **Photo Upload** - Drag-and-drop upload with real-time 7-color e-paper preview
+- **Photo Navigation** - Browse photos via web virtual buttons (prev / next / latest)
+- **Test Pattern** - Send a 7-color test pattern with one click to verify hardware
+- **Remote Management** - Update code, reboot, or shut down remotely
+- **System Monitoring** - CPU temperature, memory, disk usage, and uptime
 
-## 硬體需求 / Hardware
+## Hardware Requirements
 
-| 項目 / Item | 規格 / Spec |
+| Item | Spec |
 |------|------|
 | Board | Raspberry Pi Zero 2 W |
 | Carrier | Waveshare RPi Zero PhotoPainter Board |
@@ -47,9 +46,9 @@ A smart display system based on the Waveshare 7.3" 6-color e-paper display.
 | Battery | 3.7V 1500mAh Li-Po |
 | Storage | 32GB+ microSD (64GB recommended) |
 
-## 快速開始 / Quick Start
+## Quick Start
 
-### 1. 準備 Raspberry Pi
+### 1. Prepare Raspberry Pi
 
 ```bash
 # Enable SPI
@@ -57,7 +56,7 @@ sudo raspi-config
 # → Interface Options → SPI → Enable
 ```
 
-### 2. 一鍵安裝 / Install
+### 2. Install
 
 ```bash
 git clone https://github.com/teyrallc/photopainter.git
@@ -65,22 +64,40 @@ cd photopainter
 bash scripts/install.sh
 ```
 
-### 3. 存取 Web 介面 / Access Web UI
+### 3. Access Web UI
 
 ```
 http://<Pi-IP>:5000
 ```
 
-## 服務管理 / Service Management
+## Service Management
 
 ```bash
-sudo systemctl status vignette     # 查看狀態 / Status
-sudo systemctl restart vignette    # 重啟 / Restart
-sudo systemctl stop vignette       # 停止 / Stop
-journalctl -u vignette -f          # 日誌 / Logs
+sudo systemctl status vignette     # Check status
+sudo systemctl restart vignette    # Restart service
+sudo systemctl stop vignette       # Stop service
+journalctl -u vignette -f          # View live logs
 ```
 
-## API
+## Updating the Code
+
+To pull the latest changes from GitHub and restart the service:
+
+```bash
+cd ~/photopainter
+git pull origin main
+sudo systemctl restart vignette
+```
+
+Or use the built-in update script:
+
+```bash
+bash scripts/update.sh
+```
+
+You can also trigger a remote update from the Web UI under **Settings → System → Update**.
+
+## API Reference
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -100,7 +117,7 @@ journalctl -u vignette -f          # 日誌 / Logs
 | POST | `/api/system/reboot` | Reboot |
 | POST | `/api/system/shutdown` | Shutdown |
 
-## 專案結構 / Project Structure
+## Project Structure
 
 ```
 photopainter/
@@ -112,6 +129,8 @@ photopainter/
 │   └── display_buttons.py       # GPIO button controller
 ├── web/
 │   ├── app.py                   # Flask web application
+│   ├── auth.py                  # Authentication logic
+│   ├── services/                # Business logic services
 │   ├── templates/               # HTML templates
 │   └── static/                  # CSS/JS static files
 ├── scripts/
@@ -123,13 +142,15 @@ photopainter/
 └── README.md
 ```
 
-## 致謝 / Credits
+## Credits
 
 - [Waveshare e-Paper](https://github.com/waveshare/e-Paper) - E-paper driver
 - [Waveshare RPi Zero PhotoPainter](https://www.waveshare.net/wiki/RPi_Zero_PhotoPainter) - Hardware reference
 
-## 授權 / License
+## License
 
 MIT License
+
+![Vignette](web/static/img/vignette-logo.svg)
 
 &copy; 2026 Teyra LLC W.Weng
