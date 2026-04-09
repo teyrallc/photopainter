@@ -1,14 +1,14 @@
 [Unit]
 Description=Vignette - H System Smart Display Web Interface
-Documentation=https://github.com/teyrallc/photopainter
+Documentation=https://github.com/teyrallc/Vignette
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/home/pi/photopainter
-ExecStart=/home/pi/photopainter/venv/bin/python /home/pi/photopainter/web/app.py
+WorkingDirectory=/home/pi/Vignette
+ExecStart=/home/pi/Vignette/venv/bin/python /home/pi/Vignette/web/app.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

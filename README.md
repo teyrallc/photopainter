@@ -59,8 +59,8 @@ sudo raspi-config
 ### 2. Install
 
 ```bash
-git clone https://github.com/teyrallc/photopainter.git
-cd photopainter
+git clone https://github.com/teyrallc/Vignette.git
+cd Vignette
 bash scripts/install.sh
 ```
 
@@ -84,7 +84,7 @@ journalctl -u vignette -f          # View live logs
 To pull the latest changes from GitHub and restart the service:
 
 ```bash
-cd ~/photopainter
+cd ~/Vignette
 git pull origin main
 sudo systemctl restart vignette
 ```
@@ -120,7 +120,7 @@ You can also trigger a remote update from the Web UI under **Settings → System
 ## Project Structure
 
 ```
-photopainter/
+Vignette/
 ├── lib/waveshare_epd/           # Waveshare e-paper driver
 │   ├── epd7in3e.py              # 7.3" 6-color display driver (E model)
 │   └── epdconfig.py             # SPI/GPIO hardware config
@@ -151,6 +151,6 @@ photopainter/
 
 MIT License
 
-![Vignette](web/static/img/vignette-logo.svg)
+<img src="web/static/img/vignette-logo.svg" width="320" alt="Vignette">
 
 &copy; 2026 Teyra LLC W.Weng
