@@ -299,27 +299,37 @@ def render_otp_page(code):
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    font_title = _get_font(42)
-    font_code = _get_font(120)
-    font_desc = _get_font(24)
-    font_small = _get_font(16)
+    font_title = _get_font(38)
+    font_code  = _get_font(100)
+    font_desc  = _get_font(22)
+    font_small = _get_font(15)
+    font_tiny  = _get_font(10)
 
-    # Header
-    draw.rectangle([0, 0, EPD_W, 70], fill=RED)
-    draw.text((EPD_W // 2, 35), "Authentication Required", fill=WHITE, font=font_title, anchor="mm")
+    # ── Header (0–65) ──
+    draw.rectangle([0, 0, EPD_W, 65], fill=RED)
+    draw.text((EPD_W // 2, 32), "Authentication Required",
+              fill=WHITE, font=font_title, anchor="mm")
 
-    # Code
-    draw.text((EPD_W // 2, EPD_H // 2 - 20), code, fill=BLACK, font=font_code, anchor="mm")
+    # ── Sub-label ──
+    draw.text((EPD_W // 2, 82), "Hardware Verification Code",
+              fill=BLACK, font=_get_font(16), anchor="mt")
 
-    # Description
-    draw.text((EPD_W // 2, EPD_H // 2 + 80), "Enter this 6-digit code on the web interface.", fill=BLACK, font=font_desc, anchor="mm")
-    
-    # Expiry warning
-    draw.text((EPD_W // 2, EPD_H // 2 + 130), "This code will expire in 10 minutes.", fill=RED, font=font_small, anchor="mm")
+    # ── OTP Code ──
+    draw.text((EPD_W // 2, 228), code,
+              fill=BLACK, font=font_code, anchor="mm")
 
-    _draw_logo(draw, EPD_W // 2, EPD_H - 38, 22, BLACK)
-    draw.text((EPD_W // 2, EPD_H - 10),
-              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_small, anchor="mb")
+    # ── Description + expiry ──
+    draw.text((EPD_W // 2, 320), "Enter this code on the web interface.",
+              fill=BLACK, font=font_desc, anchor="mt")
+    draw.text((EPD_W // 2, 356), "Expires in 10 minutes.",
+              fill=RED, font=font_small, anchor="mt")
+
+    # ── Footer (consistent with other pages) ──
+    FT = EPD_H - 74   # 406
+    draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
+    _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
+    draw.text((EPD_W // 2, FT + 52),
+              "\u00a9 2026 Teyra LLC W.Weng", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 
