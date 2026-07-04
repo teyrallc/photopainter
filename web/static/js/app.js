@@ -17,18 +17,23 @@ function showToast(message, type) {
     if (!container) return;
 
     var toastId = 'toast-' + Date.now();
-    var bgClass = {
-        'success': 'bg-success',
-        'danger': 'bg-danger',
-        'warning': 'bg-warning text-dark',
-        'info': 'bg-info text-dark',
-    }[type] || 'bg-info text-dark';
+    // Text colour must follow the background: light backgrounds (warning/info)
+    // need dark text and a dark close button; dark backgrounds (success/danger)
+    // need white. The old code hardcoded white text on every toast, so warning
+    // and info toasts were white-on-light and unreadable.
+    var styles = {
+        'success': { bg: 'bg-success', text: 'text-white', close: 'btn-close-white' },
+        'danger':  { bg: 'bg-danger',  text: 'text-white', close: 'btn-close-white' },
+        'warning': { bg: 'bg-warning', text: 'text-dark',  close: '' },
+        'info':    { bg: 'bg-info',    text: 'text-dark',  close: '' },
+    };
+    var s = styles[type] || styles.info;
 
     var html =
-        '<div id="' + toastId + '" class="toast align-items-center ' + bgClass + ' text-white border-0" role="alert">' +
+        '<div id="' + toastId + '" class="toast align-items-center ' + s.bg + ' ' + s.text + ' border-0" role="alert" aria-live="assertive" aria-atomic="true">' +
             '<div class="d-flex">' +
                 '<div class="toast-body">' + message + '</div>' +
-                '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>' +
+                '<button type="button" class="btn-close ' + s.close + ' me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>' +
             '</div>' +
         '</div>';
     container.insertAdjacentHTML('beforeend', html);

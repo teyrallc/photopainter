@@ -101,10 +101,12 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     PANEL_CX = 402 + 396 // 2   # 600
     PANEL_CY = EPD_H // 2       # 240
 
+    photo = None
     if photo_path and os.path.exists(photo_path):
         photo = _prepare_photo(photo_path, 396, 478,
                                config.get("photo_rotation", 0),
                                config.get("photo_fit_mode", "fit"))
+    if photo is not None:
         px = 402 + (396 - photo.width) // 2
         py = 1 + (478 - photo.height) // 2
         img.paste(photo, (px, py))
@@ -139,8 +141,10 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
     """Render full-screen photo with rotation and fit mode."""
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
 
+    photo = None
     if photo_path and os.path.exists(photo_path):
         photo = _prepare_photo(photo_path, EPD_W, EPD_H, rotation, fit_mode)
+    if photo is not None:
         px = (EPD_W - photo.width) // 2
         py = (EPD_H - photo.height) // 2
         img.paste(photo, (px, py))
@@ -341,8 +345,15 @@ def render_otp_page(code):
 
 
 def _prepare_photo(path, max_w, max_h, rotation=0, fit_mode="fit"):
-    """Load, rotate, and resize a photo."""
-    photo = Image.open(path).convert("RGB")
+    """Load, rotate, and resize a photo. Returns None if the file cannot be
+    decoded (truncated/corrupt upload) so callers can fall back to a placeholder
+    instead of raising a 500 out of the render path."""
+    try:
+        with Image.open(path) as src:
+            photo = src.convert("RGB")
+    except Exception as e:
+        logger.warning(f"Could not decode photo {path}: {e}")
+        return None
 
     if rotation:
         photo = photo.rotate(-rotation, expand=True)
@@ -572,18 +583,23 @@ def _draw_calendar_fullscreen(draw, events):
                 color = RED if col_idx >= 5 else BLACK
                 draw.text((cx, cy), str(day), fill=color, font=font_day, anchor="mm")
 
-    # Events list
+    # Events list. For a 6-week month the grid pushes ey down far enough that
+    # fixed events[:4] would overflow the 480px panel, so cap by available space.
     ey = grid_y + (len(cal) + 1) * cell_h + 20
     draw.line([(50, ey - 5), (EPD_W - 50, ey - 5)], fill=BLACK, width=1)
 
+    line_h = 24
+    bottom_margin = 16
+    max_events = max(0, (EPD_H - bottom_margin - ey) // line_h)
+
     if events:
-        for ev in events[:4]:
+        for ev in events[:max_events]:
             start = ev.get("start")
             summary = ev.get("summary", "?")[:30]
             if start:
                 ts = start.strftime("%m/%d %H:%M")
                 draw.text((80, ey), f"• {ts}  {summary}", fill=BLACK, font=font_event)
-                ey += 24
+                ey += line_h
     else:
         draw.text((EPD_W // 2, ey + 5), "No upcoming events",
                   fill=BLACK, font=font_event, anchor="mt")

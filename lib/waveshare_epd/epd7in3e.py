@@ -29,11 +29,16 @@
 #
 
 import logging
+import time
 from . import epdconfig
 
 import PIL
 from PIL import Image
 import io
+
+# Hard cap on how long to wait for the panel's BUSY line to go idle. Without it
+# a disconnected/mis-wired panel spins forever while holding the display lock.
+BUSY_TIMEOUT_S = 40
 
 # Display resolution
 EPD_WIDTH       = 800
@@ -86,7 +91,11 @@ class EPD:
 
     def ReadBusyH(self):
         logger.debug("e-Paper busy H")
+        deadline = time.time() + BUSY_TIMEOUT_S
         while(epdconfig.digital_read(self.busy_pin) == 0):      # 0: busy, 1: idle
+            if time.time() > deadline:
+                raise TimeoutError("e-Paper BUSY did not release within "
+                                   f"{BUSY_TIMEOUT_S}s")
             epdconfig.delay_ms(5)
         logger.debug("e-Paper busy H release")
 

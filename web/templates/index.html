@@ -10,13 +10,14 @@
         <div class="card">
             <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-display"></i> {{ t.epaper_preview }}</span>
-                <button class="btn btn-sm btn-outline-light" onclick="refreshPreview()">
+                <button class="btn btn-sm btn-outline-light" onclick="refreshPreview()"
+                        aria-label="{{ t.epaper_preview }}" title="{{ t.epaper_preview }}">
                     <i class="bi bi-arrow-clockwise"></i>
                 </button>
             </div>
             <div class="card-body text-center p-3" style="background:#e8e8e8;">
                 <div style="display:inline-block;border:3px solid #333;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
-                    <img id="epaper-preview" src="/api/preview/current?t={{ now }}"
+                    <img id="epaper-preview" src="/api/preview-current?t={{ now }}"
                          style="width:100%;max-width:640px;height:auto;display:block;"
                          alt="E-paper Preview">
                 </div>
@@ -126,7 +127,7 @@
             </div>
             <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label small">{{ t.slideshow_interval }}</label>
+                    <label class="form-label small" for="slideshow-interval">{{ t.slideshow_interval }}</label>
                     <select class="form-select form-select-sm" id="slideshow-interval">
                         <option value="60" {% if config.slideshow_interval == 60 %}selected{% endif %}>1 {{ t.minute }}</option>
                         <option value="300" {% if config.slideshow_interval == 300 or not config.slideshow_interval %}selected{% endif %}>5 {{ t.minutes }}</option>
@@ -136,7 +137,7 @@
                     </select>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label small">{{ t.slideshow_order }}</label>
+                    <label class="form-label small" for="slideshow-order">{{ t.slideshow_order }}</label>
                     <select class="form-select form-select-sm" id="slideshow-order">
                         <option value="sequential" {% if config.slideshow_order != 'random' %}selected{% endif %}>{{ t.sequential }}</option>
                         <option value="random" {% if config.slideshow_order == 'random' %}selected{% endif %}>{{ t.random }}</option>
@@ -316,13 +317,13 @@ function setWidget(mode) {
     }).then(r => r.json()).then(d => {
         if (d.success) refreshPreview();
         else showToast(d.error, 'danger');
-    });
+    }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 // ── Preview ──
 function refreshPreview() {
     const img = document.getElementById('epaper-preview');
-    img.src = '/api/preview/current?t=' + Date.now();
+    img.src = '/api/preview-current?t=' + Date.now();
 }
 
 // ── Update Display (THE button to push to e-paper) ──
@@ -347,23 +348,44 @@ function updateDisplay() {
     });
 }
 
-// ── Photo navigation (config only, updates preview) ──
+// ── Photo navigation (advances selection AND pushes to the e-paper) ──
 function _photoNav(url) {
     fetch(url, {method: 'POST'}).then(r => r.json()).then(d => {
         if (d.success && d.photo) {
-            document.getElementById('photo-index').textContent = d.photo.current_index + 1;
+            document.getElementById('photo-index').textContent =
+                d.photo.current_index >= 0 ? d.photo.current_index + 1 : '-';
             document.getElementById('photo-total').textContent = d.photo.total;
-            const nameEl = document.getElementById('current-photo-name');
-            const imgEl = document.getElementById('current-photo-img');
-            if (d.photo.current_image) {
-                if (imgEl) imgEl.src = '/output/' + d.photo.current_image;
-                nameEl.innerHTML = '<strong>' + d.photo.current_image + '</strong>';
+            const preview = document.getElementById('photo-preview');
+            if (preview && d.photo.current_image) {
+                // Rebuild the block with createElement/textContent so the <img>
+                // appears even when the dashboard first loaded with no photo, and
+                // so a crafted filename can't inject HTML.
+                preview.innerHTML = '';
+                const frame = document.createElement('div');
+                frame.className = 'epaper-frame';
+                const img = document.createElement('img');
+                img.id = 'current-photo-img';
+                img.src = '/output/' + encodeURIComponent(d.photo.current_image);
+                img.className = 'img-fluid rounded';
+                img.alt = 'Current';
+                img.style.maxHeight = '150px';
+                img.style.objectFit = 'contain';
+                frame.appendChild(img);
+                const name = document.createElement('p');
+                name.id = 'current-photo-name';
+                name.className = 'mt-2 mb-0 small';
+                const strong = document.createElement('strong');
+                strong.textContent = d.photo.current_image;
+                name.appendChild(strong);
+                preview.appendChild(frame);
+                preview.appendChild(name);
             }
             refreshPreview();
+            if (d.displayed) showToast('{{ t.displayed_ok }}', 'success');
         } else if (d.error) {
             showToast(d.error, 'danger');
         }
-    });
+    }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 function photoNext() { _photoNav('/api/photo/next'); }
 function photoPrev() { _photoNav('/api/photo/prev'); }
@@ -382,18 +404,22 @@ function startSlideshow() {
         if (d.success) {
             document.getElementById('btn-start-slideshow').style.display = 'none';
             document.getElementById('btn-stop-slideshow').style.display = '';
-            showToast('{{ t.slideshow }} started', 'success');
+            showToast('{{ t.slideshow_started }}', 'success');
+        } else {
+            showToast(d.error || '{{ t.action_failed }}', 'danger');
         }
-    });
+    }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 function stopSlideshow() {
     fetch('/api/slideshow/stop', {method: 'POST'}).then(r => r.json()).then(d => {
         if (d.success) {
             document.getElementById('btn-start-slideshow').style.display = '';
             document.getElementById('btn-stop-slideshow').style.display = 'none';
-            showToast('{{ t.slideshow }} stopped', 'info');
+            showToast('{{ t.slideshow_stopped }}', 'info');
+        } else {
+            showToast(d.error || '{{ t.action_failed }}', 'danger');
         }
-    });
+    }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 // Slideshow photo picker
@@ -453,9 +479,11 @@ function ssPickerSave() {
             document.getElementById('slideshow-photo-count').textContent =
                 photos.length || '{{ t.all_photos }}';
             bootstrap.Modal.getInstance(document.getElementById('slideshowPickerModal')).hide();
-            showToast('OK', 'success');
+            showToast('{{ t.action_ok }}', 'success');
+        } else {
+            showToast(d.error || '{{ t.action_failed }}', 'danger');
         }
-    });
+    }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 // ── System ──
@@ -472,29 +500,52 @@ function loadSystemInfo() {
             <tr><td><i class="bi bi-clock"></i> {{ t.uptime }}</td><td>${info.uptime || '-'}</td></tr>
         </table>`;
     }).catch(() => {
-        document.getElementById('system-info').innerHTML = '<p class="text-danger mb-0">Failed to load</p>';
+        document.getElementById('system-info').innerHTML = '<p class="text-danger mb-0">{{ t.load_failed }}</p>';
     });
 }
 function systemUpdate() {
     if (!confirm('{{ t.confirm_update }}')) return;
     const out = document.getElementById('update-output');
     out.classList.remove('d-none');
-    out.querySelector('pre').textContent = '{{ t.loading }}\n';
+    const pre = out.querySelector('pre');
+    pre.textContent = '{{ t.loading }}\n';
+    // The update now runs in the background and the service restarts when done.
     fetch('/api/system/update', {method:'POST'}).then(r=>r.json()).then(d => {
-        out.querySelector('pre').textContent = d.output || d.error || 'Done';
-        if (d.success) { showToast('OK', 'success'); setTimeout(()=>location.reload(), 5000); }
-        else showToast('Failed', 'danger');
+        if (d.status === 'running' || d.success) {
+            showToast('{{ t.update_started }}', 'info');
+            pollUpdate(pre);
+        } else {
+            pre.textContent = d.error || '{{ t.action_failed }}';
+            showToast('{{ t.action_failed }}', 'danger');
+        }
+    }).catch(e => { pre.textContent = 'Error: ' + e; showToast('Error: ' + e, 'danger'); });
+}
+function pollUpdate(pre) {
+    fetch('/api/system/update/status').then(r=>r.json()).then(s => {
+        if (s.output || s.error) pre.textContent = (s.output || '') + (s.error ? '\n' + s.error : '');
+        if (s.status === 'running') {
+            setTimeout(() => pollUpdate(pre), 3000);
+        } else if (s.status === 'done') {
+            showToast('{{ t.action_ok }}', 'success');
+            setTimeout(() => location.reload(), 5000);
+        } else if (s.status === 'failed') {
+            showToast('{{ t.action_failed }}', 'danger');
+        }
+    }).catch(() => {
+        // Connection dropped — the service is restarting after a successful
+        // update, which is the expected terminal state. Reload shortly.
+        setTimeout(() => location.reload(), 8000);
     });
 }
 function systemReboot() {
     if (!confirm('{{ t.confirm_reboot }}')) return;
-    fetch('/api/system/reboot', {method:'POST'});
-    showToast('Rebooting...', 'info');
+    fetch('/api/system/reboot', {method:'POST'}).catch(()=>{});
+    showToast('{{ t.rebooting }}', 'info');
 }
 function systemShutdown() {
     if (!confirm('{{ t.confirm_shutdown }}')) return;
-    fetch('/api/system/shutdown', {method:'POST'});
-    showToast('Shutting down...', 'warning');
+    fetch('/api/system/shutdown', {method:'POST'}).catch(()=>{});
+    showToast('{{ t.shutting_down }}', 'warning');
 }
 
 loadSystemInfo();

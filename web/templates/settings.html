@@ -13,18 +13,18 @@
             </div>
             <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label">{{ t.api_key }}</label>
+                    <label class="form-label" for="s-weather-key">{{ t.api_key }}</label>
                     <input type="text" class="form-control" id="s-weather-key"
                            value="{{ config.weather_api_key }}">
                     <div class="form-text"><a href="https://openweathermap.org/api" target="_blank">openweathermap.org</a></div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">{{ t.city }}</label>
+                    <label class="form-label" for="s-weather-city">{{ t.city }}</label>
                     <input type="text" class="form-control" id="s-weather-city"
                            value="{{ config.weather_city }}" placeholder="Taipei">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">{{ t.units }}</label>
+                    <label class="form-label" for="s-weather-units">{{ t.units }}</label>
                     <select class="form-select" id="s-weather-units">
                         <option value="metric" {% if config.weather_units == 'metric' %}selected{% endif %}>{{ t.celsius }}</option>
                         <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
@@ -49,7 +49,7 @@
             </div>
             <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label">{{ t.ical_url }}</label>
+                    <label class="form-label" for="s-cal-url">{{ t.ical_url }}</label>
                     <input type="url" class="form-control" id="s-cal-url"
                            value="{{ config.calendar_ical_url }}"
                            placeholder="https://calendar.google.com/calendar/ical/...">
@@ -74,7 +74,7 @@
             </div>
             <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label">{{ t.default_rotation }}</label>
+                    <label class="form-label" for="s-rotation">{{ t.default_rotation }}</label>
                     <select class="form-select" id="s-rotation">
                         <option value="0" {% if config.photo_rotation == 0 %}selected{% endif %}>0° ({{ t.normal }})</option>
                         <option value="90" {% if config.photo_rotation == 90 %}selected{% endif %}>90° CW</option>
@@ -83,7 +83,7 @@
                     </select>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">{{ t.fit_mode }}</label>
+                    <label class="form-label" for="s-fit-mode">{{ t.fit_mode }}</label>
                     <select class="form-select" id="s-fit-mode">
                         <option value="fit" {% if config.photo_fit_mode == 'fit' %}selected{% endif %}>{{ t.fit_letterbox }}</option>
                         <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>{{ t.stretch_fill }}</option>
@@ -166,6 +166,10 @@
 
 {% block scripts %}
 <script>
+function _saveResult(d) {
+    showToast(d && d.success ? '{{ t.action_ok }}' : (d && d.error) || '{{ t.action_failed }}',
+              d && d.success ? 'success' : 'danger');
+}
 function saveWeather() {
     fetch('/api/config', {
         method: 'POST',
@@ -175,9 +179,8 @@ function saveWeather() {
             weather_city: document.getElementById('s-weather-city').value,
             weather_units: document.getElementById('s-weather-units').value,
         })
-    }).then(r => r.json()).then(d => {
-        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
-    });
+    }).then(r => r.json()).then(_saveResult)
+      .catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 function testWeather() {
@@ -197,9 +200,8 @@ function saveCalendar() {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ calendar_ical_url: document.getElementById('s-cal-url').value })
-    }).then(r => r.json()).then(d => {
-        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
-    });
+    }).then(r => r.json()).then(_saveResult)
+      .catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 function testCalendar() {
@@ -207,23 +209,38 @@ function testCalendar() {
     div.innerHTML = '<span class="text-muted">{{ t.loading }}</span>';
     fetch('/api/calendar').then(r => r.json()).then(d => {
         const count = d.events ? d.events.length : 0;
-        div.innerHTML = `<span class="text-success">${d.today.date_str} (${d.today.weekday}) - ${count} events</span>`;
+        if (!d.configured) {
+            // No URL set — do not show a reassuring green result.
+            div.innerHTML = `<span class="text-warning">${d.today.date_str} — no calendar URL configured</span>`;
+        } else if (count === 0) {
+            div.innerHTML = `<span class="text-warning">${d.today.date_str} — connected, 0 upcoming events (check the URL if unexpected)</span>`;
+        } else {
+            div.innerHTML = `<span class="text-success">${d.today.date_str} (${d.today.weekday}) - ${count} events</span>`;
+        }
     }).catch(e => { div.innerHTML = `<span class="text-danger">${e}</span>`; });
 }
 
 function savePhotoSettings() {
     const rotation = parseInt(document.getElementById('s-rotation').value);
     const fitMode = document.getElementById('s-fit-mode').value;
+    // fetch only rejects on network errors, so inspect each response's JSON and
+    // only report success when BOTH actually succeeded (previously always "OK").
     Promise.all([
         fetch('/api/photo/rotation', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({rotation})
-        }),
+        }).then(r => r.json()),
         fetch('/api/photo/fit_mode', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({fit_mode: fitMode})
-        })
-    ]).then(() => showToast('OK', 'success'));
+        }).then(r => r.json())
+    ]).then(([a, b]) => {
+        if (a.success && b.success) {
+            showToast('{{ t.action_ok }}', 'success');
+        } else {
+            showToast(a.error || b.error || '{{ t.action_failed }}', 'danger');
+        }
+    }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 function testGDriveConnect() {
@@ -270,27 +287,25 @@ function saveGDrive() {
             gdrive_client_id: document.getElementById('s-gdrive-id').value,
             gdrive_client_secret: document.getElementById('s-gdrive-secret').value,
         })
-    }).then(r => r.json()).then(d => {
-        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
-    });
+    }).then(r => r.json()).then(_saveResult)
+      .catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 function showQR() {
-    fetch('/api/page/qr', {method: 'POST'}).then(r => r.json()).then(d => {
-        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
-    });
+    fetch('/api/page/qr', {method: 'POST'}).then(r => r.json()).then(_saveResult)
+      .catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 function resetAll() {
     if (!confirm('{{ t.confirm_reset }}')) return;
     fetch('/api/reset', {method: 'POST'}).then(r => r.json()).then(d => {
         if (d.success) {
-            showToast('OK', 'success');
+            showToast('{{ t.action_ok }}', 'success');
             setTimeout(() => window.location.href = '/setup', 2000);
         } else {
             showToast(d.error, 'danger');
         }
-    });
+    }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 </script>
 {% endblock %}

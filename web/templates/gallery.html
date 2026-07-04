@@ -66,7 +66,8 @@
                         <i class="bi bi-display"></i> {{ t.display }}
                     </button>
                     <button class="btn btn-sm btn-outline-danger"
-                            onclick="deleteImage('{{ img.filename }}', 'img-card-{{ loop.index }}')">
+                            onclick="deleteImage('{{ img.filename }}', 'img-card-{{ loop.index }}')"
+                            aria-label="{{ t.delete }}" title="{{ t.delete }}">
                         <i class="bi bi-trash"></i>
                     </button>
                 </div>
@@ -148,7 +149,8 @@
                         </button>
                         <span class="badge bg-primary ms-2" id="drive-selected-count">0</span> {{ t.selected }}
                     </div>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="loadDriveFiles()" id="drive-refresh-btn">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadDriveFiles()" id="drive-refresh-btn"
+                            aria-label="{{ t.refresh }}" title="{{ t.refresh }}">
                         <i class="bi bi-arrow-clockwise"></i>
                     </button>
                 </div>
@@ -222,39 +224,52 @@ function batchUpload(files) {
     const bar = document.getElementById('batch-progress-bar');
     const text = document.getElementById('batch-progress-text');
     progressDiv.classList.remove('d-none');
+    bar.classList.remove('bg-danger', 'progress-bar-striped', 'progress-bar-animated');
 
     const total = files.length;
     text.textContent = `{{ t.uploading }} ${total} files...`;
-    bar.style.width = '50%';
-    bar.classList.add('progress-bar-striped', 'progress-bar-animated');
+    bar.style.width = '0%';
 
     const formData = new FormData();
-    for (let i = 0; i < total; i++) {
-        formData.append('files', files[i]);
-    }
+    for (let i = 0; i < total; i++) formData.append('files', files[i]);
 
-    fetch('/api/upload/batch', { method: 'POST', body: formData })
-        .then(r => r.json())
-        .then(data => {
-            bar.style.width = '100%';
-            bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
-            if (data.success) {
-                text.textContent = `{{ t.upload_complete }}: ${data.uploaded} / ${data.total}`;
-                showToast(`{{ t.upload_complete }}: ${data.uploaded} / ${data.total}`,
-                          data.uploaded === data.total ? 'success' : 'warning');
-                setTimeout(() => location.reload(), 1500);
-            } else {
-                text.textContent = data.error || 'Failed';
-                showToast(data.error || 'Failed', 'danger');
-            }
-        })
-        .catch(e => {
-            bar.style.width = '100%';
-            bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+    // XHR so the bar reflects REAL upload progress instead of a fake 50%.
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload/batch');
+    xhr.upload.addEventListener('progress', e => {
+        if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            bar.style.width = pct + '%';
+        }
+    });
+    xhr.upload.addEventListener('load', () => {
+        // Bytes are up; the Pi is now processing. Show an indeterminate state.
+        bar.style.width = '100%';
+        bar.classList.add('progress-bar-striped', 'progress-bar-animated');
+        text.textContent = `{{ t.uploading }} ${total} files...`;
+    });
+    xhr.addEventListener('load', () => {
+        bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+            text.textContent = `{{ t.upload_complete }}: ${data.uploaded} / ${data.total}`;
+            showToast(`{{ t.upload_complete }}: ${data.uploaded} / ${data.total}`,
+                      data.uploaded === data.total ? 'success' : 'warning');
+            setTimeout(() => location.reload(), 1500);
+        } else {
             bar.classList.add('bg-danger');
-            text.textContent = 'Error: ' + e;
-            showToast('Upload failed: ' + e, 'danger');
-        });
+            text.textContent = data.error || '{{ t.action_failed }}';
+            showToast(data.error || '{{ t.action_failed }}', 'danger');
+        }
+    });
+    xhr.addEventListener('error', () => {
+        bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+        bar.classList.add('bg-danger');
+        text.textContent = '{{ t.action_failed }}';
+        showToast('Upload failed', 'danger');
+    });
+    xhr.send(formData);
 }
 
 // ── Google Sign-In ────────────────────────────────────────────────────
@@ -367,27 +382,57 @@ function renderDriveFiles(files, clearFirst) {
         return;
     }
 
+    // Build with createElement/textContent (NOT innerHTML): Drive filenames are
+    // attacker-influenceable and were previously injected raw, allowing
+    // <img onerror=…> style XSS in the Drive browser.
     files.forEach(f => {
-        const thumb = f.thumbnailLink || '';
-        const checked = driveSelectedFiles[f.id] ? 'checked' : '';
+        const selected = !!driveSelectedFiles[f.id];
         const col = document.createElement('div');
         col.className = 'col-6 col-md-4 col-lg-3';
-        col.innerHTML = `
-            <div class="card h-100 drive-card ${checked ? 'border-success border-2' : ''}"
-                 data-id="${f.id}" onclick="toggleDriveFile('${f.id}', '${f.name.replace(/'/g, "\\'")}', this)">
-                <div style="height:140px;overflow:hidden;background:#f0f0f0;display:flex;align-items:center;justify-content:center;">
-                    ${thumb ? `<img src="${thumb}" style="max-height:140px;max-width:100%;object-fit:cover;">` :
-                             '<i class="bi bi-image text-muted" style="font-size:3rem;"></i>'}
-                </div>
-                <div class="card-body p-2">
-                    <small class="d-block text-truncate" title="${f.name}">${f.name}</small>
-                    <div class="form-check mt-1">
-                        <input class="form-check-input drive-check" type="checkbox" ${checked}
-                               data-id="${f.id}" onclick="event.stopPropagation();"
-                               onchange="toggleDriveFile('${f.id}', '${f.name.replace(/'/g, "\\'")}')">
-                    </div>
-                </div>
-            </div>`;
+
+        const card = document.createElement('div');
+        card.className = 'card h-100 drive-card' + (selected ? ' border-success border-2' : '');
+        card.dataset.id = f.id;
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', () => toggleDriveFile(f.id, f.name, card));
+
+        const thumbWrap = document.createElement('div');
+        thumbWrap.style.cssText = 'height:140px;overflow:hidden;background:#f0f0f0;display:flex;align-items:center;justify-content:center;';
+        if (f.thumbnailLink) {
+            const img = document.createElement('img');
+            img.src = f.thumbnailLink;  // property assignment, not HTML
+            img.style.cssText = 'max-height:140px;max-width:100%;object-fit:cover;';
+            thumbWrap.appendChild(img);
+        } else {
+            const icon = document.createElement('i');
+            icon.className = 'bi bi-image text-muted';
+            icon.style.fontSize = '3rem';
+            thumbWrap.appendChild(icon);
+        }
+
+        const body = document.createElement('div');
+        body.className = 'card-body p-2';
+        const nameEl = document.createElement('small');
+        nameEl.className = 'd-block text-truncate';
+        nameEl.title = f.name;
+        nameEl.textContent = f.name;
+
+        const checkWrap = document.createElement('div');
+        checkWrap.className = 'form-check mt-1';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'form-check-input drive-check';
+        cb.checked = selected;
+        cb.dataset.id = f.id;
+        cb.addEventListener('click', e => e.stopPropagation());
+        cb.addEventListener('change', () => toggleDriveFile(f.id, f.name));
+        checkWrap.appendChild(cb);
+
+        body.appendChild(nameEl);
+        body.appendChild(checkWrap);
+        card.appendChild(thumbWrap);
+        card.appendChild(body);
+        col.appendChild(card);
         grid.appendChild(col);
     });
 }
