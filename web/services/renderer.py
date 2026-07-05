@@ -62,6 +62,15 @@ def _draw_logo(draw, cx, cy, size, fill):
     draw.text((cx, cy), "Vignette", fill=fill, font=_get_logo_font(size), anchor="mm")
 
 
+def _logo_dims(draw, size):
+    """Actual rendered (width, height) of the 'Vignette' wordmark at a size.
+    The Amsterdam Three script face is wide with swashes/descenders, so neighbours
+    (titles, taglines, copyright) must be placed against these real bounds — not
+    a guessed offset — to avoid overlap."""
+    b = draw.textbbox((0, 0), "Vignette", font=_get_logo_font(size))
+    return b[2] - b[0], b[3] - b[1]
+
+
 def _get_font(size):
     """Get a font at the given size, trying CJK fonts first for Chinese support."""
     if size in _font_cache:
@@ -111,9 +120,13 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
         py = 1 + (478 - photo.height) // 2
         img.paste(photo, (px, py))
     else:
-        # Default: Vignette logo as placeholder
-        _draw_logo(draw, PANEL_CX, PANEL_CY - 20, 82, BLACK)
-        draw.text((PANEL_CX, PANEL_CY + 62),
+        # Default: Vignette logo as placeholder. Place the tagline BELOW the
+        # logo's real bottom edge (its script descenders otherwise overlap it).
+        logo_size = 74
+        logo_w, logo_h = _logo_dims(draw, logo_size)
+        logo_cy = PANEL_CY - 16
+        _draw_logo(draw, PANEL_CX, logo_cy, logo_size, BLACK)
+        draw.text((PANEL_CX, logo_cy + logo_h // 2 + 12),
                   "Smart Display", fill=BLACK, font=_get_font(14), anchor="mt")
 
     return img
@@ -173,13 +186,21 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
     font_small  = _get_font(12)
     font_tiny   = _get_font(10)
 
-    # ── Header (0–60): logo left · divider · "WiFi Setup" right ──
+    # ── Header (0–60): centered "logo | WiFi Setup" group, spaced by MEASURED
+    #    widths so the wide script wordmark can't run into the title. ──
     draw.rectangle([0, 0, EPD_W, 60], fill=BLUE)
-    _draw_logo(draw, EPD_W // 2 - 80, 30, 38, WHITE)
-    draw.line([(EPD_W // 2 - 8, 14), (EPD_W // 2 - 8, 46)],
-              fill=(180, 180, 220), width=1)
-    draw.text((EPD_W // 2 + 52, 30), "WiFi Setup",
-              fill=WHITE, font=font_header, anchor="mm")
+    logo_size = 34
+    logo_w, logo_h = _logo_dims(draw, logo_size)
+    title = "WiFi Setup"
+    tb = draw.textbbox((0, 0), title, font=font_header)
+    title_w = tb[2] - tb[0]
+    gap = 18
+    total_w = logo_w + gap + 1 + gap + title_w
+    start_x = (EPD_W - total_w) // 2
+    _draw_logo(draw, start_x + logo_w // 2, 30, logo_size, WHITE)
+    div_x = start_x + logo_w + gap
+    draw.line([(div_x, 14), (div_x, 46)], fill=(180, 180, 220), width=1)
+    draw.text((div_x + gap, 30), title, fill=WHITE, font=font_header, anchor="lm")
 
     # ── Column centers ──
     L = EPD_W // 4        # 200

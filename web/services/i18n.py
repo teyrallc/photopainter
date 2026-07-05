@@ -406,16 +406,45 @@ TRANSLATIONS = {
         "action_failed": "\u5931\u6557",
         "load_failed": "\u8f09\u5165\u5931\u6557",
         "update_started": "\u5df2\u958b\u59cb\u66f4\u65b0\uff0c\u88dd\u7f6e\u5c07\u91cd\u65b0\u555f\u52d5\u3002",
+        "upload_options_hint": "\u65cb\u8f49\u8207\u7e2e\u653e\u8a2d\u5b9a\u6703\u5957\u7528\u5230\u63a5\u4e0b\u4f86\u9078\u64c7\u7684\u6a94\u6848\u3002",
     },
 }
 
 
+class _Translations:
+    """Wrapper so templates can safely use ``{{ t.key }}`` for ANY key.
+
+    A plain dict is unsafe here: Jinja resolves ``t.clear`` with getattr BEFORE
+    item lookup, so for a dict it returns the bound ``dict.clear`` method (which
+    renders as ``<built-in method clear ...>``) for every name that collides
+    with a dict method (clear, get, items, keys, values, update, copy, pop, …).
+    This object exposes no such methods; attribute/item access returns the
+    translation string, or '' when the key is absent (per-key English fallback
+    is already merged in below)."""
+    __slots__ = ("_d",)
+
+    def __init__(self, data):
+        self._d = data
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return self._d.get(name, "")
+
+    def __getitem__(self, name):
+        return self._d.get(name, "")
+
+    def __contains__(self, name):
+        return name in self._d
+
+
 def get_translations(lang="en"):
-    """Get the translation dict for a language, with per-key fallback to English.
+    """Get translations for a language, with per-key fallback to English.
 
     Merging over a copy of the English dict means a key that exists only in `en`
-    renders its English text in every language instead of a blank Undefined."""
+    renders its English text in every language. Returns a _Translations wrapper
+    so ``{{ t.key }}`` never resolves to a dict method (see class docstring)."""
     base = dict(TRANSLATIONS["en"])
     if lang != "en" and lang in TRANSLATIONS:
         base.update(TRANSLATIONS[lang])
-    return base
+    return _Translations(base)
