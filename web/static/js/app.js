@@ -29,16 +29,27 @@ function showToast(message, type) {
     };
     var s = styles[type] || styles.info;
 
-    var html =
-        '<div id="' + toastId + '" class="toast align-items-center ' + s.bg + ' ' + s.text + ' border-0" role="alert" aria-live="assertive" aria-atomic="true">' +
-            '<div class="d-flex">' +
-                '<div class="toast-body">' + message + '</div>' +
-                '<button type="button" class="btn-close ' + s.close + ' me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>' +
-            '</div>' +
-        '</div>';
-    container.insertAdjacentHTML('beforeend', html);
+    // Build via DOM + textContent so a message containing server error text /
+    // filenames can never inject HTML (defense-in-depth).
+    var toastEl = document.createElement('div');
+    toastEl.id = toastId;
+    toastEl.className = 'toast align-items-center ' + s.bg + ' ' + s.text + ' border-0';
+    toastEl.setAttribute('role', 'alert');
+    toastEl.setAttribute('aria-live', 'assertive');
+    toastEl.setAttribute('aria-atomic', 'true');
+    var flex = document.createElement('div');
+    flex.className = 'd-flex';
+    var body = document.createElement('div');
+    body.className = 'toast-body';
+    body.textContent = message;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-close ' + s.close + ' me-2 m-auto';
+    btn.setAttribute('data-bs-dismiss', 'toast');
+    btn.setAttribute('aria-label', 'Close');
+    flex.appendChild(body); flex.appendChild(btn); toastEl.appendChild(flex);
+    container.appendChild(toastEl);
 
-    var toastEl = document.getElementById(toastId);
     var toast = new bootstrap.Toast(toastEl, { delay: 4000 });
     toast.show();
 

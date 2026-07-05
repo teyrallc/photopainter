@@ -84,17 +84,20 @@
 
     <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
     <script>
+    // tojson emits a properly-escaped JS string (handles quotes/apostrophes and
+    // is safe inside <script>), unlike a bare "{{ t.x }}" which HTML-escapes
+    // apostrophes to &#39; and breaks on embedded quotes.
     window.VIGNETTE_I18N = {
-        sending_to_epaper: "{{ t.sending_to_epaper }}",
-        displayed_ok: "{{ t.displayed_ok }}",
-        confirm_clear: "{{ t.confirm_clear }}",
-        clearing: "{{ t.clearing }}",
-        sleep_ok: "{{ t.sleep_ok }}",
-        loading_next: "{{ t.loading_next }}",
-        loading_prev: "{{ t.loading_prev }}",
-        loading_latest: "{{ t.loading_latest }}",
-        confirm_test: "{{ t.confirm_test }}",
-        sending_test: "{{ t.sending_test }}"
+        sending_to_epaper: {{ t.sending_to_epaper | tojson }},
+        displayed_ok: {{ t.displayed_ok | tojson }},
+        confirm_clear: {{ t.confirm_clear | tojson }},
+        clearing: {{ t.clearing | tojson }},
+        sleep_ok: {{ t.sleep_ok | tojson }},
+        loading_next: {{ t.loading_next | tojson }},
+        loading_prev: {{ t.loading_prev | tojson }},
+        loading_latest: {{ t.loading_latest | tojson }},
+        confirm_test: {{ t.confirm_test | tojson }},
+        sending_test: {{ t.sending_test | tojson }}
     };
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

@@ -18,7 +18,7 @@
             <div class="card-body text-center p-3" style="background:#e8e8e8;">
                 <div style="display:inline-block;border:3px solid #333;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
                     <img id="epaper-preview" src="/api/preview-current?t={{ now }}"
-                         style="width:100%;max-width:640px;height:auto;display:block;"
+                         style="width:100%;max-width:800px;height:auto;display:block;margin:0 auto;"
                          alt="E-paper Preview">
                 </div>
                 <div class="mt-2">
@@ -33,7 +33,7 @@
 
     <!-- Page Control -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header bg-primary text-white">
                 <i class="bi bi-display"></i> {{ t.display_page }}
             </div>
@@ -80,7 +80,7 @@
 
     <!-- Photo Navigation -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header bg-success text-white">
                 <i class="bi bi-camera"></i> {{ t.photo_control }}
             </div>
@@ -121,7 +121,7 @@
 
     <!-- Slideshow -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header bg-warning text-dark">
                 <i class="bi bi-play-circle"></i> {{ t.slideshow }}
             </div>
@@ -175,7 +175,7 @@
 
     <!-- Display Status + Quick Actions -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header bg-dark text-white">
                 <i class="bi bi-info-circle"></i> {{ t.display_status }}
             </div>
@@ -205,7 +205,7 @@
 
     <!-- Quick Links -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header bg-secondary text-white">
                 <i class="bi bi-lightning"></i> {{ t.quick_actions }}
             </div>
@@ -227,7 +227,7 @@
 
     <!-- System Info -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header"><i class="bi bi-cpu"></i> {{ t.system_info }}</div>
             <div class="card-body" id="system-info"><p class="text-muted">{{ t.loading }}</p></div>
         </div>
@@ -235,7 +235,7 @@
 
     <!-- Remote Management -->
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header"><i class="bi bi-gear"></i> {{ t.remote_mgmt }}</div>
             <div class="card-body">
                 <div class="d-grid gap-2">
@@ -286,36 +286,34 @@
 {% block scripts %}
 <script>
 // ── Page / Widget switching (config only) ──
-function switchPage(page) {
-    document.querySelectorAll('[onclick^="switchPage"]').forEach(btn => {
-        btn.className = btn.className.replace(/\bbtn-primary\b/, 'btn-outline-primary');
+function _setActive(prefix, cls, outlineCls, key) {
+    // Highlight only the confirmed-active button (called AFTER server success,
+    // so a failed request never leaves a wrong button highlighted).
+    document.querySelectorAll(`[onclick^="${prefix}"]`).forEach(btn => {
+        btn.className = btn.className.replace(new RegExp('\\b' + cls + '\\b'), outlineCls);
     });
-    const clicked = document.querySelector(`[onclick="switchPage('${page}')"]`);
-    if (clicked) clicked.className = clicked.className.replace('btn-outline-primary', 'btn-primary');
+    const clicked = document.querySelector(`[onclick="${prefix}('${key}')"]`);
+    if (clicked) clicked.className = clicked.className.replace(outlineCls, cls);
+}
 
+function switchPage(page) {
     fetch('/api/page/switch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({page: page})
     }).then(r => r.json()).then(d => {
-        if (d.success) refreshPreview();
+        if (d.success) { _setActive('switchPage', 'btn-primary', 'btn-outline-primary', d.page || page); refreshPreview(); }
         else showToast(d.error, 'danger');
     }).catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 function setWidget(mode) {
-    document.querySelectorAll('[onclick^="setWidget"]').forEach(btn => {
-        btn.className = btn.className.replace(/\bbtn-info\b/, 'btn-outline-info');
-    });
-    const clicked = document.querySelector(`[onclick="setWidget('${mode}')"]`);
-    if (clicked) clicked.className = clicked.className.replace('btn-outline-info', 'btn-info');
-
     fetch('/api/widget/set', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({mode: mode})
     }).then(r => r.json()).then(d => {
-        if (d.success) refreshPreview();
+        if (d.success) { _setActive('setWidget', 'btn-info', 'btn-outline-info', d.widget_mode || mode); refreshPreview(); }
         else showToast(d.error, 'danger');
     }).catch(e => showToast('Error: ' + e, 'danger'));
 }
@@ -429,19 +427,28 @@ function openSlideshowPicker() {
     fetch('/api/images').then(r => r.json()).then(images => {
         const grid = document.getElementById('slideshow-picker-grid');
         grid.innerHTML = '';
+        // Build with createElement/textContent (NOT innerHTML) so a filename
+        // can never inject HTML/JS into the picker.
         images.forEach(img => {
-            const checked = ssPickerSelected.has(img.filename) ? 'checked' : '';
             const sel = ssPickerSelected.has(img.filename);
             const col = document.createElement('div');
             col.className = 'col-4 col-md-3';
-            col.innerHTML = `
-                <div class="card h-100 ss-pick-card ${sel ? 'border-success border-2' : ''}" data-fn="${img.filename}"
-                     onclick="ssPickerToggle('${img.filename}', this)" style="cursor:pointer;">
-                    <img src="/output/${img.filename}" style="height:80px;object-fit:cover;" class="card-img-top">
-                    <div class="card-body p-1 text-center">
-                        <small class="text-truncate d-block">${img.filename}</small>
-                    </div>
-                </div>`;
+            const card = document.createElement('div');
+            card.className = 'card h-100 ss-pick-card' + (sel ? ' border-success border-2' : '');
+            card.dataset.fn = img.filename;
+            card.style.cursor = 'pointer';
+            card.addEventListener('click', () => ssPickerToggle(img.filename, card));
+            const im = document.createElement('img');
+            im.src = '/output/' + encodeURIComponent(img.filename);
+            im.className = 'card-img-top';
+            im.style.cssText = 'height:80px;object-fit:cover;';
+            const body = document.createElement('div');
+            body.className = 'card-body p-1 text-center';
+            const label = document.createElement('small');
+            label.className = 'text-truncate d-block';
+            label.textContent = img.filename;
+            body.appendChild(label);
+            card.appendChild(im); card.appendChild(body); col.appendChild(card);
             grid.appendChild(col);
         });
         new bootstrap.Modal(document.getElementById('slideshowPickerModal')).show();
@@ -490,7 +497,8 @@ function ssPickerSave() {
 function loadSystemInfo() {
     fetch('/api/system/info').then(r => r.json()).then(info => {
         const div = document.getElementById('system-info');
-        const tc = info.cpu_temp > 70 ? 'danger' : (info.cpu_temp > 55 ? 'warning' : 'success');
+        const tc = (info.cpu_temp == null) ? 'secondary'
+                   : (info.cpu_temp > 70 ? 'danger' : (info.cpu_temp > 55 ? 'warning' : 'success'));
         div.innerHTML = `<table class="table table-sm mb-0">
             <tr><td><i class="bi bi-pc-display"></i> {{ t.host }}</td><td>${info.hostname || '-'}</td></tr>
             <tr><td><i class="bi bi-wifi"></i> {{ t.ip }}</td><td>${(info.ip_addresses || []).join(', ') || '-'}</td></tr>

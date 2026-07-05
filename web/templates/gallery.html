@@ -188,8 +188,9 @@ let currentPreviewFile = null;
 function openPreview(filename) {
     currentPreviewFile = filename;
     document.getElementById('previewModalTitle').textContent = filename;
-    document.getElementById('modal-original').src = '/output/' + filename;
-    document.getElementById('modal-epaper').src = '/api/preview/' + filename;
+    // encodeURIComponent so filenames with spaces/#/? resolve to the right URL.
+    document.getElementById('modal-original').src = '/output/' + encodeURIComponent(filename);
+    document.getElementById('modal-epaper').src = '/api/preview/' + encodeURIComponent(filename);
     document.getElementById('modal-display-btn').onclick = () => displayImage(filename);
 
     const modal = new bootstrap.Modal(document.getElementById('previewModal'));
@@ -199,16 +200,17 @@ function openPreview(filename) {
 function deleteImage(filename, cardId) {
     if (!confirm(`{{ t.confirm_delete }} ${filename}?`)) return;
 
-    fetch(`/api/images/${filename}`, { method: 'DELETE' })
+    fetch(`/api/images/${encodeURIComponent(filename)}`, { method: 'DELETE' })
         .then(r => r.json())
         .then(data => {
             if (data.success) {
                 document.getElementById(cardId).remove();
                 showToast('{{ t.deleted }} ' + filename, 'success');
             } else {
-                showToast(data.error, 'danger');
+                showToast(data.error || '{{ t.action_failed }}', 'danger');
             }
-        });
+        })
+        .catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 // ── Batch Upload ──────────────────────────────────────────────────────
@@ -524,8 +526,11 @@ function disconnectDrive() {
             if (d.success) {
                 showToast('Google Drive disconnected', 'success');
                 location.reload();
+            } else {
+                showToast(d.error || '{{ t.action_failed }}', 'danger');
             }
-        });
+        })
+        .catch(e => showToast('Error: ' + e, 'danger'));
 }
 
 // Show toast for gdrive callback results

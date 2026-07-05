@@ -22,7 +22,7 @@
         <!-- Hardware -->
         <section id="hardware" class="mb-5">
             <h3>{{ t.hardware_req }}</h3>
-            <table class="table table-bordered">
+            <div class="table-responsive"><table class="table table-bordered">
                 <tbody>
                     <tr><td><strong>Board</strong></td><td>Raspberry Pi Zero 2 W</td></tr>
                     <tr><td><strong>Carrier</strong></td><td>Waveshare RPi Zero PhotoPainter Board</td></tr>
@@ -33,7 +33,7 @@
                     <tr><td><strong>Resolution</strong></td><td>800 x 480 pixels</td></tr>
                     <tr><td><strong>Refresh</strong></td><td>~12 seconds</td></tr>
                 </tbody>
-            </table>
+            </table></div>
         </section>
 
         <!-- Assembly -->
@@ -66,7 +66,7 @@ bash scripts/install.sh</code></pre>
             <h3>{{ t.web_console }}</h3>
             <pre class="bg-dark text-light p-3 rounded"><code>http://&lt;Pi-IP&gt;:5000</code></pre>
 
-            <table class="table table-bordered">
+            <div class="table-responsive"><table class="table table-bordered">
                 <thead><tr><th>Page</th><th>Function</th></tr></thead>
                 <tbody>
                     <tr><td><strong>{{ t.dashboard }}</strong></td><td>Photo navigation, display status, system info, remote management</td></tr>
@@ -75,13 +75,13 @@ bash scripts/install.sh</code></pre>
                     <tr><td><strong>{{ t.settings }}</strong></td><td>Weather, calendar, photo, system settings</td></tr>
                     <tr><td><strong>{{ t.wifi_setup }}</strong></td><td>WiFi configuration</td></tr>
                 </tbody>
-            </table>
+            </table></div>
         </section>
 
         <!-- Photo Navigation -->
         <section id="photo-nav" class="mb-5">
             <h3>{{ t.photo_navigation }}</h3>
-            <table class="table table-bordered">
+            <div class="table-responsive"><table class="table table-bordered">
                 <thead><tr><th>Button</th><th>Function</th></tr></thead>
                 <tbody>
                     <tr><td><strong>{{ t.prev }}</strong></td><td>Display previous photo on e-paper</td></tr>
@@ -89,7 +89,7 @@ bash scripts/install.sh</code></pre>
                     <tr><td><strong>{{ t.latest }}</strong></td><td>Display the most recently uploaded photo</td></tr>
                     <tr><td><strong>{{ t.test_pattern }}</strong></td><td>Send 6-color test pattern to verify hardware</td></tr>
                 </tbody>
-            </table>
+            </table></div>
             <div class="alert alert-warning">
                 <i class="bi bi-exclamation-triangle"></i>
                 Each e-paper refresh takes ~12 seconds.
@@ -99,7 +99,7 @@ bash scripts/install.sh</code></pre>
         <!-- API -->
         <section id="api" class="mb-5">
             <h3>{{ t.api_reference }}</h3>
-            <table class="table table-bordered table-sm">
+            <div class="table-responsive"><table class="table table-bordered table-sm">
                 <thead>
                     <tr><th>Method</th><th>Path</th><th>Description</th></tr>
                 </thead>
@@ -119,7 +119,7 @@ bash scripts/install.sh</code></pre>
                     <tr><td><code>GET</code></td><td><code>/api/wifi/scan</code></td><td>Scan networks</td></tr>
                     <tr><td><code>POST</code></td><td><code>/api/wifi/connect</code></td><td>Connect WiFi (JSON: {"ssid": "...", "password": "..."})</td></tr>
                 </tbody>
-            </table>
+            </table></div>
         </section>
 
         <!-- Service Management -->

@@ -120,13 +120,15 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
         py = 1 + (478 - photo.height) // 2
         img.paste(photo, (px, py))
     else:
-        # Default: Vignette logo as placeholder. Place the tagline BELOW the
-        # logo's real bottom edge (its script descenders otherwise overlap it).
+        # Default: Vignette logo as placeholder. Place the tagline below the
+        # logo's ACTUAL bottom ink edge (measured at the same mm anchor used to
+        # draw it) so the script descender swash can't overlap it.
         logo_size = 74
-        logo_w, logo_h = _logo_dims(draw, logo_size)
-        logo_cy = PANEL_CY - 16
+        logo_cy = PANEL_CY - 24
         _draw_logo(draw, PANEL_CX, logo_cy, logo_size, BLACK)
-        draw.text((PANEL_CX, logo_cy + logo_h // 2 + 12),
+        lb = draw.textbbox((PANEL_CX, logo_cy), "Vignette",
+                           font=_get_logo_font(logo_size), anchor="mm")
+        draw.text((PANEL_CX, lb[3] + 12),
                   "Smart Display", fill=BLACK, font=_get_font(14), anchor="mt")
 
     return img
@@ -411,17 +413,26 @@ def _draw_calendar_panel(draw, x, y, w, h, events):
     # Mini month calendar
     _draw_mini_calendar(draw, x + 20, y + 90, w - 40, now)
 
-    # Upcoming events (if any)
-    ey = y + h - 10
-    if events:
-        for ev in events[:2]:
+    # Upcoming events — placed BELOW the actual mini-grid (not pinned to the
+    # panel bottom, which collided with 6-week months), capped to the space that
+    # fits. A geometric dot is used instead of a U+2022 bullet, which renders as
+    # a tofu box in fonts lacking that glyph.
+    import calendar as _cal
+    weeks = len(_cal.monthcalendar(now.year, now.month))
+    grid_bottom = (y + 90) + weeks * 16 + 16   # mirrors _draw_mini_calendar geometry
+    ey = grid_bottom + 6
+    line_h = 18
+    max_rows = max(0, (y + h - 6 - ey) // line_h)
+    if events and max_rows > 0:
+        for ev in events[:max_rows]:
             start = ev.get("start")
             summary = ev.get("summary", "?")[:20]
             if start:
                 time_str = start.strftime("%m/%d %H:%M")
-                draw.text((x + 10, ey - 20), f"• {time_str} {summary}",
-                          fill=BLACK, font=font_event, anchor="lb")
-                ey -= 18
+                draw.ellipse([x + 10, ey + 5, x + 15, ey + 10], fill=BLACK)
+                draw.text((x + 22, ey), f"{time_str} {summary}",
+                          fill=BLACK, font=font_event, anchor="lt")
+                ey += line_h
 
 
 def _draw_mini_calendar(draw, x, y, w, now):
@@ -545,7 +556,7 @@ def _draw_weather_fullscreen(draw, weather):
         draw.text((fx, 415), f"({fc['weekday']})", fill=BLACK, font=_get_font(14), anchor="mt")
         draw.text((fx, 435), f"{fc['temp_min']}~{fc['temp_max']}°",
                   fill=BLACK, font=font_detail, anchor="mt")
-        draw.text((fx, 458), fc["description"][:4],
+        draw.text((fx, 456), fc["description"][:14],
                   fill=BLACK, font=_get_font(14), anchor="mt")
         fx += 250
 
@@ -619,7 +630,9 @@ def _draw_calendar_fullscreen(draw, events):
             summary = ev.get("summary", "?")[:30]
             if start:
                 ts = start.strftime("%m/%d %H:%M")
-                draw.text((80, ey), f"• {ts}  {summary}", fill=BLACK, font=font_event)
+                # Geometric dot instead of a U+2022 bullet (tofu-safe).
+                draw.ellipse([64, ey + 7, 70, ey + 13], fill=BLACK)
+                draw.text((80, ey), f"{ts}  {summary}", fill=BLACK, font=font_event)
                 ey += line_h
     else:
         draw.text((EPD_W // 2, ey + 5), "No upcoming events",
