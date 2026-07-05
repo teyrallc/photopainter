@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vignette - WiFi Setup</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -554,12 +554,17 @@
                 <a id="go-link" href="#" class="btn btn-success">Open Vignette Dashboard</a>
             </div>
 
-            <!-- ═══ Fallback: Connection Failed ═══ -->
+            <!-- ═══ Fallback: could not auto-confirm (NOT necessarily a failure) ═══ -->
             <div id="fallback-view" class="fallback-view hidden">
                 <div class="warn-icon">
                     <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
                 </div>
                 <h3>Check Your E-Paper Display</h3>
+                <p>
+                    We couldn't automatically detect the device from this phone
+                    (some networks block <code>.local</code> lookups). This does
+                    <strong>not</strong> mean setup failed.
+                </p>
                 <p>
                     <strong>If WiFi connected successfully:</strong><br>
                     The e-paper screen will show the new IP address.<br>
@@ -636,9 +641,18 @@
         var s2 = document.getElementById('step2');
         var s3 = document.getElementById('step3');
 
-        s1.className = 'step ' + (phase >= 1 ? (phase > 1 ? 'done' : 'active') : '');
-        s2.className = 'step ' + (phase >= 2 ? (phase > 2 ? 'done' : 'active') : '');
-        s3.className = 'step ' + (phase >= 3 ? 'active' : '');
+        if (phase === 4) {
+            // Fallback / could-not-confirm. The first two steps happened, but the
+            // final step is unconfirmed — do NOT paint it as done/active, which
+            // would read as "almost finished" during an unresolved outcome.
+            s1.className = 'step done';
+            s2.className = 'step done';
+            s3.className = 'step';
+        } else {
+            s1.className = 'step ' + (phase >= 1 ? (phase > 1 ? 'done' : 'active') : '');
+            s2.className = 'step ' + (phase >= 2 ? (phase > 2 ? 'done' : 'active') : '');
+            s3.className = 'step ' + (phase >= 3 ? 'active' : '');
+        }
 
         // Toggle views
         document.getElementById('wifi-form').classList.toggle('hidden', phase !== 1);

@@ -10,12 +10,14 @@ Phase 2: Three page views (Home/Widget/Photo), Weather, Calendar,
 import io
 import logging
 import os
+import secrets
 import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import (Flask, jsonify, make_response, redirect, render_template,
                    request, send_file, send_from_directory, session, url_for)
@@ -54,10 +56,22 @@ from services import display_mgr
 config = Config(CONFIG_PATH)
 
 app = Flask(__name__)
-app.secret_key = config.get("session_secret", os.urandom(24).hex())
-if not config.get("session_secret"):
-    config.set("session_secret", app.secret_key)
+# Persist a stable session secret so logins survive restarts.
+_session_secret = config.get("session_secret")
+if not _session_secret:
+    _session_secret = secrets.token_hex(24)
+    config.set("session_secret", _session_secret)
+app.secret_key = _session_secret
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+# Session-cookie hardening. SESSION_COOKIE_SECURE stays False on purpose: the
+# device is reached over plain http on the LAN (http://<ip>:5000), and a Secure
+# cookie would never be sent there, breaking login. SameSite=Lax plus the
+# Origin check in csrf_protect() below provide the CSRF defense instead.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+)
 
 # ── Auth System ────────────────────────────────────────────────────────
 from services import auth_mgr
@@ -68,28 +82,57 @@ app.register_blueprint(auth_bp)
 
 @app.before_request
 def enforce_auth():
-    """Globally protect routes. Exceptions are static files, wifi setup forms, and the auth blueprint itself."""
-    # Allow unauthenticated access to setup, static, auth pages, and wifi connection/status
+    """Globally protect routes.
+
+    Static assets and the auth blueprint are always reachable. While the device
+    is still onboarding (AP portal, and up until an admin account exists)
+    everything is open so a phone can configure it. Once an admin account
+    exists, EVERYTHING — including /api/wifi/* and /output/* — requires a
+    logged-in session, so the device stays locked down even over a public tunnel.
+    """
     if request.path.startswith('/static') or request.path.startswith('/auth'):
         return
-    if request.path.startswith('/api/wifi/'):
-        return
-    if request.path.startswith('/output/'):
-        return
 
-    # If AP mode is active (setup_complete is False), we let people use the local network setup portal
+    # First-time setup / AP portal: everything open so a phone can configure it.
     if not config.is_setup_complete:
         return
 
+    # setup_complete flips true the instant WiFi connects — BEFORE the admin
+    # account is created. Onboarding isn't finished until an admin exists, so
+    # keep the WiFi portal endpoints reachable during that window (notably the
+    # cross-network /api/wifi/connect/status poll the setup page relies on);
+    # every other route pushes the user to create the admin account.
     if not config.get("admin_email"):
+        if request.path.startswith('/api/wifi/'):
+            return
         if request.path.startswith('/api/'):
             return jsonify({"error": "Setup required."}), 401
         return redirect(url_for('auth.setup_admin'))
-        
+
+    # Fully set up (admin exists): require a logged-in session for everything.
     if not session.get('logged_in'):
         if request.path.startswith('/api/'):
             return jsonify({"error": "Unauthorized.", "redirect": "/auth/login"}), 401
         return redirect(url_for('auth.login', next=request.url))
+
+
+@app.before_request
+def csrf_protect():
+    """Lightweight CSRF defense: reject state-changing requests whose Origin/
+    Referer host does not match the device. Runs only after setup is complete
+    (the AP portal legitimately needs cross-origin posts) and skips the auth
+    blueprint, whose form posts are covered by the SameSite=Lax cookie."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    if not config.is_setup_complete:
+        return
+    if request.path.startswith('/auth'):
+        return
+    source = request.headers.get('Origin') or request.headers.get('Referer')
+    if not source:
+        return jsonify({"error": "Missing origin header."}), 403
+    if urlparse(source).netloc != request.host:
+        return jsonify({"error": "Cross-origin request blocked."}), 403
 
 
 @app.context_processor
@@ -108,7 +151,8 @@ def handle_exception(e):
     raise e
 
 
-display_lock = threading.RLock()
+# NOTE: display_lock / display_state are owned by display_mgr and bound below
+# (see init_display_mgr) — do not create duplicates here.
 
 # ── WiFi AP Hotspot Management ────────────────────────────────────────────
 
@@ -219,17 +263,36 @@ def is_ap_active():
         pass
     return False
 
-display_state = {
-    "current_image": None,
-    "last_update": None,
-    "status": "idle",
-}
 
+def maybe_start_ngrok():
+    """Start a public ngrok tunnel only if the owner opted in and supplied a
+    token (via config or the NGROK_AUTHTOKEN env var). Returns the public URL,
+    or None if disabled/unconfigured/failed. No token is ever baked into source.
+    """
+    if not config.get("ngrok_enabled"):
+        return None
+    token = config.get("ngrok_token") or os.environ.get("NGROK_AUTHTOKEN", "")
+    if not token:
+        logger.warning("ngrok enabled but no token configured; skipping tunnel")
+        return None
+    try:
+        from pyngrok import ngrok
+        ngrok.set_auth_token(token)
+        public_url = ngrok.connect(5000).public_url
+        logger.info(f"Ngrok tunnel active: {public_url}")
+        return public_url
+    except Exception as e:
+        logger.error(f"Failed to start ngrok tunnel: {e}")
+        return None
+
+# display_state is owned by display_mgr and bound below; only photo_state lives
+# here. Guard it with a lock — request threads and the slideshow loop mutate it.
 photo_state = {
     "current_index": -1,
     "current_image": None,
     "total": 0,
 }
+photo_lock = threading.Lock()
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'gif'}
 EPD_WIDTH = 800
@@ -244,6 +307,35 @@ EPAPER_PALETTE = (
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def safe_output_path(filename):
+    """Resolve a user-supplied filename inside OUTPUT_DIR, or None if it tries to
+    escape (path traversal / absolute path). Use for every filename that comes
+    from a request body/param before touching the filesystem."""
+    if not filename:
+        return None
+    # secure_filename strips path separators; realpath containment is the backstop.
+    from werkzeug.utils import secure_filename
+    safe = secure_filename(filename)
+    if not safe:
+        return None
+    candidate = os.path.realpath(os.path.join(OUTPUT_DIR, safe))
+    root = os.path.realpath(OUTPUT_DIR)
+    if candidate != root and not candidate.startswith(root + os.sep):
+        return None
+    return candidate
+
+
+def parse_rotation(raw):
+    """Coerce a request-supplied rotation to a valid angle, or raise ValueError."""
+    try:
+        r = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("Invalid rotation")
+    if r not in (0, 90, 180, 270):
+        raise ValueError("Rotation must be 0, 90, 180 or 270")
+    return r
 
 
 def get_image_list():
@@ -275,7 +367,8 @@ def get_current_photo_path():
 
 
 def quantize_to_epaper(image_path):
-    img = Image.open(image_path).convert("RGB")
+    with Image.open(image_path) as src:
+        img = src.convert("RGB")
     img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
     pal_image = Image.new("P", (1, 1))
     pal_image.putpalette(EPAPER_PALETTE)
@@ -309,8 +402,9 @@ def process_upload(file_storage, rotation=0, fit_mode="fit"):
 
     file_storage.save(filepath)
 
-    # Apply rotation if requested
-    img = Image.open(filepath).convert("RGB")
+    # Apply rotation if requested (close the source handle before saving back).
+    with Image.open(filepath) as src:
+        img = src.convert("RGB")
     if rotation:
         img = img.rotate(-rotation, expand=True)
 
@@ -343,28 +437,48 @@ display_lock = display_mgr.display_lock
 # ── Photo Navigation ──────────────────────────────────────────────────────
 
 def navigate_photo(direction):
-    """Navigate photos (config-only, no e-paper update)."""
+    """Advance the current-photo index. Guarded by photo_lock so concurrent
+    requests and the slideshow tick cannot desync index/filename."""
     images = get_image_list()
     if not images:
         return False, "No images available"
     total = len(images)
-    if direction == "latest":
-        photo_state["current_index"] = 0
-    elif direction == "next":
+    with photo_lock:
+        if direction == "latest":
+            photo_state["current_index"] = 0
+        elif direction == "next":
+            idx = photo_state["current_index"]
+            photo_state["current_index"] = (idx + 1) % total if idx >= 0 else 1 % total
+        elif direction == "prev":
+            idx = photo_state["current_index"]
+            photo_state["current_index"] = (idx - 1) % total if idx > 0 else total - 1
+        elif isinstance(direction, int):
+            if 0 <= direction < total:
+                photo_state["current_index"] = direction
+            else:
+                return False, f"Index out of range (0-{total-1})"
         idx = photo_state["current_index"]
-        photo_state["current_index"] = (idx + 1) % total if idx >= 0 else 1 % total
-    elif direction == "prev":
-        idx = photo_state["current_index"]
-        photo_state["current_index"] = (idx - 1) % total if idx > 0 else total - 1
-    elif isinstance(direction, int):
-        if 0 <= direction < total:
-            photo_state["current_index"] = direction
-        else:
-            return False, f"Index out of range (0-{total-1})"
-    idx = photo_state["current_index"]
-    photo_state["current_image"] = images[idx]["filename"]
-    photo_state["total"] = total
+        photo_state["current_image"] = images[idx]["filename"]
+        photo_state["total"] = total
     return True, "Photo index updated"
+
+
+def navigate_and_display(direction):
+    """Advance the selection AND push it to the e-paper panel, so the physical
+    frame changes (this is what the Prev/Next/Latest buttons are documented to
+    do). Returns (ok, message, pushed) where pushed is False if the panel was
+    busy but the selection still moved."""
+    ok, msg = navigate_photo(direction)
+    if not ok:
+        return False, msg, False
+    config.set("current_page", "photo")
+    if not display_lock.acquire(blocking=False):
+        return True, "Selection updated (display busy)", False
+    try:
+        success, dmsg = display_mgr.display_current_page()
+        return True, dmsg if success else f"Display error: {dmsg}", success
+    finally:
+        display_lock.release()
 
 
 # ── Page Routes ────────────────────────────────────────────────────────────
@@ -379,21 +493,22 @@ def index():
                            display_state=display_state,
                            photo_state=photo_state,
                            total_images=len(images),
-                           config=config.to_dict(),
+                           config=config.public_dict(),
                            now=int(time.time()))
 
 
 @app.route('/setup')
 def setup_page():
+    # During onboarding this is the WiFi setup portal. Once setup is complete,
+    # there is no separate "first-time setup" page — settings live in /settings.
     if not config.is_setup_complete:
         return render_template('wifi_setup.html')
-    return render_template('setup.html', config=config.to_dict())
-
+    return redirect(url_for('settings_page'))
 
 
 @app.route('/upload')
 def upload_page():
-    return render_template('upload.html', config=config.to_dict())
+    return render_template('upload.html', config=config.public_dict())
 
 
 @app.route('/gallery')
@@ -401,24 +516,19 @@ def gallery_page():
     images = get_image_list()
     gdrive_connected = config.get("gdrive_connected", False)
     gdrive_configured = bool(config.get("gdrive_client_id", ""))
-    return render_template('gallery.html', images=images, config=config.to_dict(),
+    return render_template('gallery.html', images=images, config=config.public_dict(),
                            gdrive_connected=gdrive_connected,
                            gdrive_configured=gdrive_configured)
 
 
 @app.route('/settings')
 def settings_page():
-    return render_template('settings.html', config=config.to_dict())
+    return render_template('settings.html', config=config.public_dict())
 
 
 @app.route('/manual')
 def manual_page():
     return render_template('manual.html')
-
-
-@app.route('/wifi')
-def wifi_page():
-    return render_template('wifi.html', config=config.to_dict())
 
 
 @app.errorhandler(404)
@@ -428,32 +538,22 @@ def handle_404(e):
 
 # ── API: Setup & Config ──────────────────────────────────────────────────
 
-@app.route('/api/setup', methods=['POST'])
-def api_setup():
-    """Save initial setup configuration."""
-    data = request.get_json() or {}
-    config.update({
-        "setup_complete": True,
-        "weather_api_key": data.get("weather_api_key", ""),
-        "weather_city": data.get("weather_city", ""),
-        "weather_units": data.get("weather_units", "metric"),
-        "calendar_ical_url": data.get("calendar_ical_url", ""),
-        "current_page": data.get("current_page", "photo"),
-    })
-    logger.info("Setup complete!")
-    return jsonify({"success": True, "message": "Setup saved"})
-
-
 @app.route('/api/config', methods=['GET'])
 def api_config_get():
-    return jsonify(config.to_dict())
+    return jsonify(config.public_dict())
 
 
 @app.route('/api/config', methods=['POST'])
 def api_config_set():
+    """Update settings. Only allow-listed, validated keys are accepted — this
+    endpoint can never write admin_*, session_secret, setup_complete or tokens."""
     data = request.get_json() or {}
-    config.update(data)
-    return jsonify({"success": True, "config": config.to_dict()})
+    applied, rejected = config.filtered_update(data)
+    resp = {"success": True, "config": config.public_dict(),
+            "applied": sorted(applied.keys())}
+    if rejected:
+        resp["rejected"] = rejected
+    return jsonify(resp)
 
 
 @app.route('/api/reset', methods=['POST'])
@@ -461,11 +561,20 @@ def api_reset():
     """Reset all settings to factory defaults (simulates first-time QR setup)."""
     config.reset()
     logger.info("System reset to factory defaults")
-    # Start AP hotspot for WiFi configuration
-    start_ap_hotspot()
-    # Display QR setup on e-paper
-    display_mgr.display_qr_setup()
-    return jsonify({"success": True, "message": "Reset complete. QR setup displayed."})
+
+    def _do_reset():
+        # AP start + QR render are slow (nmcli + e-paper); run off the request
+        # thread so the client gets an immediate response.
+        start_ap_hotspot()
+        try:
+            display_mgr.display_qr_setup(_get_ip())
+        except Exception as e:
+            logger.error(f"QR setup after reset failed: {e}")
+
+    threading.Thread(target=_do_reset, daemon=True).start()
+    return jsonify({"success": True,
+                    "message": "Reset started. Connect to the 'Vignette-Setup' "
+                               "hotspot to reconfigure."})
 
 
 # ── API: Page Control (virtual buttons) ──────────────────────────────────
@@ -508,9 +617,11 @@ def api_page_refresh():
 
 @app.route('/api/widget/toggle', methods=['POST'])
 def api_widget_toggle():
-    """Toggle widget between weather and calendar (config only)."""
+    """Cycle widget mode through weather → calendar → split (config only)."""
+    modes = ["weather", "calendar", "split"]
     current = config.get("widget_mode", "weather")
-    new_mode = "calendar" if current == "weather" else "weather"
+    idx = modes.index(current) if current in modes else 0
+    new_mode = modes[(idx + 1) % len(modes)]
     config.set("widget_mode", new_mode)
     return jsonify({"success": True, "widget_mode": new_mode})
 
@@ -521,7 +632,7 @@ def api_page_qr():
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
     try:
-        success, msg = display_mgr.display_qr_setup()
+        success, msg = display_mgr.display_qr_setup(_get_ip())
         if success:
             return jsonify({"success": True, "message": "QR code displayed"})
         return jsonify({"error": msg}), 500
@@ -565,8 +676,13 @@ def api_upload():
     if not allowed_file(file.filename):
         return jsonify({"error": "File type not allowed"}), 400
 
-    rotation = int(request.form.get('rotation', 0))
+    try:
+        rotation = parse_rotation(request.form.get('rotation', 0))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     fit_mode = request.form.get('fit_mode', config.get('photo_fit_mode', 'fit'))
+    if fit_mode not in ("fit", "stretch"):
+        fit_mode = "fit"
 
     try:
         filename = process_upload(file, rotation, fit_mode)
@@ -583,20 +699,22 @@ def api_display():
     filename = data.get('filename') or request.form.get('filename')
     if not filename:
         return jsonify({"error": "No filename provided"}), 400
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
     try:
         success, msg = display_mgr.display_image_on_epaper(filepath)
         if success:
+            safe_name = os.path.basename(filepath)
             images = get_image_list()
-            for i, img in enumerate(images):
-                if img["filename"] == filename:
-                    photo_state["current_index"] = i
-                    photo_state["current_image"] = filename
-                    break
+            with photo_lock:
+                for i, img in enumerate(images):
+                    if img["filename"] == safe_name:
+                        photo_state["current_index"] = i
+                        photo_state["current_image"] = safe_name
+                        break
             config.set("current_page", "photo")
             return jsonify({"success": True, "message": "Image displayed"})
         return jsonify({"error": f"Display failed: {msg}"}), 500
@@ -606,11 +724,12 @@ def api_display():
 
 @app.route('/api/preview/<filename>')
 def api_preview(filename):
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
     buf = quantize_to_epaper(filepath)
-    return send_file(buf, mimetype='image/png', download_name=f"preview_{filename}")
+    return send_file(buf, mimetype='image/png',
+                     download_name=f"preview_{os.path.basename(filepath)}")
 
 
 @app.route('/api/images')
@@ -620,11 +739,11 @@ def api_images():
 
 @app.route('/api/images/<filename>', methods=['DELETE'])
 def api_delete_image(filename):
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
     os.remove(filepath)
-    return jsonify({"success": True, "message": f"Deleted {filename}"})
+    return jsonify({"success": True, "message": f"Deleted {os.path.basename(filepath)}"})
 
 
 @app.route('/api/upload/batch', methods=['POST'])
@@ -634,8 +753,13 @@ def api_upload_batch():
     if not files:
         return jsonify({"error": "No files provided"}), 400
 
-    rotation = int(request.form.get('rotation', 0))
+    try:
+        rotation = parse_rotation(request.form.get('rotation', 0))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     fit_mode = request.form.get('fit_mode', config.get('photo_fit_mode', 'fit'))
+    if fit_mode not in ("fit", "stretch"):
+        fit_mode = "fit"
 
     results = []
     for file in files:
@@ -662,21 +786,42 @@ def _gdrive_redirect_uri():
     return f"http://{request.host}/api/gdrive/callback"
 
 
+def _store_gdrive_tokens(tokens, keep_refresh=True):
+    """Persist tokens from an exchange/refresh, tracking access-token expiry."""
+    updates = {
+        "gdrive_access_token": tokens.get("access_token", ""),
+        "gdrive_connected": True,
+    }
+    expires_in = tokens.get("expires_in")
+    if expires_in:
+        # Refresh ~1 min early to avoid using a token that expires mid-request.
+        updates["gdrive_token_expiry"] = int(time.time()) + int(expires_in) - 60
+    if "refresh_token" in tokens:
+        updates["gdrive_refresh_token"] = tokens["refresh_token"]
+    elif not keep_refresh:
+        updates["gdrive_refresh_token"] = ""
+    config.update(updates)
+
+
 def _gdrive_access_token():
-    """Get a valid access token, refreshing if needed."""
+    """Get a valid access token, refreshing proactively when expired."""
     token = config.get("gdrive_access_token")
-    if token:
+    expiry = config.get("gdrive_token_expiry", 0)
+    if token and time.time() < expiry:
         return token
     refresh = config.get("gdrive_refresh_token")
     if not refresh:
-        return None
-    new_token = gdrive.refresh_access_token(
+        # No way to refresh; return whatever we have (may still be valid if we
+        # never learned an expiry) or None.
+        return token or None
+    tokens = gdrive.refresh_access_token(
         config.get("gdrive_client_id", ""),
         config.get("gdrive_client_secret", ""),
         refresh)
-    if new_token:
-        config.set("gdrive_access_token", new_token)
-    return new_token
+    if tokens and tokens.get("access_token"):
+        _store_gdrive_tokens(tokens)
+        return tokens["access_token"]
+    return None
 
 
 @app.route('/api/gdrive/config')
@@ -706,12 +851,7 @@ def api_gdrive_auth():
     if not tokens:
         return jsonify({"error": "Token exchange failed"}), 400
 
-    config.update({
-        "gdrive_access_token": tokens.get("access_token", ""),
-        "gdrive_refresh_token": tokens.get("refresh_token",
-                                           config.get("gdrive_refresh_token", "")),
-        "gdrive_connected": True,
-    })
+    _store_gdrive_tokens(tokens)
     return jsonify({"success": True})
 
 
@@ -729,12 +869,7 @@ def api_gdrive_callback():
         code, _gdrive_redirect_uri())
 
     if tokens:
-        config.update({
-            "gdrive_access_token": tokens.get("access_token", ""),
-            "gdrive_refresh_token": tokens.get("refresh_token",
-                                               config.get("gdrive_refresh_token", "")),
-            "gdrive_connected": True,
-        })
+        _store_gdrive_tokens(tokens)
     return redirect(url_for('gallery_page'))
 
 
@@ -776,8 +911,13 @@ def api_gdrive_download():
     if not files:
         return jsonify({"error": "No files selected"}), 400
 
-    rotation = int(data.get("rotation", 0))
+    try:
+        rotation = parse_rotation(data.get("rotation", 0))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     fit_mode = data.get("fit_mode", config.get("photo_fit_mode", "fit"))
+    if fit_mode not in ("fit", "stretch"):
+        fit_mode = "fit"
 
     results = []
     for f in files:
@@ -804,7 +944,8 @@ def api_gdrive_download():
         if ok:
             # Process the downloaded image (rotation + fit)
             try:
-                img = Image.open(dest).convert("RGB")
+                with Image.open(dest) as _src:
+                    img = _src.convert("RGB")
                 if rotation:
                     img = img.rotate(-rotation, expand=True)
                 if fit_mode == "stretch":
@@ -834,44 +975,44 @@ def api_gdrive_download():
 @app.route('/api/photo/current')
 def api_photo_current():
     images = get_image_list()
-    photo_state["total"] = len(images)
-    return jsonify({
-        "index": photo_state["current_index"],
-        "filename": photo_state["current_image"],
-        "total": photo_state["total"],
-    })
+    with photo_lock:
+        photo_state["total"] = len(images)
+        return jsonify({
+            "index": photo_state["current_index"],
+            "filename": photo_state["current_image"],
+            "total": photo_state["total"],
+        })
+
+
+def _photo_nav_response(direction):
+    """Advance selection and push to the e-paper, returning a JSON response."""
+    ok, msg, pushed = navigate_and_display(direction)
+    if not ok:
+        return jsonify({"error": msg}), 500
+    with photo_lock:
+        snapshot = dict(photo_state)
+    return jsonify({"success": True, "photo": snapshot,
+                    "displayed": pushed, "message": msg})
 
 
 @app.route('/api/photo/next', methods=['POST'])
 def api_photo_next():
-    success, msg = navigate_photo("next")
-    if success:
-        return jsonify({"success": True, "photo": photo_state})
-    return jsonify({"error": msg}), 500
+    return _photo_nav_response("next")
 
 
 @app.route('/api/photo/prev', methods=['POST'])
 def api_photo_prev():
-    success, msg = navigate_photo("prev")
-    if success:
-        return jsonify({"success": True, "photo": photo_state})
-    return jsonify({"error": msg}), 500
+    return _photo_nav_response("prev")
 
 
 @app.route('/api/photo/latest', methods=['POST'])
 def api_photo_latest():
-    success, msg = navigate_photo("latest")
-    if success:
-        return jsonify({"success": True, "photo": photo_state})
-    return jsonify({"error": msg}), 500
+    return _photo_nav_response("latest")
 
 
 @app.route('/api/photo/goto/<int:idx>', methods=['POST'])
 def api_photo_goto(idx):
-    success, msg = navigate_photo(idx)
-    if success:
-        return jsonify({"success": True, "photo": photo_state})
-    return jsonify({"error": msg}), 500
+    return _photo_nav_response(idx)
 
 
 # ── API: Display Control ──────────────────────────────────────────────────
@@ -910,6 +1051,10 @@ def api_clear():
 
 @app.route('/api/sleep', methods=['POST'])
 def api_sleep():
+    # Must hold display_lock like every other hardware route, or this races the
+    # SPI bus against an in-flight refresh/slideshow tick.
+    if not display_lock.acquire(blocking=False):
+        return jsonify({"error": "Display is busy"}), 503
     try:
         from waveshare_epd import epd7in3e
         epd = epd7in3e.EPD()
@@ -919,13 +1064,18 @@ def api_sleep():
         return jsonify({"success": True, "message": "Display sleeping"})
     except Exception as e:
         return jsonify({"error": f"Sleep failed: {e}"}), 500
+    finally:
+        display_lock.release()
 
 
 # ── API: E-paper Preview (for dashboard) ──────────────────────────────────
 
-@app.route('/api/preview/current')
+@app.route('/api/preview-current')
 def api_preview_current():
-    """Render the current page as a PNG for the dashboard preview."""
+    """Render the current page as a PNG for the dashboard preview.
+
+    Named without a trailing path segment so it can't collide with the
+    /api/preview/<filename> route (a photo named 'current')."""
     page = config.get("current_page", "photo")
     weather = None
     events = []
@@ -985,28 +1135,28 @@ def _slideshow_loop():
         if not pool:
             continue
 
-        idx = photo_state["current_index"]
-        if order == "random":
-            import random
-            new_idx_in_pool = random.randint(0, len(pool) - 1)
-        else:
-            # Find current position in pool
-            current_name = photo_state.get("current_image")
-            cur_pool_idx = -1
-            for i, p in enumerate(pool):
-                if p["filename"] == current_name:
-                    cur_pool_idx = i
-                    break
-            new_idx_in_pool = (cur_pool_idx + 1) % len(pool)
+        with photo_lock:
+            if order == "random":
+                import random
+                new_idx_in_pool = random.randint(0, len(pool) - 1)
+            else:
+                # Find current position in pool
+                current_name = photo_state.get("current_image")
+                cur_pool_idx = -1
+                for i, p in enumerate(pool):
+                    if p["filename"] == current_name:
+                        cur_pool_idx = i
+                        break
+                new_idx_in_pool = (cur_pool_idx + 1) % len(pool)
 
-        target_name = pool[new_idx_in_pool]["filename"]
-        # Find in full image list to set photo_state
-        for i, img in enumerate(images):
-            if img["filename"] == target_name:
-                photo_state["current_index"] = i
-                photo_state["current_image"] = target_name
-                photo_state["total"] = len(images)
-                break
+            target_name = pool[new_idx_in_pool]["filename"]
+            # Find in full image list to set photo_state
+            for i, img in enumerate(images):
+                if img["filename"] == target_name:
+                    photo_state["current_index"] = i
+                    photo_state["current_image"] = target_name
+                    photo_state["total"] = len(images)
+                    break
 
         # Update e-paper
         if display_lock.acquire(blocking=False):
@@ -1238,21 +1388,19 @@ def _background_wifi_connect(ssid, password):
             # Mark setup complete upon ACTUAL success
             config.set("setup_complete", True)
 
-            # Start ngrok tunnel and get the public URL
+            # Optionally start a public ngrok tunnel (opt-in; no baked-in token).
             redirect_url = f"http://{new_ip}:5000"
-            try:
-                from pyngrok import ngrok
-                logger.info("Initializing ngrok tunnel after setup...")
-                ngrok.set_auth_token("3By64a7MxTOJAWF3eD8TGoLcaIl_5tprPKw4ftjjRSTWU1eVM")
-                public_url = ngrok.connect(5000).public_url
-                logger.info(f"Ngrok Tunnel Active: {public_url}")
+            real_ssid = get_active_ssid() or ssid
+            public_url = maybe_start_ngrok()
+            if public_url:
                 redirect_url = public_url
-                real_ssid = get_active_ssid() or ssid
-                display_mgr.display_wifi_connected(real_ssid, public_url.replace("https://", ""))
-            except Exception as e:
-                logger.error(f"Failed to start ngrok in background: {e}")
                 try:
-                    real_ssid = get_active_ssid() or ssid
+                    display_mgr.display_wifi_connected(
+                        real_ssid, public_url.replace("https://", ""))
+                except Exception:
+                    pass
+            else:
+                try:
                     display_mgr.display_wifi_connected(real_ssid, new_ip)
                 except Exception:
                     pass
@@ -1324,7 +1472,11 @@ def api_wifi_connect_status():
     """Poll the result of a background WiFi connection attempt.
     Needs CORS because the client page was loaded from 192.168.4.1 (AP)
     but polls this endpoint on hostname.local (new network)."""
-    resp = jsonify(_wifi_connect_state)
+    # Serialize a shallow copy so the background thread can't mutate mid-encode.
+    # CORS stays permissive here by necessity: during setup the phone loads the
+    # page from the AP (192.168.4.1) but must poll this across the new network.
+    # The payload carries no password — only status/ssid/ip/redirect.
+    resp = jsonify(dict(_wifi_connect_state))
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Methods'] = 'GET'
     return resp
@@ -1337,7 +1489,7 @@ def api_status():
     return jsonify({
         "display": display_state,
         "photo": photo_state,
-        "config": config.to_dict(),
+        "config": config.public_dict(),
         "total_images": len(get_image_list()),
         "system": get_system_info(),
     })
@@ -1359,9 +1511,10 @@ def api_weather():
 @app.route('/api/calendar')
 def api_calendar():
     """Get upcoming calendar events."""
-    events = fetch_calendar_events(config.get("calendar_ical_url", ""))
+    url = config.get("calendar_ical_url", "")
+    events = fetch_calendar_events(url)
     today = get_today_info()
-    return jsonify({"today": today, "events": [
+    return jsonify({"today": today, "configured": bool(url), "events": [
         {"summary": e.get("summary"), "start": e["start"].isoformat() if e.get("start") else None}
         for e in events
     ]})
@@ -1447,24 +1600,50 @@ def api_system_info():
     return jsonify(get_system_info())
 
 
-@app.route('/api/system/update', methods=['POST'])
-def api_system_update():
+_update_state = {"status": "idle", "output": "", "error": None, "returncode": None}
+_update_lock = threading.Lock()
+
+
+def _run_update():
+    global _update_state
     update_script = os.path.join(PROJECT_DIR, "scripts", "update.sh")
-    if not os.path.exists(update_script):
-        return jsonify({"error": "Update script not found"}), 500
+    _update_state = {"status": "running", "output": "", "error": None, "returncode": None}
     try:
         result = subprocess.run(
             ["bash", update_script],
-            capture_output=True, text=True, timeout=300, cwd=PROJECT_DIR)
-        return jsonify({
-            "success": result.returncode == 0,
+            capture_output=True, text=True, timeout=600, cwd=PROJECT_DIR)
+        _update_state = {
+            "status": "done" if result.returncode == 0 else "failed",
             "output": result.stdout,
             "error": result.stderr if result.returncode != 0 else None,
-        })
+            "returncode": result.returncode,
+        }
     except subprocess.TimeoutExpired:
-        return jsonify({"error": "Update timed out"}), 500
+        _update_state = {"status": "failed", "output": "",
+                         "error": "Update timed out", "returncode": None}
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        _update_state = {"status": "failed", "output": "",
+                         "error": str(e), "returncode": None}
+
+
+@app.route('/api/system/update', methods=['POST'])
+def api_system_update():
+    # Run off the request thread — update.sh pulls + pip-installs (minutes on a
+    # Pi Zero) and restarts the service; blocking here hangs the client.
+    update_script = os.path.join(PROJECT_DIR, "scripts", "update.sh")
+    if not os.path.exists(update_script):
+        return jsonify({"error": "Update script not found"}), 500
+    with _update_lock:
+        if _update_state["status"] == "running":
+            return jsonify({"error": "Update already in progress"}), 409
+        threading.Thread(target=_run_update, daemon=True).start()
+    return jsonify({"success": True, "status": "running",
+                    "message": "Update started. The device will restart when done."}), 202
+
+
+@app.route('/api/system/update/status')
+def api_system_update_status():
+    return jsonify(_update_state)
 
 
 @app.route('/api/system/reboot', methods=['POST'])
@@ -1485,9 +1664,14 @@ def api_system_shutdown():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/output/<filename>')
+@app.route('/output/<path:filename>')
 def serve_image(filename):
-    return send_from_directory(OUTPUT_DIR, filename)
+    # Auth is enforced globally (enforce_auth) once setup is complete, so these
+    # private photos are no longer world-readable. Containment-check the name.
+    safe = safe_output_path(filename)
+    if not safe or not os.path.exists(safe):
+        return jsonify({"error": "Not found"}), 404
+    return send_from_directory(OUTPUT_DIR, os.path.basename(safe))
 
 
 def verify_or_connect_wifi_on_boot():
@@ -1538,30 +1722,24 @@ def verify_or_connect_wifi_on_boot():
 
 
 if __name__ == '__main__':
-    # --- TESTING MODE: Factory Reset on Boot ---
-    logger.info("TESTING MODE RESTART: Wiping ALL config for fresh test.")
-    config.set("setup_complete", False)
-    config.set("wifi_ssid", "")
-    config.set("wifi_password", "")
-    config.set("admin_email", "")
-    config.set("admin_password_hash", "")
-    config.set("session_secret", "")  # Invalidate all browser sessions
-    # Re-generate a fresh secret key for this boot
-    import secrets
-    new_secret = secrets.token_hex(24)
-    app.secret_key = new_secret
-    config.set("session_secret", new_secret)
-    try:
-        stop_ap_hotspot()
-    except Exception:
-        pass
-    # Also disconnect any existing WiFi so AP mode starts fresh
-    try:
-        subprocess.run(["nmcli", "device", "disconnect", "wlan0"],
-                       capture_output=True, text=True, timeout=5)
-    except Exception:
-        pass
-    # ---------------------------------------------
+    # Optional, explicit factory reset — NEVER on by default. Set
+    # VIGNETTE_FACTORY_RESET=1 in the environment for one boot to wipe config
+    # (admin account, WiFi, session secret) and return to first-time setup.
+    if os.environ.get("VIGNETTE_FACTORY_RESET") == "1":
+        logger.warning("VIGNETTE_FACTORY_RESET set: wiping config for a fresh setup.")
+        config.reset()
+        new_secret = secrets.token_hex(24)
+        app.secret_key = new_secret
+        config.set("session_secret", new_secret)
+        try:
+            stop_ap_hotspot()
+        except Exception:
+            pass
+        try:
+            subprocess.run(["nmcli", "device", "disconnect", "wlan0"],
+                           capture_output=True, text=True, timeout=5)
+        except Exception:
+            pass
 
     # Do boot connectivity check first if we have a saved WiFi configuration
     if config.get("wifi_ssid"):
@@ -1595,24 +1773,17 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"Could not display QR setup: {e}")
     else:
-        # Start ngrok tunnel since network is available
+        # Network is available. Only publish a public tunnel if the owner opted
+        # in (config ngrok_enabled + a token); otherwise stay LAN-only.
+        ssid = get_active_ssid() or config.get("wifi_ssid", "WiFi")
+        public_url = maybe_start_ngrok()
         try:
-            from pyngrok import ngrok
-            logger.info("Initializing ngrok tunnel...")
-            ngrok.set_auth_token("3By64a7MxTOJAWF3eD8TGoLcaIl_5tprPKw4ftjjRSTWU1eVM")
-            public_url = ngrok.connect(5000).public_url
-            logger.info(f"Ngrok Tunnel Active: {public_url}")
-            
-            # Display ngrok URL on e-paper
-            ssid = get_active_ssid() or config.get("wifi_ssid", "WiFi")
-            # We can override the IP display to show the ngrok tunnel so the user knows remote access is ready
-            display_mgr.display_wifi_connected(ssid, ip_address=public_url.replace("https://", ""))
-        except Exception as e:
-            logger.error(f"Failed to start ngrok: {e}")
-            try:
-                ssid = get_active_ssid() or config.get("wifi_ssid", "WiFi")
+            if public_url:
+                display_mgr.display_wifi_connected(
+                    ssid, ip_address=public_url.replace("https://", ""))
+            else:
                 display_mgr.display_wifi_connected(ssid, ip)
-            except Exception as e2:
-                pass
+        except Exception as e:
+            logger.error(f"Could not update display on boot: {e}")
 
     app.run(host='0.0.0.0', port=5000, debug=False)

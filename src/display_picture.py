@@ -90,7 +90,7 @@ def crop(image, disp_w, disp_h, intelligent=True):
 
 def display_on_epaper(image):
     """Display a CV2 image on the Waveshare 7.3" e-paper display."""
-    from waveshare_epd import epd7in3e
+    from waveshare_epd import epd7in3e, epdconfig
 
     # Rotate if portrait
     if image.shape[0] > image.shape[1]:
@@ -102,23 +102,31 @@ def display_on_epaper(image):
     # Convert to PIL Image
     pil_image = Image.fromarray(image)
 
-    # Initialize display
+    # Initialize display — init() returns -1 (does not raise) on failure.
     epd = epd7in3e.EPD()
     print("Initializing e-paper display...")
-    epd.init()
+    if epd.init() != 0:
+        raise RuntimeError("e-paper init failed")
 
-    print("Sending image to display...")
-    buf = epd.getbuffer(pil_image)
-    epd.display(buf)
-
-    print("Entering sleep mode...")
-    epd.sleep()
-    print("Display updated successfully!")
+    try:
+        print("Sending image to display...")
+        buf = epd.getbuffer(pil_image)
+        epd.display(buf)
+        print("Entering sleep mode...")
+        epd.sleep()
+        print("Display updated successfully!")
+    finally:
+        # Always drop power / close SPI even if getbuffer/display raised, so the
+        # panel is never left energized after a partial refresh.
+        try:
+            epdconfig.module_exit()
+        except Exception:
+            pass
 
 
 def quantize_preview(image):
     """
-    Quantize image to 7-color palette (simulates e-paper appearance).
+    Quantize image to the panel's 6-color palette (simulates e-paper appearance).
     Returns a PIL Image for preview purposes.
     """
     if len(image.shape) == 3 and image.shape[2] == 3:
@@ -126,16 +134,17 @@ def quantize_preview(image):
 
     pil_image = Image.fromarray(image)
 
-    # Create palette matching e-paper display
+    # Palette must match epd7in3e.getbuffer exactly: black, white, yellow, red,
+    # (black filler), blue, green. The 6-color Spectra panel has NO orange, so
+    # the old 7-color palette produced a preview the hardware can't reproduce.
     pal_image = Image.new("P", (1, 1))
     pal_image.putpalette(
-        (0, 0, 0,  255, 255, 255,  0, 255, 0,  0, 0, 255,
-         255, 0, 0,  255, 255, 0,  255, 128, 0) + (0, 0, 0) * 249
+        (0, 0, 0,  255, 255, 255,  255, 255, 0,  255, 0, 0,
+         0, 0, 0,  0, 0, 255,  0, 255, 0) + (0, 0, 0) * 249
     )
 
-    # Quantize to 7 colors with dithering
-    image_7color = pil_image.convert("RGB").quantize(palette=pal_image)
-    return image_7color.convert("RGB")
+    image_6color = pil_image.convert("RGB").quantize(palette=pal_image)
+    return image_6color.convert("RGB")
 
 
 def main():

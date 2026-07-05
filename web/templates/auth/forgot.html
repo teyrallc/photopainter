@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vignette - Password Recovery</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -45,7 +45,7 @@
         .form-group input:focus { border-color: #3b82f6; background: rgba(0,0,0,0.3); }
         .btn-primary {
             width: 100%;
-            background: #3b82f6;
+            background: linear-gradient(135deg, #7c3aed, #a78bfa);
             color: white;
             border: none;
             border-radius: 12px;
@@ -54,7 +54,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+            box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
         }
         .btn-primary:active { transform: scale(0.98); }
         .error { color: #ef4444; font-size: 14px; margin-top: 8px; text-align: center; display: none; }
@@ -94,6 +94,7 @@
             const btn = e.target.querySelector('button');
             const errorMsg = document.getElementById('errorMsg');
             const email = document.getElementById('email').value;
+            btn.disabled = true;            // prevent double-submit
             btn.textContent = 'Sending to Display...';
             errorMsg.style.display = 'none';
 
@@ -106,14 +107,17 @@
                 const data = await res.json();
                 if(data.success) {
                     window.location.href = '/auth/verify-reset?email=' + encodeURIComponent(email);
+                    return;
                 } else {
                     errorMsg.textContent = data.error || 'Request failed';
                     errorMsg.style.display = 'block';
+                    btn.disabled = false;
                     btn.textContent = 'Request Hardware Token';
                 }
             } catch(err) {
                 errorMsg.textContent = 'Network error';
                 errorMsg.style.display = 'block';
+                btn.disabled = false;
                 btn.textContent = 'Request Hardware Token';
             }
         });

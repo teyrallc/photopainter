@@ -8,3 +8,8 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+
+# Runtime secret store — holds admin_password_hash, session_secret,
+# wifi_password, gdrive/ngrok tokens, etc. MUST NOT be committed.
+config.json
+config.json.bad

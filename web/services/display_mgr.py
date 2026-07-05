@@ -51,24 +51,26 @@ def display_pil_image(img):
     with display_lock:
         display_state["status"] = "displaying"
         logger.info("Sending image to e-paper...")
-        
+
         # Try up to 3 times to initialize and display
         last_error = None
         for attempt in range(3):
+            epd = None
             try:
                 from waveshare_epd import epd7in3e
                 epd = epd7in3e.EPD()
-                
-                # Hardware init
-                epd.init()
-                
+
+                # Hardware init — init() returns -1 (not an exception) on failure.
+                if epd.init() != 0:
+                    raise RuntimeError("e-paper init failed (module_init)")
+
                 # Render and show
                 buf = epd.getbuffer(img)
                 epd.display(buf)
-                
+
                 # Power off
                 epd.sleep()
-                
+
                 display_state["status"] = "idle"
                 display_state["last_update"] = datetime.now().isoformat()
                 logger.info(f"Display update complete! (Attempt {attempt + 1})")
@@ -76,8 +78,20 @@ def display_pil_image(img):
             except Exception as e:
                 last_error = e
                 logger.warning(f"Display attempt {attempt + 1} failed: {e}")
-                time.sleep(1) # Wait a bit before retry
-                
+                # Always release the panel/SPI before retrying so PWR doesn't
+                # stay high and the shared SPI handle is closed and reopenable.
+                try:
+                    if epd is not None:
+                        epd.sleep()
+                except Exception:
+                    pass
+                try:
+                    from waveshare_epd import epdconfig
+                    epdconfig.module_exit()
+                except Exception:
+                    pass
+                time.sleep(1)  # Wait a bit before retry
+
         logger.error(f"Display failed after 3 attempts: {last_error}", exc_info=True)
         display_state["status"] = "error"
         return False, str(last_error)
@@ -113,8 +127,9 @@ def display_current_page():
     display_state["current_image"] = f"[{page} page]"
     return display_pil_image(img)
 
-def display_qr_setup(ip):
-    """Display QR code setup page on e-paper."""
+def display_qr_setup(ip=None):
+    """Display QR code setup page on e-paper. ip is optional — the renderer
+    always shows the AP address (192.168.4.1), so callers need not supply it."""
     img = renderer.render_qr_setup(ip)
     display_state["current_image"] = "[QR setup]"
     return display_pil_image(img)
@@ -158,6 +173,11 @@ def display_test_pattern():
 def display_image_on_epaper(image_path):
     """Display an image file on e-paper."""
     display_state["current_image"] = os.path.basename(image_path)
-    img = Image.open(image_path).convert("RGB")
+    try:
+        with Image.open(image_path) as src:
+            img = src.convert("RGB")
+    except Exception as e:
+        logger.error(f"Could not open image {image_path}: {e}")
+        return False, f"Unreadable image: {e}"
     img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
     return display_pil_image(img)

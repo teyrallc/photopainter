@@ -19,17 +19,22 @@ DRIVE_API = "https://www.googleapis.com/drive/v3"
 SCOPES = "https://www.googleapis.com/auth/drive.readonly"
 
 
-def get_auth_url(client_id, redirect_uri):
-    """Build the Google OAuth 2.0 authorization URL."""
-    params = urllib.parse.urlencode({
+def get_auth_url(client_id, redirect_uri, state=None):
+    """Build the Google OAuth 2.0 authorization URL.
+
+    Pass a random `state` and verify it in the callback to prevent OAuth
+    login-CSRF (Google requires a state nonce)."""
+    fields = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": SCOPES,
         "access_type": "offline",
         "prompt": "consent",
-    })
-    return f"{GOOGLE_AUTH_URL}?{params}"
+    }
+    if state:
+        fields["state"] = state
+    return f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(fields)}"
 
 
 def exchange_code(client_id, client_secret, code, redirect_uri):
@@ -53,7 +58,10 @@ def exchange_code(client_id, client_secret, code, redirect_uri):
 
 
 def refresh_access_token(client_id, client_secret, refresh_token):
-    """Use refresh token to get a new access token."""
+    """Use a refresh token to get a new access token.
+
+    Returns the full token dict (access_token + expires_in) so the caller can
+    track expiry, or None on failure."""
     data = urllib.parse.urlencode({
         "client_id": client_id,
         "client_secret": client_secret,
@@ -63,8 +71,7 @@ def refresh_access_token(client_id, client_secret, refresh_token):
     req = urllib.request.Request(GOOGLE_TOKEN_URL, data=data, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            tokens = json.loads(resp.read().decode())
-        return tokens.get("access_token")
+            return json.loads(resp.read().decode())
     except Exception as e:
         logger.error(f"Google Drive token refresh failed: {e}")
         return None

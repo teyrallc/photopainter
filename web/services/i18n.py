@@ -28,6 +28,7 @@ TRANSLATIONS = {
         "latest": "Latest",
         "test_pattern": "Test Pattern",
         "refresh": "Refresh",
+        "delete": "Delete",
         "update_display": "Update Display",
         "clear": "Clear",
         "sleep": "Sleep",
@@ -195,6 +196,15 @@ TRANSLATIONS = {
         "loading_latest": "Loading latest...",
         "confirm_test": "Send test pattern to e-paper?",
         "sending_test": "Sending test pattern...",
+        "slideshow_started": "Slideshow started",
+        "slideshow_stopped": "Slideshow stopped",
+        "rebooting": "Rebooting...",
+        "shutting_down": "Shutting down...",
+        "action_ok": "OK",
+        "action_failed": "Failed",
+        "load_failed": "Failed to load",
+        "update_started": "Update started; the device will restart shortly.",
+        "upload_options_hint": "Rotation & fit apply to the next file you choose.",
     },
     "zh": {
         "app_name": "Vignette",
@@ -220,6 +230,7 @@ TRANSLATIONS = {
         "latest": "\u6700\u65b0",
         "test_pattern": "\u6e2c\u8a66\u5716\u6848",
         "refresh": "\u91cd\u65b0\u6574\u7406",
+        "delete": "\u522a\u9664",
         "update_display": "\u66f4\u65b0\u5230\u87a2\u5e55",
         "clear": "\u6e05\u9664\u87a2\u5e55",
         "sleep": "\u4f11\u7720",
@@ -333,7 +344,7 @@ TRANSLATIONS = {
         "gdrive_step4": "\u65b0\u589e JS \u4f86\u6e90: http://YOUR_PI_IP:5000",
 
         # Setup
-        "first_time_setup": "H System \u667a\u6167\u87a2\u5e55 - \u521d\u6b21\u8a2d\u5b9a",
+        "first_time_setup": "\u521d\u6b21\u8a2d\u5b9a",
         "weather_hint": "\u5728 openweathermap.org \u53d6\u5f97\u514d\u8cbb API Key",
         "city_placeholder": "\u4f8b\u5982\uff1aTaipei, Tokyo, New York",
         "ical_placeholder": "https://calendar.google.com/calendar/ical/...",
@@ -387,10 +398,53 @@ TRANSLATIONS = {
         "loading_latest": "\u8f09\u5165\u6700\u65b0\u7167\u7247...",
         "confirm_test": "\u78ba\u5b9a\u8981\u767c\u9001\u6e2c\u8a66\u5716\u6848\u55ce\uff1f",
         "sending_test": "\u6b63\u5728\u767c\u9001\u6e2c\u8a66\u5716\u6848...",
+        "slideshow_started": "\u8f2a\u64ad\u5df2\u958b\u59cb",
+        "slideshow_stopped": "\u8f2a\u64ad\u5df2\u505c\u6b62",
+        "rebooting": "\u91cd\u65b0\u555f\u52d5\u4e2d...",
+        "shutting_down": "\u95dc\u6a5f\u4e2d...",
+        "action_ok": "\u5b8c\u6210",
+        "action_failed": "\u5931\u6557",
+        "load_failed": "\u8f09\u5165\u5931\u6557",
+        "update_started": "\u5df2\u958b\u59cb\u66f4\u65b0\uff0c\u88dd\u7f6e\u5c07\u91cd\u65b0\u555f\u52d5\u3002",
+        "upload_options_hint": "\u65cb\u8f49\u8207\u7e2e\u653e\u8a2d\u5b9a\u6703\u5957\u7528\u5230\u63a5\u4e0b\u4f86\u9078\u64c7\u7684\u6a94\u6848\u3002",
     },
 }
 
 
+class _Translations:
+    """Wrapper so templates can safely use ``{{ t.key }}`` for ANY key.
+
+    A plain dict is unsafe here: Jinja resolves ``t.clear`` with getattr BEFORE
+    item lookup, so for a dict it returns the bound ``dict.clear`` method (which
+    renders as ``<built-in method clear ...>``) for every name that collides
+    with a dict method (clear, get, items, keys, values, update, copy, pop, …).
+    This object exposes no such methods; attribute/item access returns the
+    translation string, or '' when the key is absent (per-key English fallback
+    is already merged in below)."""
+    __slots__ = ("_d",)
+
+    def __init__(self, data):
+        self._d = data
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return self._d.get(name, "")
+
+    def __getitem__(self, name):
+        return self._d.get(name, "")
+
+    def __contains__(self, name):
+        return name in self._d
+
+
 def get_translations(lang="en"):
-    """Get translation dict for the given language."""
-    return TRANSLATIONS.get(lang, TRANSLATIONS["en"])
+    """Get translations for a language, with per-key fallback to English.
+
+    Merging over a copy of the English dict means a key that exists only in `en`
+    renders its English text in every language. Returns a _Translations wrapper
+    so ``{{ t.key }}`` never resolves to a dict method (see class docstring)."""
+    base = dict(TRANSLATIONS["en"])
+    if lang != "en" and lang in TRANSLATIONS:
+        base.update(TRANSLATIONS[lang])
+    return _Translations(base)

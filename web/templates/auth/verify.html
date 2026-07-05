@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vignette - Verify Reset</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -44,11 +44,11 @@
             text-align: center;
             letter-spacing: 2px;
         }
-        .form-group input[type="password"] { text-align: light; letter-spacing: normal; }
+        .form-group input[type="password"] { text-align: left; letter-spacing: normal; }
         .form-group input:focus { border-color: #f59e0b; background: rgba(0,0,0,0.3); }
         .btn-primary {
             width: 100%;
-            background: #f59e0b;
+            background: linear-gradient(135deg, #7c3aed, #a78bfa);
             color: white;
             border: none;
             border-radius: 12px;
@@ -57,7 +57,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+            box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
         }
         .btn-primary:active { transform: scale(0.98); }
         .error { color: #ef4444; font-size: 14px; margin-top: 8px; text-align: center; display: none; }

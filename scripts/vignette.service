@@ -1,21 +1,39 @@
+# Template — install.sh renders this to /etc/systemd/system/vignette.service,
+# substituting __RUN_USER__ and __INSTALL_DIR__. Do not install this file
+# verbatim; the placeholders must be filled in first.
 [Unit]
-Description=Vignette - H System Smart Display Web Interface
+Description=Vignette - Smart Display Web Interface
 Documentation=https://github.com/teyrallc/Vignette
-After=network-online.target
+After=network-online.target NetworkManager.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/home/pi/Vignette
-ExecStart=/home/pi/Vignette/venv/bin/python /home/pi/Vignette/web/app.py
+# Runs as a non-root user. NetworkManager control is granted via a polkit rule
+# and reboot/shutdown/restart via a scoped sudoers entry (both created by
+# install.sh), so the web app never runs with full root privileges.
+User=__RUN_USER__
+SupplementaryGroups=spi gpio netdev
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/venv/bin/python __INSTALL_DIR__/web/app.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
-
-# Environment
 Environment=PYTHONUNBUFFERED=1
+
+# To enable the opt-in public tunnel, set the owner's own token here:
+# Environment=NGROK_AUTHTOKEN=your_token_here
+
+# Conservative hardening. NoNewPrivileges / RestrictSUIDSGID / ProtectSystem
+# are intentionally omitted: the app legitimately invokes sudo (a setuid binary)
+# for reboot/shutdown and nmcli writes under /etc/NetworkManager. Tighten
+# further only after validating on real hardware.
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictRealtime=yes
 
 [Install]
 WantedBy=multi-user.target

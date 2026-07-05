@@ -62,6 +62,15 @@ def _draw_logo(draw, cx, cy, size, fill):
     draw.text((cx, cy), "Vignette", fill=fill, font=_get_logo_font(size), anchor="mm")
 
 
+def _logo_dims(draw, size):
+    """Actual rendered (width, height) of the 'Vignette' wordmark at a size.
+    The Amsterdam Three script face is wide with swashes/descenders, so neighbours
+    (titles, taglines, copyright) must be placed against these real bounds — not
+    a guessed offset — to avoid overlap."""
+    b = draw.textbbox((0, 0), "Vignette", font=_get_logo_font(size))
+    return b[2] - b[0], b[3] - b[1]
+
+
 def _get_font(size):
     """Get a font at the given size, trying CJK fonts first for Chinese support."""
     if size in _font_cache:
@@ -101,17 +110,25 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     PANEL_CX = 402 + 396 // 2   # 600
     PANEL_CY = EPD_H // 2       # 240
 
+    photo = None
     if photo_path and os.path.exists(photo_path):
         photo = _prepare_photo(photo_path, 396, 478,
                                config.get("photo_rotation", 0),
                                config.get("photo_fit_mode", "fit"))
+    if photo is not None:
         px = 402 + (396 - photo.width) // 2
         py = 1 + (478 - photo.height) // 2
         img.paste(photo, (px, py))
     else:
-        # Default: Vignette logo as placeholder
-        _draw_logo(draw, PANEL_CX, PANEL_CY - 20, 82, BLACK)
-        draw.text((PANEL_CX, PANEL_CY + 62),
+        # Default: Vignette logo as placeholder. Place the tagline below the
+        # logo's ACTUAL bottom ink edge (measured at the same mm anchor used to
+        # draw it) so the script descender swash can't overlap it.
+        logo_size = 74
+        logo_cy = PANEL_CY - 24
+        _draw_logo(draw, PANEL_CX, logo_cy, logo_size, BLACK)
+        lb = draw.textbbox((PANEL_CX, logo_cy), "Vignette",
+                           font=_get_logo_font(logo_size), anchor="mm")
+        draw.text((PANEL_CX, lb[3] + 12),
                   "Smart Display", fill=BLACK, font=_get_font(14), anchor="mt")
 
     return img
@@ -139,8 +156,10 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
     """Render full-screen photo with rotation and fit mode."""
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
 
+    photo = None
     if photo_path and os.path.exists(photo_path):
         photo = _prepare_photo(photo_path, EPD_W, EPD_H, rotation, fit_mode)
+    if photo is not None:
         px = (EPD_W - photo.width) // 2
         py = (EPD_H - photo.height) // 2
         img.paste(photo, (px, py))
@@ -169,13 +188,21 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
     font_small  = _get_font(12)
     font_tiny   = _get_font(10)
 
-    # ── Header (0–60): logo left · divider · "WiFi Setup" right ──
+    # ── Header (0–60): centered "logo | WiFi Setup" group, spaced by MEASURED
+    #    widths so the wide script wordmark can't run into the title. ──
     draw.rectangle([0, 0, EPD_W, 60], fill=BLUE)
-    _draw_logo(draw, EPD_W // 2 - 80, 30, 38, WHITE)
-    draw.line([(EPD_W // 2 - 8, 14), (EPD_W // 2 - 8, 46)],
-              fill=(180, 180, 220), width=1)
-    draw.text((EPD_W // 2 + 52, 30), "WiFi Setup",
-              fill=WHITE, font=font_header, anchor="mm")
+    logo_size = 34
+    logo_w, logo_h = _logo_dims(draw, logo_size)
+    title = "WiFi Setup"
+    tb = draw.textbbox((0, 0), title, font=font_header)
+    title_w = tb[2] - tb[0]
+    gap = 18
+    total_w = logo_w + gap + 1 + gap + title_w
+    start_x = (EPD_W - total_w) // 2
+    _draw_logo(draw, start_x + logo_w // 2, 30, logo_size, WHITE)
+    div_x = start_x + logo_w + gap
+    draw.line([(div_x, 14), (div_x, 46)], fill=(180, 180, 220), width=1)
+    draw.text((div_x + gap, 30), title, fill=WHITE, font=font_header, anchor="lm")
 
     # ── Column centers ──
     L = EPD_W // 4        # 200
@@ -341,8 +368,15 @@ def render_otp_page(code):
 
 
 def _prepare_photo(path, max_w, max_h, rotation=0, fit_mode="fit"):
-    """Load, rotate, and resize a photo."""
-    photo = Image.open(path).convert("RGB")
+    """Load, rotate, and resize a photo. Returns None if the file cannot be
+    decoded (truncated/corrupt upload) so callers can fall back to a placeholder
+    instead of raising a 500 out of the render path."""
+    try:
+        with Image.open(path) as src:
+            photo = src.convert("RGB")
+    except Exception as e:
+        logger.warning(f"Could not decode photo {path}: {e}")
+        return None
 
     if rotation:
         photo = photo.rotate(-rotation, expand=True)
@@ -379,17 +413,26 @@ def _draw_calendar_panel(draw, x, y, w, h, events):
     # Mini month calendar
     _draw_mini_calendar(draw, x + 20, y + 90, w - 40, now)
 
-    # Upcoming events (if any)
-    ey = y + h - 10
-    if events:
-        for ev in events[:2]:
+    # Upcoming events — placed BELOW the actual mini-grid (not pinned to the
+    # panel bottom, which collided with 6-week months), capped to the space that
+    # fits. A geometric dot is used instead of a U+2022 bullet, which renders as
+    # a tofu box in fonts lacking that glyph.
+    import calendar as _cal
+    weeks = len(_cal.monthcalendar(now.year, now.month))
+    grid_bottom = (y + 90) + weeks * 16 + 16   # mirrors _draw_mini_calendar geometry
+    ey = grid_bottom + 6
+    line_h = 18
+    max_rows = max(0, (y + h - 6 - ey) // line_h)
+    if events and max_rows > 0:
+        for ev in events[:max_rows]:
             start = ev.get("start")
             summary = ev.get("summary", "?")[:20]
             if start:
                 time_str = start.strftime("%m/%d %H:%M")
-                draw.text((x + 10, ey - 20), f"• {time_str} {summary}",
-                          fill=BLACK, font=font_event, anchor="lb")
-                ey -= 18
+                draw.ellipse([x + 10, ey + 5, x + 15, ey + 10], fill=BLACK)
+                draw.text((x + 22, ey), f"{time_str} {summary}",
+                          fill=BLACK, font=font_event, anchor="lt")
+                ey += line_h
 
 
 def _draw_mini_calendar(draw, x, y, w, now):
@@ -513,7 +556,7 @@ def _draw_weather_fullscreen(draw, weather):
         draw.text((fx, 415), f"({fc['weekday']})", fill=BLACK, font=_get_font(14), anchor="mt")
         draw.text((fx, 435), f"{fc['temp_min']}~{fc['temp_max']}°",
                   fill=BLACK, font=font_detail, anchor="mt")
-        draw.text((fx, 458), fc["description"][:4],
+        draw.text((fx, 456), fc["description"][:14],
                   fill=BLACK, font=_get_font(14), anchor="mt")
         fx += 250
 
@@ -572,18 +615,25 @@ def _draw_calendar_fullscreen(draw, events):
                 color = RED if col_idx >= 5 else BLACK
                 draw.text((cx, cy), str(day), fill=color, font=font_day, anchor="mm")
 
-    # Events list
+    # Events list. For a 6-week month the grid pushes ey down far enough that
+    # fixed events[:4] would overflow the 480px panel, so cap by available space.
     ey = grid_y + (len(cal) + 1) * cell_h + 20
     draw.line([(50, ey - 5), (EPD_W - 50, ey - 5)], fill=BLACK, width=1)
 
+    line_h = 24
+    bottom_margin = 16
+    max_events = max(0, (EPD_H - bottom_margin - ey) // line_h)
+
     if events:
-        for ev in events[:4]:
+        for ev in events[:max_events]:
             start = ev.get("start")
             summary = ev.get("summary", "?")[:30]
             if start:
                 ts = start.strftime("%m/%d %H:%M")
-                draw.text((80, ey), f"• {ts}  {summary}", fill=BLACK, font=font_event)
-                ey += 24
+                # Geometric dot instead of a U+2022 bullet (tofu-safe).
+                draw.ellipse([64, ey + 7, 70, ey + 13], fill=BLACK)
+                draw.text((80, ey), f"{ts}  {summary}", fill=BLACK, font=font_event)
+                ey += line_h
     else:
         draw.text((EPD_W // 2, ey + 5), "No upcoming events",
                   fill=BLACK, font=font_event, anchor="mt")
