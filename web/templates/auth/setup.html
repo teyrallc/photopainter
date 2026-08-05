@@ -1,186 +1,188 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vignette - Initial Setup</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .container { width: 100%; max-width: 420px; }
-        .brand { text-align: center; margin-bottom: 24px; }
-        .brand h1 { color: #f8fafc; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
-        .brand p { color: #94a3b8; font-size: 15px; margin-top: 4px; }
-        .brand-logo { height: 56px; filter: brightness(0) invert(1); opacity: 0.9; display: block; margin: 0 auto 12px; }
-        .card {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            padding: 32px 24px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
-        }
-        .form-group { margin-bottom: 20px; text-align: left; }
-        .form-group label { display: block; color: #cbd5e1; font-size: 14px; font-weight: 500; margin-bottom: 8px; }
-        .form-group input {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 14px 16px;
-            color: #fff;
-            font-size: 16px;
-            outline: none;
-            transition: all 0.2s;
-        }
-        .form-group input:focus { border-color: #10b981; background: rgba(0,0,0,0.3); }
-        .btn-primary {
-            width: 100%;
-            background: #10b981;
-            color: white;
-            border: none;
-            border-radius: 12px;
-            padding: 16px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-        }
-        .btn-primary:active { transform: scale(0.98); }
-        .error { color: #ef4444; font-size: 14px; margin-top: 8px; text-align: center; display: none; }
-        .info { color: #cbd5e1; font-size: 13px; text-align: center; margin-bottom: 20px; line-height: 1.5; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="brand">
-            <img src="/static/img/vignette-logo.svg" alt="Vignette" class="brand-logo">
-            <h1>Create Admin</h1>
-            <p>First-time Device Registration</p>
-        </div>
-        <div class="card">
-            <!-- Phase 1: Account Info -->
-            <div id="phase1">
-                <div class="info">
-                    This smart display supports a single owner account. Once registered, this screen will be permanently locked.
-                </div>
-                <form id="setupForm">
-                    <div class="form-group">
-                        <label>Admin Email</label>
-                        <input type="email" id="email" required placeholder="you@example.com" />
-                    </div>
-                    <div class="form-group">
-                        <label>Secure Password (min 6 chars)</label>
-                        <input type="password" id="password" required placeholder="••••••••" minlength="6" />
-                    </div>
-                    <div class="error" id="errorMsg1"></div>
-                    <button type="submit" class="btn-primary" style="margin-top: 10px;">Initialize Device</button>
-                </form>
-            </div>
+{% extends "_kiosk.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — Create admin{% endblock %}
 
-            <!-- Phase 2: Hardware OTP -->
-            <div id="phase2" style="display: none;">
-                <div class="info" style="color: #10b981; font-weight: 600;">
-                    <i class="bi bi-display"></i> Check your E-Paper display!<br>
-                    <span style="font-weight: 400; color: #cbd5e1;">A 6-digit verification code has been shown on the device.</span>
-                </div>
-                <form id="verifyForm">
-                    <div class="form-group">
-                        <label>6-Digit Verification Code</label>
-                        <input type="text" id="otpCode" required placeholder="000000" maxlength="6" inputmode="numeric" 
-                               style="text-align: center; font-size: 24px; letter-spacing: 8px; font-weight: 700;" />
-                    </div>
-                    <div class="error" id="errorMsg2"></div>
-                    <button type="submit" class="btn-primary" style="margin-top: 10px;">Verify & Complete</button>
-                    <button type="button" class="btn-primary" onclick="location.reload()" 
-                            style="margin-top: 12px; background: rgba(255,255,255,0.1); box-shadow: none;">Back</button>
-                </form>
-            </div>
-        </div>
+{% block brand %}
+<h1>Create your admin account</h1>
+<p>First-time device registration</p>
+{% endblock %}
+
+{% block card %}
+<ol class="stepper" id="stepper">
+    <li class="stepper__step is-active" data-step="1">
+        <div class="stepper__bar"></div><span class="stepper__label">Account</span>
+    </li>
+    <li class="stepper__step" data-step="2">
+        <div class="stepper__bar"></div><span class="stepper__label">Verify</span>
+    </li>
+</ol>
+
+<!-- ═══ 1 — account details ═══════════════════════════════════════════════ -->
+<section id="phase-account">
+    <div class="alert alert--info mb-2">
+        {{ icon('shield') }}
+        <span>This display has a single owner account. Once registered, this page locks permanently.</span>
     </div>
 
-    <script>
-        // Phase 1: Registration data submission
-        document.getElementById('setupForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = e.target.querySelector('button');
-            const errorMsg = document.getElementById('errorMsg1');
-            btn.disabled = true;
-            btn.textContent = 'Preparing Hardware Check...';
-            errorMsg.style.display = 'none';
+    <form id="setup-form">
+        <div class="field">
+            <label class="label" for="email">Admin email</label>
+            <input type="email" class="input" id="email" required placeholder="you@example.com"
+                   autocomplete="username" autocapitalize="none" spellcheck="false">
+        </div>
 
-            try {
-                const res = await fetch('/auth/setup', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        email: document.getElementById('email').value,
-                        password: document.getElementById('password').value
-                    })
-                });
-                const data = await res.json();
-                if(data.success && data.needs_otp) {
-                    document.getElementById('phase1').style.display = 'none';
-                    document.getElementById('phase2').style.display = 'block';
-                } else {
-                    errorMsg.textContent = data.error || 'Setup failed';
-                    errorMsg.style.display = 'block';
-                    btn.disabled = false;
-                    btn.textContent = 'Initialize Device';
-                }
-            } catch(err) {
-                errorMsg.textContent = 'Network error';
-                errorMsg.style.display = 'block';
-                btn.disabled = false;
-                btn.textContent = 'Initialize Device';
-            }
+        <div class="field">
+            <label class="label" for="password">Password</label>
+            <div class="input-group">
+                <input type="password" class="input" id="password" required placeholder="••••••••"
+                       minlength="6" autocomplete="new-password">
+                <button type="button" class="input-group__btn" id="toggle-pass"
+                        aria-label="Show password" aria-pressed="false">
+                    <span id="pass-eye">{{ icon('eye') }}</span>
+                    <span id="pass-eye-off" class="hidden">{{ icon('eye-off') }}</span>
+                </button>
+            </div>
+            <p class="hint">At least 6 characters.</p>
+        </div>
+
+        <div class="alert alert--danger mb-2 hidden" id="error-account"></div>
+
+        <button type="submit" class="btn btn--primary btn--block">
+            {{ icon('arrow-right') }} Continue
+        </button>
+    </form>
+</section>
+
+<!-- ═══ 2 — hardware OTP ══════════════════════════════════════════════════ -->
+<section id="phase-verify" class="hidden">
+    <div class="status-view" style="padding-bottom:0;">
+        <div class="status-view__badge status-view__badge--ok">{{ icon('display') }}</div>
+        <h2 class="ok">Check the e-paper screen</h2>
+        <p class="mb-2">A 6-digit code is showing on the display itself — proof you're
+           standing in front of the device.</p>
+    </div>
+
+    <form id="verify-form" class="mt-2">
+        <div class="field">
+            <label class="label" for="otp-code">Verification code</label>
+            <input type="text" class="input otp-input" id="otp-code" required placeholder="000000"
+                   maxlength="6" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code">
+        </div>
+
+        <div class="alert alert--danger mb-2 hidden" id="error-verify"></div>
+
+        <button type="submit" class="btn btn--primary btn--block">
+            {{ icon('check-circle') }} Verify and finish
+        </button>
+        <button type="button" class="btn btn--ghost btn--block mt-1" id="back-btn">Back</button>
+    </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    'use strict';
+
+    var stepper = document.getElementById('stepper');
+
+    function setStep(step) {
+        Array.prototype.forEach.call(stepper.children, function (li) {
+            var n = parseInt(li.getAttribute('data-step'), 10);
+            li.classList.toggle('is-done', n < step);
+            li.classList.toggle('is-active', n === step);
         });
+        document.getElementById('phase-account').classList.toggle('hidden', step !== 1);
+        document.getElementById('phase-verify').classList.toggle('hidden', step !== 2);
+    }
 
-        // Phase 2: OTP Verification
-        document.getElementById('verifyForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = e.target.querySelector('button');
-            const errorMsg = document.getElementById('errorMsg2');
-            btn.disabled = true;
-            btn.textContent = 'Verifying...';
-            errorMsg.style.display = 'none';
+    function fail(box, message) {
+        box.textContent = message;
+        box.classList.remove('hidden');
+    }
 
-            try {
-                const res = await fetch('/auth/setup-verify', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        code: document.getElementById('otpCode').value
-                    })
-                });
-                const data = await res.json();
-                if(data.success) {
-                    btn.textContent = 'Success! Redirecting...';
-                    btn.style.background = '#059669';
-                    setTimeout(() => { window.location.href = '/'; }, 1500);
-                } else {
-                    errorMsg.textContent = data.error || 'Invalid code';
-                    errorMsg.style.display = 'block';
-                    btn.disabled = false;
-                    btn.textContent = 'Verify & Complete';
-                }
-            } catch(err) {
-                errorMsg.textContent = 'Network error';
-                errorMsg.style.display = 'block';
-                btn.disabled = false;
-                btn.textContent = 'Verify & Complete';
+    document.getElementById('toggle-pass').addEventListener('click', function () {
+        var input = document.getElementById('password');
+        var shown = input.type === 'text';
+        input.type = shown ? 'password' : 'text';
+        this.setAttribute('aria-pressed', shown ? 'false' : 'true');
+        document.getElementById('pass-eye').classList.toggle('hidden', !shown);
+        document.getElementById('pass-eye-off').classList.toggle('hidden', shown);
+    });
+
+    /* ── Phase 1 ────────────────────────────────────────────────────────── */
+
+    document.getElementById('setup-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = this.querySelector('button[type="submit"]');
+        var box = document.getElementById('error-account');
+        var restore = V.busy(btn, 'Preparing…');
+        box.classList.add('hidden');
+
+        fetch('/auth/setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value
+            })
+        })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (data) {
+            restore();
+            if (data.success && data.needs_otp) {
+                setStep(2);
+                document.getElementById('otp-code').focus();
+            } else {
+                fail(box, data.error || 'Setup failed.');
             }
+        })
+        .catch(function () {
+            restore();
+            fail(box, 'Could not reach the display. Check your connection and try again.');
         });
-    </script>
-</body>
-</html>
+    });
+
+    /* ── Phase 2 ────────────────────────────────────────────────────────── */
+
+    document.getElementById('back-btn').addEventListener('click', function () {
+        window.location.reload();
+    });
+
+    // Keep the code field numeric so a stray character never gets submitted.
+    document.getElementById('otp-code').addEventListener('input', function () {
+        this.value = this.value.replace(/\D/g, '').slice(0, 6);
+    });
+
+    document.getElementById('verify-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = this.querySelector('button[type="submit"]');
+        var box = document.getElementById('error-verify');
+        var restore = V.busy(btn, 'Verifying…');
+        box.classList.add('hidden');
+
+        fetch('/auth/setup-verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: document.getElementById('otp-code').value })
+        })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (data) {
+            if (data.success) {
+                V.toast('Device registered', 'success');
+                setTimeout(function () { window.location.href = '/'; }, 1200);
+                return;
+            }
+            restore();
+            fail(box, data.error || 'That code was not accepted.');
+        })
+        .catch(function () {
+            restore();
+            fail(box, 'Could not reach the display. Check your connection and try again.');
+        });
+    });
+
+    setStep(1);
+})();
+</script>
+{% endblock %}

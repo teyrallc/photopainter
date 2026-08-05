@@ -1,123 +1,92 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vignette - Login</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .container { width: 100%; max-width: 420px; }
-        .brand { text-align: center; margin-bottom: 24px; }
-        .brand h1 { color: #f8fafc; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
-        .brand p { color: #94a3b8; font-size: 15px; margin-top: 4px; }
-        .brand-logo { height: 72px; filter: brightness(0) invert(1); display: block; margin: 0 auto 8px; }
-        .card {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            padding: 32px 24px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
-        }
-        .form-group { margin-bottom: 20px; text-align: left; }
-        .form-group label { display: block; color: #cbd5e1; font-size: 14px; font-weight: 500; margin-bottom: 8px; }
-        .form-group input {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 14px 16px;
-            color: #fff;
-            font-size: 16px;
-            outline: none;
-            transition: all 0.2s;
-        }
-        .form-group input:focus { border-color: #a78bfa; background: rgba(0,0,0,0.3); }
-        .btn-primary {
-            width: 100%;
-            background: #a78bfa;
-            color: white;
-            border: none;
-            border-radius: 12px;
-            padding: 16px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(167, 139, 250, 0.3);
-        }
-        .btn-primary:active { transform: scale(0.98); }
-        .error { color: #ef4444; font-size: 14px; margin-top: 8px; text-align: center; display: none; }
-        .links { margin-top: 20px; text-align: center; }
-        .links a { color: #a78bfa; text-decoration: none; font-size: 14px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="brand">
-            <img src="/static/img/vignette-logo.svg" alt="Vignette" class="brand-logo">
-            <p>Welcome Back</p>
-        </div>
-        <div class="card">
-            <form id="loginForm">
-                <div class="form-group">
-                    <label>Admin Email</label>
-                    <input type="email" id="email" required placeholder="you@example.com" />
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="password" required placeholder="••••••••" />
-                </div>
-                <div class="error" id="errorMsg"></div>
-                <button type="submit" class="btn-primary" style="margin-top: 10px;">Sign In</button>
-            </form>
-            <div class="links">
-                <a href="/auth/forgot-password">Forgot Password?</a>
-            </div>
+{% extends "_kiosk.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — Sign in{% endblock %}
+
+{% block brand %}
+<h1>Welcome back</h1>
+<p>Sign in to your display</p>
+{% endblock %}
+
+{% block card %}
+<form id="login-form">
+    <div class="field">
+        <label class="label" for="email">Admin email</label>
+        <input type="email" class="input" id="email" required placeholder="you@example.com"
+               autocomplete="username" autocapitalize="none" spellcheck="false">
+    </div>
+
+    <div class="field">
+        <label class="label" for="password">Password</label>
+        <div class="input-group">
+            <input type="password" class="input" id="password" required placeholder="••••••••"
+                   autocomplete="current-password">
+            <button type="button" class="input-group__btn" id="toggle-pass"
+                    aria-label="Show password" aria-pressed="false">
+                <span id="pass-eye">{{ icon('eye') }}</span>
+                <span id="pass-eye-off" class="hidden">{{ icon('eye-off') }}</span>
+            </button>
         </div>
     </div>
 
-    <script>
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = e.target.querySelector('button');
-            const errorMsg = document.getElementById('errorMsg');
-            btn.textContent = 'Authenticating...';
-            errorMsg.style.display = 'none';
+    <div class="alert alert--danger mb-2 hidden" id="error-msg"></div>
 
-            try {
-                const res = await fetch('/auth/login', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        email: document.getElementById('email').value,
-                        password: document.getElementById('password').value
-                    })
-                });
-                const data = await res.json();
-                if(data.success) {
-                    window.location.href = '/';
-                } else {
-                    errorMsg.textContent = data.error || 'Login failed';
-                    errorMsg.style.display = 'block';
-                    btn.textContent = 'Sign In';
-                }
-            } catch(err) {
-                errorMsg.textContent = 'Network error';
-                errorMsg.style.display = 'block';
-                btn.textContent = 'Sign In';
+    <button type="submit" class="btn btn--primary btn--block">
+        {{ icon('arrow-right') }} Sign in
+    </button>
+</form>
+
+<p class="center mt-2 mb-0">
+    <a href="/auth/forgot-password" class="small">Forgot your password?</a>
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    'use strict';
+
+    var form  = document.getElementById('login-form');
+    var error = document.getElementById('error-msg');
+
+    document.getElementById('toggle-pass').addEventListener('click', function () {
+        var input = document.getElementById('password');
+        var shown = input.type === 'text';
+        input.type = shown ? 'password' : 'text';
+        this.setAttribute('aria-pressed', shown ? 'false' : 'true');
+        document.getElementById('pass-eye').classList.toggle('hidden', !shown);
+        document.getElementById('pass-eye-off').classList.toggle('hidden', shown);
+    });
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = form.querySelector('button[type="submit"]');
+        var restore = V.busy(btn, 'Signing in…');
+        error.classList.add('hidden');
+
+        fetch('/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value
+            })
+        })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (data) {
+            if (data.success) {
+                window.location.href = '/';
+                return;
             }
+            restore();
+            error.textContent = data.error || 'Sign in failed.';
+            error.classList.remove('hidden');
+        })
+        .catch(function () {
+            restore();
+            error.textContent = 'Could not reach the display. Check your connection and try again.';
+            error.classList.remove('hidden');
         });
-    </script>
-</body>
-</html>
+    });
+})();
+</script>
+{% endblock %}

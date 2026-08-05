@@ -1,503 +1,613 @@
 {% extends "base.html" %}
-{% block title %}Vignette - {{ t.dashboard }}{% endblock %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — {{ t.dashboard }}{% endblock %}
 
 {% block content %}
-<h2 class="mb-4"><i class="bi bi-house"></i> {{ t.dashboard }}</h2>
-
-<div class="row g-4">
-    <!-- E-paper Preview -->
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-display"></i> {{ t.epaper_preview }}</span>
-                <button class="btn btn-sm btn-outline-light" onclick="refreshPreview()">
-                    <i class="bi bi-arrow-clockwise"></i>
-                </button>
-            </div>
-            <div class="card-body text-center p-3" style="background:#e8e8e8;">
-                <div style="display:inline-block;border:3px solid #333;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
-                    <img id="epaper-preview" src="/api/preview/current?t={{ now }}"
-                         style="width:100%;max-width:640px;height:auto;display:block;"
-                         alt="E-paper Preview">
-                </div>
-                <div class="mt-2">
-                    <small class="text-muted" id="preview-page-label">
-                        {{ config.current_page | upper }}
-                        {% if config.current_page == 'widget' %}({{ config.widget_mode }}){% endif %}
-                    </small>
-                </div>
-            </div>
-        </div>
+<div class="page-head">
+    <div class="page-head__text">
+        <h1>{{ t.dashboard }}</h1>
+        <p>{{ t.dashboard_sub }}</p>
     </div>
-
-    <!-- Page Control -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-primary text-white">
-                <i class="bi bi-display"></i> {{ t.display_page }}
-            </div>
-            <div class="card-body">
-                <div class="d-flex justify-content-center gap-2 mb-3">
-                    <button class="btn btn-{{ 'primary' if config.current_page == 'home' else 'outline-primary' }}"
-                            onclick="switchPage('home')">
-                        <i class="bi bi-house"></i> {{ t.home }}
-                    </button>
-                    <button class="btn btn-{{ 'primary' if config.current_page == 'widget' else 'outline-primary' }}"
-                            onclick="switchPage('widget')">
-                        <i class="bi bi-grid"></i> {{ t.widget }}
-                    </button>
-                    <button class="btn btn-{{ 'primary' if config.current_page == 'photo' else 'outline-primary' }}"
-                            onclick="switchPage('photo')">
-                        <i class="bi bi-camera"></i> {{ t.photo }}
-                    </button>
-                </div>
-
-                <!-- Widget mode buttons -->
-                <div class="d-flex justify-content-center gap-2 flex-wrap mb-3">
-                    <button class="btn btn-sm btn-{{ 'info' if config.widget_mode == 'split' else 'outline-info' }}"
-                            onclick="setWidget('split')">
-                        <i class="bi bi-layout-split"></i> {{ t.split }}
-                    </button>
-                    <button class="btn btn-sm btn-{{ 'info' if config.widget_mode == 'weather' else 'outline-info' }}"
-                            onclick="setWidget('weather')">
-                        <i class="bi bi-cloud-sun"></i> {{ t.weather }}
-                    </button>
-                    <button class="btn btn-sm btn-{{ 'info' if config.widget_mode == 'calendar' else 'outline-info' }}"
-                            onclick="setWidget('calendar')">
-                        <i class="bi bi-calendar3"></i> {{ t.calendar }}
-                    </button>
-                </div>
-
-                <div class="d-grid">
-                    <button class="btn btn-success btn-lg" onclick="updateDisplay()" id="btn-update-display">
-                        <i class="bi bi-send"></i> {{ t.update_display }}
-                    </button>
-                </div>
-            </div>
-        </div>
+    <div class="page-head__actions">
+        {% if config.slideshow_active %}
+        <span class="badge badge--success"><span class="dot dot--pulse"></span>{{ t.slideshow_running }}</span>
+        {% endif %}
+        <span class="badge {{ 'badge--warning' if display_state.status != 'idle' else '' }}" id="display-status-badge">
+            {{ icon('display') }}{{ display_state.status }}
+        </span>
     </div>
+</div>
 
-    <!-- Photo Navigation -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-success text-white">
-                <i class="bi bi-camera"></i> {{ t.photo_control }}
-            </div>
-            <div class="card-body text-center">
-                <div id="photo-preview" class="mb-3">
-                    {% if photo_state.current_image %}
-                    <div class="epaper-frame">
-                        <img id="current-photo-img" src="/output/{{ photo_state.current_image }}" class="img-fluid rounded"
-                             alt="Current" style="max-height: 150px; object-fit: contain;">
+<div class="grid grid-2">
+
+    <!-- ══ What the panel is showing ═══════════════════════════════════════
+         The preview is the whole point of the device, so it leads the page and
+         carries the one action that actually reaches the hardware. -->
+    <section class="card card--accent span-2">
+        <div class="card__body">
+            <div class="hero">
+                <div class="hero__preview">
+                    <div class="epaper">
+                        <div class="epaper__screen">
+                            <img id="epaper-preview" src="/api/preview/current?t={{ now }}"
+                                 alt="{{ t.epaper_preview }}">
+                        </div>
                     </div>
-                    <p class="mt-2 mb-0 small" id="current-photo-name"><strong>{{ photo_state.current_image }}</strong></p>
-                    {% else %}
-                    <p class="text-muted mb-0" id="current-photo-name">{{ t.no_photo }}</p>
-                    {% endif %}
+                    <p class="epaper__caption">
+                        <span id="preview-page-label">
+                            {{ t[config.current_page] or config.current_page }}{% if config.current_page == 'widget' %} · {{ t[config.widget_mode] or config.widget_mode }}{% endif %}
+                        </span>
+                        <button type="button" class="btn btn--ghost btn--icon btn--sm" id="refresh-preview"
+                                aria-label="{{ t.refresh }}" title="{{ t.refresh }}">{{ icon('refresh') }}</button>
+                    </p>
                 </div>
 
-                <div class="mb-2">
-                    <span class="badge bg-secondary">
-                        <span id="photo-index">{{ photo_state.current_index + 1 if photo_state.current_index >= 0 else '-' }}</span>
-                        / <span id="photo-total">{{ photo_state.total }}</span>
-                    </span>
-                </div>
+                <div class="hero__controls">
+                    <div>
+                        <p class="label">{{ t.display_page }}</p>
+                        <div class="segmented" role="group" aria-label="{{ t.display_page }}">
+                            {% for key, ico in [('home', 'home'), ('widget', 'grid'), ('photo', 'camera')] %}
+                            <button type="button" class="segmented__btn" data-page="{{ key }}"
+                                    aria-pressed="{{ 'true' if config.current_page == key else 'false' }}">
+                                {{ icon(ico) }}<span>{{ t[key] }}</span>
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
 
-                <div class="d-flex justify-content-center gap-2 mb-2">
-                    <button class="btn btn-outline-primary" onclick="photoPrev()">
-                        <i class="bi bi-chevron-left"></i> {{ t.prev }}
-                    </button>
-                    <button class="btn btn-outline-primary" onclick="photoNext()">
-                        {{ t.next }} <i class="bi bi-chevron-right"></i>
-                    </button>
+                    <!-- Only meaningful while the widget page is selected, so it
+                         stays out of the way otherwise. -->
+                    <div id="widget-modes" class="{{ '' if config.current_page == 'widget' else 'hidden' }}">
+                        <p class="label">{{ t.widget }}</p>
+                        <div class="row">
+                            {% for key, ico in [('split', 'split'), ('weather', 'weather'), ('calendar', 'calendar')] %}
+                            <button type="button" class="chip" data-widget="{{ key }}"
+                                    aria-pressed="{{ 'true' if config.widget_mode == key else 'false' }}">
+                                {{ icon(ico) }}{{ t[key] }}
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="hero__push">
+                        <button type="button" class="btn btn--primary btn--lg btn--block" id="btn-update-display">
+                            {{ icon('send') }} {{ t.update_display }}
+                        </button>
+                        <p class="tiny dim center mt-1">{{ t.refresh_takes }}</p>
+                    </div>
+
+                    <div class="datalist">
+                        <div class="datarow">
+                            <span class="datarow__label">{{ icon('image') }}{{ t.showing }}</span>
+                            <span class="datarow__value">{{ display_state.current_image or '—' }}</span>
+                        </div>
+                        <div class="datarow">
+                            <span class="datarow__label">{{ icon('clock') }}{{ t.last_update }}</span>
+                            <span class="datarow__value">{{ display_state.last_update or t.never }}</span>
+                        </div>
+                    </div>
                 </div>
-                <button class="btn btn-outline-success btn-sm" onclick="photoLatest()">
-                    <i class="bi bi-camera"></i> {{ t.latest }}
-                </button>
             </div>
         </div>
-    </div>
+    </section>
 
-    <!-- Slideshow -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-warning text-dark">
-                <i class="bi bi-play-circle"></i> {{ t.slideshow }}
+    <!-- ══ Photos ═════════════════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">
+            {{ icon('camera') }}<h2>{{ t.photo_control }}</h2>
+            <span class="spacer"></span>
+            <span class="badge" id="photo-counter">
+                <span id="photo-index">{{ photo_state.current_index + 1 if photo_state.current_index >= 0 else '—' }}</span>
+                / <span id="photo-total">{{ photo_state.total }}</span>
+            </span>
+        </div>
+        <div class="card__body">
+            {% if total_images %}
+            {#- Nothing is selected until the first navigation, and an empty
+                panel mock-up reads as a broken image. Keep the frame out of the
+                way until there is something to put in it. -#}
+            <div class="epaper epaper--sm mb-2 {{ '' if photo_state.current_image else 'hidden' }}"
+                 id="current-photo-frame">
+                <div class="epaper__screen">
+                    <img id="current-photo-img" alt="{{ t.current }}"
+                         {% if photo_state.current_image %}src="/output/{{ photo_state.current_image | urlencode }}"{% endif %}>
+                </div>
             </div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label small">{{ t.slideshow_interval }}</label>
-                    <select class="form-select form-select-sm" id="slideshow-interval">
-                        <option value="60" {% if config.slideshow_interval == 60 %}selected{% endif %}>1 {{ t.minute }}</option>
-                        <option value="300" {% if config.slideshow_interval == 300 or not config.slideshow_interval %}selected{% endif %}>5 {{ t.minutes }}</option>
-                        <option value="600" {% if config.slideshow_interval == 600 %}selected{% endif %}>10 {{ t.minutes }}</option>
+            <p class="small truncate center mb-2" id="current-photo-name">
+                {{ photo_state.current_image or t.no_photo }}
+            </p>
+
+            <div class="row" style="gap:8px;">
+                <button type="button" class="btn" style="flex:1;" id="photo-prev">
+                    {{ icon('chevron-left') }} {{ t.prev }}
+                </button>
+                <button type="button" class="btn" style="flex:1;" id="photo-next">
+                    {{ t.next }} {{ icon('chevron-right') }}
+                </button>
+            </div>
+            <button type="button" class="btn btn--ghost btn--sm btn--block mt-1" id="photo-latest">
+                {{ icon('zap') }} {{ t.latest }}
+            </button>
+            {% else %}
+            <div class="empty" style="padding:28px 18px;">
+                {{ icon('gallery', 'icon-xl') }}
+                <p class="mb-0">{{ t.no_photos_yet }}</p>
+                <a class="btn btn--primary btn--sm" href="/upload">{{ icon('upload') }} {{ t.upload }}</a>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- ══ Slideshow ══════════════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">
+            {{ icon('play') }}<h2>{{ t.slideshow }}</h2>
+            <span class="spacer"></span>
+            <span class="badge {{ 'badge--success' if config.slideshow_active else '' }}" id="slideshow-badge">
+                {{ t.running if config.slideshow_active else t.stopped }}
+            </span>
+        </div>
+        <div class="card__body">
+            <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="field mb-0">
+                    <label class="label" for="slideshow-interval">{{ t.slideshow_interval }}</label>
+                    <select class="select" id="slideshow-interval">
+                        <option value="60"   {% if config.slideshow_interval == 60 %}selected{% endif %}>1 {{ t.minute }}</option>
+                        <option value="300"  {% if config.slideshow_interval == 300 or not config.slideshow_interval %}selected{% endif %}>5 {{ t.minutes }}</option>
+                        <option value="600"  {% if config.slideshow_interval == 600 %}selected{% endif %}>10 {{ t.minutes }}</option>
                         <option value="1800" {% if config.slideshow_interval == 1800 %}selected{% endif %}>30 {{ t.minutes }}</option>
                         <option value="3600" {% if config.slideshow_interval == 3600 %}selected{% endif %}>1 {{ t.hour }}</option>
                     </select>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label small">{{ t.slideshow_order }}</label>
-                    <select class="form-select form-select-sm" id="slideshow-order">
+                <div class="field mb-0">
+                    <label class="label" for="slideshow-order">{{ t.slideshow_order }}</label>
+                    <select class="select" id="slideshow-order">
                         <option value="sequential" {% if config.slideshow_order != 'random' %}selected{% endif %}>{{ t.sequential }}</option>
-                        <option value="random" {% if config.slideshow_order == 'random' %}selected{% endif %}>{{ t.random }}</option>
+                        <option value="random"     {% if config.slideshow_order == 'random' %}selected{% endif %}>{{ t.random }}</option>
                     </select>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label small">{{ t.slideshow_photos }}</label>
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="openSlideshowPicker()">
-                            <i class="bi bi-images"></i> {{ t.select_photos }}
-                        </button>
-                        <span class="badge bg-secondary align-self-center" id="slideshow-photo-count">
-                            {{ config.slideshow_photos | length if config.slideshow_photos else t.all_photos }}
-                        </span>
-                    </div>
-                </div>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-success flex-fill" onclick="startSlideshow()" id="btn-start-slideshow"
-                            {% if config.slideshow_active %}style="display:none"{% endif %}>
-                        <i class="bi bi-play-fill"></i> {{ t.start }}
-                    </button>
-                    <button class="btn btn-danger flex-fill" onclick="stopSlideshow()" id="btn-stop-slideshow"
-                            {% if not config.slideshow_active %}style="display:none"{% endif %}>
-                        <i class="bi bi-stop-fill"></i> {{ t.stop }}
-                    </button>
-                </div>
-                {% if config.slideshow_active %}
-                <div class="alert alert-success mt-2 mb-0 py-1 text-center small">
-                    <i class="bi bi-play-circle"></i> {{ t.slideshow_running }}
-                </div>
-                {% endif %}
             </div>
-        </div>
-    </div>
 
-    <!-- Display Status + Quick Actions -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-dark text-white">
-                <i class="bi bi-info-circle"></i> {{ t.display_status }}
-            </div>
-            <div class="card-body">
-                <p><strong>{{ t.status }}:</strong>
-                    <span class="badge bg-{{ 'success' if display_state.status == 'idle' else 'warning' }}">
-                        {{ display_state.status }}
+            <div class="field mt-2 mb-2">
+                <label class="label">{{ t.slideshow_photos }}</label>
+                <button type="button" class="btn btn--block" id="open-picker">
+                    {{ icon('gallery') }}
+                    <span id="slideshow-photo-count">
+                        {% if config.slideshow_photos %}{{ config.slideshow_photos | length }} {{ t.selected }}{% else %}{{ t.all_photos }}{% endif %}
                     </span>
-                </p>
-                <p><strong>{{ t.showing }}:</strong> {{ display_state.current_image or 'None' }}</p>
-                <p><strong>{{ t.last_update }}:</strong> {{ display_state.last_update or 'Never' }}</p>
-                <p class="mb-0"><strong>{{ t.total_images }}:</strong> {{ total_images }}</p>
-                <div class="d-flex gap-2 mt-3">
-                    <button class="btn btn-outline-warning btn-sm" onclick="clearDisplay()">
-                        <i class="bi bi-eraser"></i> {{ t.clear }}
-                    </button>
-                    <button class="btn btn-outline-secondary btn-sm" onclick="sleepDisplay()">
-                        <i class="bi bi-moon"></i> {{ t.sleep }}
-                    </button>
-                    <button class="btn btn-outline-info btn-sm" onclick="displayTest()">
-                        <i class="bi bi-grid-3x3"></i> {{ t.test_pattern }}
-                    </button>
-                </div>
+                </button>
+                <p class="hint">{{ t.slideshow_empty_hint }}</p>
             </div>
-        </div>
-    </div>
 
-    <!-- Quick Links -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-secondary text-white">
-                <i class="bi bi-lightning"></i> {{ t.quick_actions }}
-            </div>
-            <div class="card-body">
-                <div class="d-grid gap-2">
-                    <a href="/upload" class="btn btn-outline-primary">
-                        <i class="bi bi-upload"></i> {{ t.upload }}
-                    </a>
-                    <a href="/gallery" class="btn btn-outline-info">
-                        <i class="bi bi-images"></i> {{ t.gallery }} ({{ total_images }})
-                    </a>
-                    <a href="/settings" class="btn btn-outline-dark">
-                        <i class="bi bi-gear"></i> {{ t.settings }}
-                    </a>
-                </div>
-            </div>
+            <button type="button" class="btn btn--success btn--block {{ 'hidden' if config.slideshow_active }}" id="btn-start-slideshow">
+                {{ icon('play') }} {{ t.start }}
+            </button>
+            <button type="button" class="btn btn--danger btn--block {{ '' if config.slideshow_active else 'hidden' }}" id="btn-stop-slideshow">
+                {{ icon('stop') }} {{ t.stop }}
+            </button>
         </div>
-    </div>
+    </section>
 
-    <!-- System Info -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header"><i class="bi bi-cpu"></i> {{ t.system_info }}</div>
-            <div class="card-body" id="system-info"><p class="text-muted">{{ t.loading }}</p></div>
+    <!-- ══ Device health ══════════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">{{ icon('cpu') }}<h2>{{ t.system_info }}</h2></div>
+        <div class="card__body" id="system-info">
+            <p class="muted small mb-0">{{ t.loading }}</p>
         </div>
-    </div>
+    </section>
 
-    <!-- Remote Management -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header"><i class="bi bi-gear"></i> {{ t.remote_mgmt }}</div>
-            <div class="card-body">
-                <div class="d-grid gap-2">
-                    <button class="btn btn-outline-primary" onclick="systemUpdate()">
-                        <i class="bi bi-arrow-repeat"></i> {{ t.update_software }}
-                    </button>
-                    <button class="btn btn-outline-warning" onclick="systemReboot()">
-                        <i class="bi bi-arrow-clockwise"></i> {{ t.reboot }}
-                    </button>
-                    <button class="btn btn-outline-danger" onclick="systemShutdown()">
-                        <i class="bi bi-power"></i> {{ t.shutdown }}
-                    </button>
-                </div>
-                <div id="update-output" class="mt-3 d-none">
-                    <pre class="bg-dark text-light p-2 rounded small" style="max-height: 200px; overflow-y: auto;"></pre>
-                </div>
+    <!-- ══ Panel maintenance ══════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">{{ icon('sliders') }}<h2>{{ t.panel_actions }}</h2></div>
+        <div class="card__body stack">
+            <p class="small muted mb-0">{{ t.panel_actions_hint }}</p>
+            <div class="row" style="gap:8px;">
+                <button type="button" class="btn btn--sm" id="btn-clear">{{ icon('eraser') }} {{ t.clear }}</button>
+                <button type="button" class="btn btn--sm" id="btn-sleep">{{ icon('moon') }} {{ t.sleep }}</button>
+                <button type="button" class="btn btn--sm" id="btn-test">{{ icon('grid') }} {{ t.test_pattern }}</button>
             </div>
+            <hr>
+            <a class="btn btn--ghost btn--sm btn--block" href="/settings">
+                {{ icon('settings') }} {{ t.system_settings }}
+            </a>
+        </div>
+    </section>
+</div>
+
+<!-- ══ Slideshow photo picker ═════════════════════════════════════════════ -->
+<div class="modal" id="picker-modal" hidden aria-hidden="true" role="dialog" aria-modal="true"
+     aria-labelledby="picker-title">
+    <div class="modal__backdrop"></div>
+    <div class="modal__panel modal__panel--wide">
+        <div class="modal__head">
+            <h3 id="picker-title">{{ t.select_photos }}</h3>
+            <button type="button" class="btn btn--ghost btn--icon btn--sm" data-modal-close
+                    aria-label="{{ t.close }}">{{ icon('x') }}</button>
+        </div>
+        <div class="modal__body">
+            <div class="row mb-2">
+                <button type="button" class="btn btn--sm" id="picker-all">{{ t.select_all }}</button>
+                <button type="button" class="btn btn--sm" id="picker-none">{{ t.deselect_all }}</button>
+                <span class="spacer"></span>
+                <span class="badge badge--accent" id="picker-count">0</span>
+            </div>
+            <div class="tiles tiles--compact" id="picker-grid"></div>
+        </div>
+        <div class="modal__foot">
+            <button type="button" class="btn btn--subtle" data-modal-close>{{ t.close }}</button>
+            <button type="button" class="btn btn--primary" id="picker-save">{{ t.save }}</button>
         </div>
     </div>
 </div>
 
-<!-- Slideshow Photo Picker Modal -->
-<div class="modal fade" id="slideshowPickerModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">{{ t.select_photos }}</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-2">
-                    <button class="btn btn-sm btn-outline-primary" onclick="ssPickerSelectAll()">{{ t.select_all }}</button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="ssPickerDeselectAll()">{{ t.deselect_all }}</button>
-                    <span class="ms-2 small text-muted">{{ t.slideshow_empty_hint }}</span>
-                </div>
-                <div id="slideshow-picker-grid" class="row g-2" style="max-height:50vh;overflow-y:auto;">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-primary" onclick="ssPickerSave()">{{ t.save }}</button>
-                <button class="btn btn-secondary" data-bs-dismiss="modal">{{ t.close }}</button>
-            </div>
-        </div>
-    </div>
-</div>
+<style>
+.hero { display: grid; gap: 20px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 900px) {
+    .hero { grid-template-columns: minmax(0, 1.25fr) minmax(280px, .9fr); gap: 26px; }
+}
+.hero__controls { display: flex; flex-direction: column; gap: 18px; }
+.hero__push { margin-top: auto; }
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// ── Page / Widget switching (config only) ──
-function switchPage(page) {
-    document.querySelectorAll('[onclick^="switchPage"]').forEach(btn => {
-        btn.className = btn.className.replace(/\bbtn-primary\b/, 'btn-outline-primary');
-    });
-    const clicked = document.querySelector(`[onclick="switchPage('${page}')"]`);
-    if (clicked) clicked.className = clicked.className.replace('btn-outline-primary', 'btn-primary');
+(function () {
+    'use strict';
 
-    fetch('/api/page/switch', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({page: page})
-    }).then(r => r.json()).then(d => {
-        if (d.success) refreshPreview();
-        else showToast(d.error, 'danger');
-    }).catch(e => showToast('Error: ' + e, 'danger'));
-}
+    var preview      = document.getElementById('epaper-preview');
+    var pageLabel    = document.getElementById('preview-page-label');
+    var widgetModes  = document.getElementById('widget-modes');
+    var pageBtns     = V.$$('[data-page]');
+    var widgetBtns   = V.$$('[data-widget]');
 
-function setWidget(mode) {
-    document.querySelectorAll('[onclick^="setWidget"]').forEach(btn => {
-        btn.className = btn.className.replace(/\bbtn-info\b/, 'btn-outline-info');
-    });
-    const clicked = document.querySelector(`[onclick="setWidget('${mode}')"]`);
-    if (clicked) clicked.className = clicked.className.replace('btn-outline-info', 'btn-info');
+    var PAGE_LABEL   = {{ {'home': t.home, 'widget': t.widget, 'photo': t.photo} | tojson }};
+    var WIDGET_LABEL = {{ {'split': t.split, 'weather': t.weather, 'calendar': t.calendar} | tojson }};
 
-    fetch('/api/widget/set', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: mode})
-    }).then(r => r.json()).then(d => {
-        if (d.success) refreshPreview();
-        else showToast(d.error, 'danger');
-    });
-}
+    var state = {
+        page:   {{ config.current_page | tojson }},
+        widget: {{ config.widget_mode | tojson }}
+    };
 
-// ── Preview ──
-function refreshPreview() {
-    const img = document.getElementById('epaper-preview');
-    img.src = '/api/preview/current?t=' + Date.now();
-}
+    /* ── Preview ────────────────────────────────────────────────────────── */
 
-// ── Update Display (THE button to push to e-paper) ──
-function updateDisplay() {
-    const btn = document.getElementById('btn-update-display');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> {{ t.updating }}...';
-
-    fetch('/api/page/refresh', {method: 'POST'}).then(r => r.json()).then(d => {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-send"></i> {{ t.update_display }}';
-        if (d.success) {
-            showToast('{{ t.displayed_ok }}', 'success');
-            refreshPreview();
-        } else {
-            showToast(d.error, 'danger');
-        }
-    }).catch(e => {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-send"></i> {{ t.update_display }}';
-        showToast('Error: ' + e, 'danger');
-    });
-}
-
-// ── Photo navigation (config only, updates preview) ──
-function _photoNav(url) {
-    fetch(url, {method: 'POST'}).then(r => r.json()).then(d => {
-        if (d.success && d.photo) {
-            document.getElementById('photo-index').textContent = d.photo.current_index + 1;
-            document.getElementById('photo-total').textContent = d.photo.total;
-            const nameEl = document.getElementById('current-photo-name');
-            const imgEl = document.getElementById('current-photo-img');
-            if (d.photo.current_image) {
-                if (imgEl) imgEl.src = '/output/' + d.photo.current_image;
-                nameEl.innerHTML = '<strong>' + d.photo.current_image + '</strong>';
-            }
-            refreshPreview();
-        } else if (d.error) {
-            showToast(d.error, 'danger');
-        }
-    });
-}
-function photoNext() { _photoNav('/api/photo/next'); }
-function photoPrev() { _photoNav('/api/photo/prev'); }
-function photoLatest() { _photoNav('/api/photo/latest'); }
-
-// ── Slideshow ──
-function startSlideshow() {
-    fetch('/api/slideshow/start', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            interval: parseInt(document.getElementById('slideshow-interval').value),
-            order: document.getElementById('slideshow-order').value,
-        })
-    }).then(r => r.json()).then(d => {
-        if (d.success) {
-            document.getElementById('btn-start-slideshow').style.display = 'none';
-            document.getElementById('btn-stop-slideshow').style.display = '';
-            showToast('{{ t.slideshow }} started', 'success');
-        }
-    });
-}
-function stopSlideshow() {
-    fetch('/api/slideshow/stop', {method: 'POST'}).then(r => r.json()).then(d => {
-        if (d.success) {
-            document.getElementById('btn-start-slideshow').style.display = '';
-            document.getElementById('btn-stop-slideshow').style.display = 'none';
-            showToast('{{ t.slideshow }} stopped', 'info');
-        }
-    });
-}
-
-// Slideshow photo picker
-let ssPickerSelected = new Set({{ config.slideshow_photos | tojson | default('[]') }});
-
-function openSlideshowPicker() {
-    fetch('/api/images').then(r => r.json()).then(images => {
-        const grid = document.getElementById('slideshow-picker-grid');
-        grid.innerHTML = '';
-        images.forEach(img => {
-            const checked = ssPickerSelected.has(img.filename) ? 'checked' : '';
-            const sel = ssPickerSelected.has(img.filename);
-            const col = document.createElement('div');
-            col.className = 'col-4 col-md-3';
-            col.innerHTML = `
-                <div class="card h-100 ss-pick-card ${sel ? 'border-success border-2' : ''}" data-fn="${img.filename}"
-                     onclick="ssPickerToggle('${img.filename}', this)" style="cursor:pointer;">
-                    <img src="/output/${img.filename}" style="height:80px;object-fit:cover;" class="card-img-top">
-                    <div class="card-body p-1 text-center">
-                        <small class="text-truncate d-block">${img.filename}</small>
-                    </div>
-                </div>`;
-            grid.appendChild(col);
-        });
-        new bootstrap.Modal(document.getElementById('slideshowPickerModal')).show();
-    });
-}
-function ssPickerToggle(fn, card) {
-    if (ssPickerSelected.has(fn)) {
-        ssPickerSelected.delete(fn);
-        card.classList.remove('border-success', 'border-2');
-    } else {
-        ssPickerSelected.add(fn);
-        card.classList.add('border-success', 'border-2');
+    function refreshPreview() {
+        preview.src = V.bust('/api/preview/current');
     }
-}
-function ssPickerSelectAll() {
-    document.querySelectorAll('.ss-pick-card').forEach(c => {
-        ssPickerSelected.add(c.dataset.fn);
-        c.classList.add('border-success', 'border-2');
+
+    function syncLabel() {
+        pageLabel.textContent = state.page === 'widget'
+            ? (PAGE_LABEL.widget + ' · ' + (WIDGET_LABEL[state.widget] || state.widget))
+            : (PAGE_LABEL[state.page] || state.page);
+        widgetModes.classList.toggle('hidden', state.page !== 'widget');
+    }
+
+    document.getElementById('refresh-preview').addEventListener('click', refreshPreview);
+
+    /* ── Page + widget selection ────────────────────────────────────────── */
+
+    pageBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var page = btn.getAttribute('data-page');
+            var previous = state.page;
+            state.page = page;
+            pageBtns.forEach(function (b) {
+                b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+            });
+            syncLabel();
+
+            V.api('/api/page/switch', { method: 'POST', body: { page: page } })
+                .then(refreshPreview)
+                .catch(function (err) {
+                    // Put the control back where it was rather than lying about
+                    // what the device is set to.
+                    state.page = previous;
+                    pageBtns.forEach(function (b) {
+                        b.setAttribute('aria-pressed',
+                            b.getAttribute('data-page') === previous ? 'true' : 'false');
+                    });
+                    syncLabel();
+                    V.fail(err);
+                });
+        });
     });
-}
-function ssPickerDeselectAll() {
-    ssPickerSelected.clear();
-    document.querySelectorAll('.ss-pick-card').forEach(c => {
-        c.classList.remove('border-success', 'border-2');
+
+    widgetBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var mode = btn.getAttribute('data-widget');
+            var previous = state.widget;
+            state.widget = mode;
+            widgetBtns.forEach(function (b) {
+                b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+            });
+            syncLabel();
+
+            V.api('/api/widget/set', { method: 'POST', body: { mode: mode } })
+                .then(refreshPreview)
+                .catch(function (err) {
+                    state.widget = previous;
+                    widgetBtns.forEach(function (b) {
+                        b.setAttribute('aria-pressed',
+                            b.getAttribute('data-widget') === previous ? 'true' : 'false');
+                    });
+                    syncLabel();
+                    V.fail(err);
+                });
+        });
     });
-}
-function ssPickerSave() {
-    const photos = Array.from(ssPickerSelected);
-    fetch('/api/config', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({slideshow_photos: photos})
-    }).then(r => r.json()).then(d => {
-        if (d.success) {
-            document.getElementById('slideshow-photo-count').textContent =
-                photos.length || '{{ t.all_photos }}';
-            bootstrap.Modal.getInstance(document.getElementById('slideshowPickerModal')).hide();
-            showToast('OK', 'success');
+
+    /* ── Push to the panel ──────────────────────────────────────────────── */
+
+    document.getElementById('btn-update-display').addEventListener('click', function () {
+        var restore = V.busy(this, V.t('updating'));
+        V.api('/api/page/refresh', { method: 'POST' })
+            .then(function () {
+                V.toast(V.t('displayed_ok'), 'success');
+                refreshPreview();
+            })
+            .catch(V.fail)
+            .then(restore);
+    });
+
+    /* ── Photo navigation ───────────────────────────────────────────────── */
+
+    var photoImg   = document.getElementById('current-photo-img');
+    var photoFrame = document.getElementById('current-photo-frame');
+    var photoName  = document.getElementById('current-photo-name');
+
+    function navigate(url, btn) {
+        var restore = V.busy(btn);
+        V.api(url, { method: 'POST' })
+            .then(function (d) {
+                var photo = d.photo || {};
+                document.getElementById('photo-index').textContent =
+                    photo.current_index >= 0 ? photo.current_index + 1 : '—';
+                document.getElementById('photo-total').textContent = photo.total || 0;
+                if (photo.current_image && photoImg) {
+                    photoImg.src = '/output/' + encodeURIComponent(photo.current_image);
+                    photoFrame.classList.remove('hidden');
+                    photoName.textContent = photo.current_image;
+                }
+                refreshPreview();
+            })
+            .catch(V.fail)
+            .then(restore);
+    }
+
+    var prevBtn = document.getElementById('photo-prev');
+    if (prevBtn) {
+        prevBtn.addEventListener('click', function () { navigate('/api/photo/prev', this); });
+        document.getElementById('photo-next').addEventListener('click', function () { navigate('/api/photo/next', this); });
+        document.getElementById('photo-latest').addEventListener('click', function () { navigate('/api/photo/latest', this); });
+    }
+
+    /* ── Slideshow ──────────────────────────────────────────────────────── */
+
+    var startBtn = document.getElementById('btn-start-slideshow');
+    var stopBtn  = document.getElementById('btn-stop-slideshow');
+    var ssBadge  = document.getElementById('slideshow-badge');
+
+    function setSlideshowRunning(running) {
+        startBtn.classList.toggle('hidden', running);
+        stopBtn.classList.toggle('hidden', !running);
+        ssBadge.textContent = running ? V.t('running') : V.t('stopped');
+        ssBadge.classList.toggle('badge--success', running);
+    }
+
+    startBtn.addEventListener('click', function () {
+        var restore = V.busy(this);
+        V.api('/api/slideshow/start', {
+            method: 'POST',
+            body: {
+                interval: parseInt(document.getElementById('slideshow-interval').value, 10),
+                order: document.getElementById('slideshow-order').value
+            }
+        })
+            .then(function () {
+                setSlideshowRunning(true);
+                V.toast(V.t('slideshow_started'), 'success');
+            })
+            .catch(V.fail)
+            .then(restore);
+    });
+
+    stopBtn.addEventListener('click', function () {
+        var restore = V.busy(this);
+        V.api('/api/slideshow/stop', { method: 'POST' })
+            .then(function () {
+                setSlideshowRunning(false);
+                V.toast(V.t('slideshow_stopped'), 'info');
+            })
+            .catch(V.fail)
+            .then(restore);
+    });
+
+    /* ── Slideshow photo picker ─────────────────────────────────────────── */
+
+    var chosen = new Set({{ (config.slideshow_photos or []) | tojson }});
+    var grid   = document.getElementById('picker-grid');
+    var count  = document.getElementById('picker-count');
+
+    function syncPickerCount() { count.textContent = chosen.size; }
+
+    document.getElementById('open-picker').addEventListener('click', function () {
+        var restore = V.busy(this);
+        V.api('/api/images')
+            .then(function (images) {
+                grid.innerHTML = '';
+                (images || []).forEach(function (img) {
+                    var tile = document.createElement('div');
+                    tile.className = 'tile' + (chosen.has(img.filename) ? ' is-selected' : '');
+                    tile.dataset.filename = img.filename;
+
+                    var thumb = document.createElement('button');
+                    thumb.type = 'button';
+                    thumb.className = 'tile__thumb';
+                    thumb.setAttribute('aria-pressed', chosen.has(img.filename) ? 'true' : 'false');
+
+                    var im = document.createElement('img');
+                    im.src = '/output/' + encodeURIComponent(img.filename);
+                    im.alt = img.filename;
+                    im.loading = 'lazy';
+                    thumb.appendChild(im);
+
+                    var check = document.createElement('span');
+                    check.className = 'tile__check';
+                    check.appendChild(V.svg('check-circle'));
+                    thumb.appendChild(check);
+
+                    thumb.addEventListener('click', function () {
+                        var on = chosen.has(img.filename);
+                        if (on) chosen.delete(img.filename); else chosen.add(img.filename);
+                        tile.classList.toggle('is-selected', !on);
+                        thumb.setAttribute('aria-pressed', on ? 'false' : 'true');
+                        syncPickerCount();
+                    });
+
+                    var meta = document.createElement('div');
+                    meta.className = 'tile__meta';
+                    var name = document.createElement('span');
+                    name.className = 'tile__name';
+                    name.textContent = img.filename;   // never innerHTML
+                    meta.appendChild(name);
+
+                    tile.appendChild(thumb);
+                    tile.appendChild(meta);
+                    grid.appendChild(tile);
+                });
+                syncPickerCount();
+                V.openModal('picker-modal');
+            })
+            .catch(V.fail)
+            .then(restore);
+    });
+
+    document.getElementById('picker-all').addEventListener('click', function () {
+        V.$$('#picker-grid .tile').forEach(function (tile) {
+            tile.classList.add('is-selected');
+            chosen.add(tile.dataset.filename);
+            var thumb = tile.querySelector('.tile__thumb');
+            if (thumb) thumb.setAttribute('aria-pressed', 'true');
+        });
+        syncPickerCount();
+    });
+
+    document.getElementById('picker-none').addEventListener('click', function () {
+        chosen.clear();
+        V.$$('#picker-grid .tile').forEach(function (tile) {
+            tile.classList.remove('is-selected');
+            var thumb = tile.querySelector('.tile__thumb');
+            if (thumb) thumb.setAttribute('aria-pressed', 'false');
+        });
+        syncPickerCount();
+    });
+
+    document.getElementById('picker-save').addEventListener('click', function () {
+        var photos = Array.from(chosen);
+        var restore = V.busy(this);
+        V.api('/api/config', { method: 'POST', body: { slideshow_photos: photos } })
+            .then(function () {
+                document.getElementById('slideshow-photo-count').textContent =
+                    photos.length ? photos.length + ' ' + V.t('selected') : V.t('all_photos');
+                V.closeModal('picker-modal');
+                V.toast(V.t('saved'), 'success');
+            })
+            .catch(V.fail)
+            .then(restore);
+    });
+
+    /* ── Panel maintenance ──────────────────────────────────────────────── */
+
+    document.getElementById('btn-clear').addEventListener('click', V.clearDisplay);
+    document.getElementById('btn-sleep').addEventListener('click', V.sleepDisplay);
+    document.getElementById('btn-test').addEventListener('click', V.displayTest);
+
+    /* ── System info ────────────────────────────────────────────────────── */
+
+    var infoBox = document.getElementById('system-info');
+
+    function meterRow(iconName, label, valueText, pct, tone) {
+        var row = document.createElement('div');
+        row.className = 'datarow';
+
+        var lab = document.createElement('span');
+        lab.className = 'datarow__label';
+        lab.appendChild(V.svg(iconName));
+        lab.appendChild(document.createTextNode(label));
+
+        var val = document.createElement('span');
+        val.className = 'datarow__value';
+        val.textContent = valueText;
+
+        row.appendChild(lab);
+        if (pct !== null && pct !== undefined) {
+            var meter = document.createElement('span');
+            meter.className = 'meter';
+            meter.style.flex = '1';
+            meter.style.maxWidth = '90px';
+            var fill = document.createElement('span');
+            fill.className = 'meter__fill' + (tone ? ' meter__fill--' + tone : '');
+            fill.style.display = 'block';
+            fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+            meter.appendChild(fill);
+            row.appendChild(meter);
+            val.style.flex = 'none';
         }
-    });
-}
+        row.appendChild(val);
+        return row;
+    }
 
-// ── System ──
-function loadSystemInfo() {
-    fetch('/api/system/info').then(r => r.json()).then(info => {
-        const div = document.getElementById('system-info');
-        const tc = info.cpu_temp > 70 ? 'danger' : (info.cpu_temp > 55 ? 'warning' : 'success');
-        div.innerHTML = `<table class="table table-sm mb-0">
-            <tr><td><i class="bi bi-pc-display"></i> {{ t.host }}</td><td>${info.hostname || '-'}</td></tr>
-            <tr><td><i class="bi bi-wifi"></i> {{ t.ip }}</td><td>${(info.ip_addresses || []).join(', ') || '-'}</td></tr>
-            <tr><td><i class="bi bi-thermometer-half"></i> {{ t.temp }}</td><td><span class="badge bg-${tc}">${info.cpu_temp ? info.cpu_temp + '°C' : '-'}</span></td></tr>
-            <tr><td><i class="bi bi-memory"></i> {{ t.ram }}</td><td>${info.mem_available_mb || '-'} / ${info.mem_total_mb || '-'} MB</td></tr>
-            <tr><td><i class="bi bi-hdd"></i> {{ t.disk }}</td><td>${info.disk_free_gb ? info.disk_free_gb + ' GB' : '-'}</td></tr>
-            <tr><td><i class="bi bi-clock"></i> {{ t.uptime }}</td><td>${info.uptime || '-'}</td></tr>
-        </table>`;
-    }).catch(() => {
-        document.getElementById('system-info').innerHTML = '<p class="text-danger mb-0">Failed to load</p>';
-    });
-}
-function systemUpdate() {
-    if (!confirm('{{ t.confirm_update }}')) return;
-    const out = document.getElementById('update-output');
-    out.classList.remove('d-none');
-    out.querySelector('pre').textContent = '{{ t.loading }}\n';
-    fetch('/api/system/update', {method:'POST'}).then(r=>r.json()).then(d => {
-        out.querySelector('pre').textContent = d.output || d.error || 'Done';
-        if (d.success) { showToast('OK', 'success'); setTimeout(()=>location.reload(), 5000); }
-        else showToast('Failed', 'danger');
-    });
-}
-function systemReboot() {
-    if (!confirm('{{ t.confirm_reboot }}')) return;
-    fetch('/api/system/reboot', {method:'POST'});
-    showToast('Rebooting...', 'info');
-}
-function systemShutdown() {
-    if (!confirm('{{ t.confirm_shutdown }}')) return;
-    fetch('/api/system/shutdown', {method:'POST'});
-    showToast('Shutting down...', 'warning');
-}
+    function loadSystemInfo() {
+        V.api('/api/system/info')
+            .then(function (info) {
+                var list = document.createElement('div');
+                list.className = 'datalist';
 
-loadSystemInfo();
-setInterval(loadSystemInfo, 30000);
+                var temp = info.cpu_temp;
+                var tempTone = temp > 70 ? 'danger' : (temp > 55 ? 'warning' : 'success');
+
+                list.appendChild(meterRow('server', V.t('host'), info.hostname || '—'));
+                list.appendChild(meterRow('wifi', V.t('ip'),
+                    (info.ip_addresses || []).join(', ') || '—'));
+
+                var tempRow = meterRow('thermometer', V.t('temp'), temp ? temp + '°C' : '—');
+                var tempVal = tempRow.querySelector('.datarow__value');
+                tempVal.innerHTML = '';
+                var chip = document.createElement('span');
+                chip.className = 'badge badge--' + tempTone;
+                chip.textContent = temp ? temp + '°C' : '—';
+                tempVal.appendChild(chip);
+                list.appendChild(tempRow);
+
+                if (info.mem_total_mb) {
+                    var usedMem = info.mem_total_mb - (info.mem_available_mb || 0);
+                    list.appendChild(meterRow('memory', V.t('ram'),
+                        usedMem + ' / ' + info.mem_total_mb + ' MB',
+                        usedMem / info.mem_total_mb * 100,
+                        usedMem / info.mem_total_mb > .85 ? 'warning' : null));
+                }
+
+                list.appendChild(meterRow('disk', V.t('disk'),
+                    info.disk_free_gb ? info.disk_free_gb + ' GB ' + V.t('free') : '—'));
+                list.appendChild(meterRow('clock', V.t('uptime'), info.uptime || '—'));
+                list.appendChild(meterRow('gallery', V.t('total_images'), String({{ total_images }})));
+
+                infoBox.innerHTML = '';
+                infoBox.appendChild(list);
+            })
+            .catch(function () {
+                infoBox.innerHTML = '';
+                var p = document.createElement('p');
+                p.className = 'small mb-0';
+                p.style.color = 'var(--danger)';
+                p.textContent = V.t('load_failed');
+                infoBox.appendChild(p);
+            });
+    }
+
+    syncLabel();
+    loadSystemInfo();
+    setInterval(loadSystemInfo, 30000);
+})();
 </script>
 {% endblock %}

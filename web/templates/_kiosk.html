@@ -1,0 +1,47 @@
+{#
+  Shared shell for the full-screen pages shown before the app exists: WiFi
+  pairing, admin registration, sign-in and password recovery.
+
+  These four pages used to carry four near-identical copies of the same inline
+  stylesheet, which is why they had drifted to three different accent colours
+  and three different heading treatments.
+#}
+{% from "_icons.html" import icon %}
+<!DOCTYPE html>
+<html lang="{{ current_lang | default('en') }}" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0b0d12">
+    <title>{% block title %}Vignette{% endblock %}</title>
+    <link rel="icon" href="{{ url_for('static', filename='img/vignette-logo.svg') }}">
+    <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/kiosk.css') }}" rel="stylesheet">
+    {% block head %}{% endblock %}
+</head>
+<body class="kiosk">
+<div class="kiosk__inner">
+
+    <div class="kiosk__brand">
+        <img src="{{ url_for('static', filename='img/vignette-logo.svg') }}" alt="Vignette">
+        {% block brand %}{% endblock %}
+    </div>
+
+    <div class="kiosk__card">
+        {% block card %}{% endblock %}
+    </div>
+
+    {% block below %}{% endblock %}
+
+    <div class="kiosk__foot">
+        <img src="{{ url_for('static', filename='img/vignette-logo.svg') }}" alt="Vignette">
+        &copy; 2026 Teyra LLC W.Weng
+    </div>
+</div>
+
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+<script src="{{ url_for('static', filename='js/ui.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

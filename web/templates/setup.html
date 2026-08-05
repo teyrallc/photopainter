@@ -1,118 +1,120 @@
 {% extends "base.html" %}
-{% block title %}Vignette - Setup{% endblock %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — {{ t.first_time_setup }}{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8 col-lg-6">
-        <div class="text-center mb-4">
-            <h2><i class="bi bi-display"></i> Vignette Setup</h2>
-            <p class="text-muted">{{ t.first_time_setup }}</p>
-        </div>
+<div style="max-width:640px;margin:0 auto;">
 
-        <div class="card">
-            <div class="card-body">
-                <form id="setup-form">
-                    <h5 class="mb-3"><i class="bi bi-cloud-sun"></i> {{ t.weather_settings }}</h5>
-
-                    <div class="mb-3">
-                        <label class="form-label">{{ t.api_key }}</label>
-                        <input type="text" class="form-control" id="weather_api_key"
-                               value="{{ config.weather_api_key }}">
-                        <div class="form-text">
-                            <a href="https://openweathermap.org/api" target="_blank">{{ t.weather_hint }}</a>
-                        </div>
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">{{ t.city }}</label>
-                        <input type="text" class="form-control" id="weather_city"
-                               value="{{ config.weather_city }}"
-                               placeholder="{{ t.city_placeholder }}">
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">{{ t.units }}</label>
-                        <select class="form-select" id="weather_units">
-                            <option value="metric" {% if config.weather_units == 'metric' %}selected{% endif %}>{{ t.celsius }}</option>
-                            <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
-                        </select>
-                    </div>
-
-                    <hr>
-                    <h5 class="mb-3"><i class="bi bi-calendar3"></i> {{ t.calendar_settings }}</h5>
-
-                    <div class="mb-3">
-                        <label class="form-label">{{ t.ical_url }}</label>
-                        <input type="url" class="form-control" id="calendar_ical_url"
-                               value="{{ config.calendar_ical_url }}"
-                               placeholder="{{ t.ical_placeholder }}">
-                        <div class="form-text">{{ t.ical_hint }}</div>
-                    </div>
-
-                    <hr>
-                    <h5 class="mb-3"><i class="bi bi-display"></i> {{ t.default_page }}</h5>
-
-                    <div class="mb-4">
-                        <div class="btn-group w-100" role="group">
-                            <input type="radio" class="btn-check" name="page" id="page-home" value="home">
-                            <label class="btn btn-outline-primary" for="page-home">
-                                <i class="bi bi-house"></i> {{ t.home }}
-                            </label>
-                            <input type="radio" class="btn-check" name="page" id="page-widget" value="widget">
-                            <label class="btn btn-outline-primary" for="page-widget">
-                                <i class="bi bi-grid"></i> {{ t.widget }}
-                            </label>
-                            <input type="radio" class="btn-check" name="page" id="page-photo" value="photo" checked>
-                            <label class="btn btn-outline-primary" for="page-photo">
-                                <i class="bi bi-camera"></i> {{ t.photo }}
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary btn-lg">
-                            <i class="bi bi-check-circle"></i> {{ t.complete_setup }}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div class="text-center mt-3">
-            <small class="text-muted">{{ t.settings_changeable }}</small>
-        </div>
+    <div class="center mb-3">
+        <h1>{{ t.first_time_setup }}</h1>
+        <p class="muted">{{ t.setup_sub }}</p>
     </div>
+
+    <form id="setup-form" class="stack" style="gap:16px;">
+
+        <section class="card">
+            <div class="card__head">{{ icon('weather') }}<h2>{{ t.weather_settings }}</h2></div>
+            <div class="card__body">
+                <div class="field">
+                    <label class="label" for="weather_api_key">{{ t.api_key }}</label>
+                    <input type="text" class="input" id="weather_api_key"
+                           value="{{ config.weather_api_key }}" autocomplete="off" spellcheck="false">
+                    <p class="hint">
+                        <a href="https://openweathermap.org/api" target="_blank" rel="noopener">{{ t.weather_hint }}</a>
+                    </p>
+                </div>
+                <div class="field">
+                    <label class="label" for="weather_city">{{ t.city }}</label>
+                    <input type="text" class="input" id="weather_city"
+                           value="{{ config.weather_city }}" placeholder="{{ t.city_placeholder }}">
+                </div>
+                <div class="field mb-0">
+                    <label class="label" for="weather_units">{{ t.units }}</label>
+                    <select class="select" id="weather_units">
+                        <option value="metric"   {% if config.weather_units != 'imperial' %}selected{% endif %}>{{ t.celsius }}</option>
+                        <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__head">{{ icon('calendar') }}<h2>{{ t.calendar_settings }}</h2></div>
+            <div class="card__body">
+                <div class="field mb-0">
+                    <label class="label" for="calendar_ical_url">{{ t.ical_url }}</label>
+                    <input type="url" class="input" id="calendar_ical_url"
+                           value="{{ config.calendar_ical_url }}"
+                           placeholder="{{ t.ical_placeholder }}" spellcheck="false">
+                    <p class="hint">{{ t.ical_hint }}</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__head">{{ icon('display') }}<h2>{{ t.default_page }}</h2></div>
+            <div class="card__body">
+                {# Reflects whatever is already saved instead of always landing
+                   on "photo". #}
+                <div class="segmented" role="group" aria-label="{{ t.default_page }}">
+                    {% for key, ico in [('home', 'home'), ('widget', 'grid'), ('photo', 'camera')] %}
+                    <button type="button" class="segmented__btn" data-page="{{ key }}"
+                            aria-pressed="{{ 'true' if (config.current_page or 'photo') == key else 'false' }}">
+                        {{ icon(ico) }}<span>{{ t[key] }}</span>
+                    </button>
+                    {% endfor %}
+                </div>
+                <p class="hint">{{ t.default_page_hint }}</p>
+            </div>
+        </section>
+
+        <button type="submit" class="btn btn--primary btn--lg btn--block">
+            {{ icon('check-circle') }} {{ t.complete_setup }}
+        </button>
+
+        <p class="tiny dim center mb-0">{{ t.settings_changeable }}</p>
+    </form>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-document.getElementById('setup-form').addEventListener('submit', function(e) {
-    e.preventDefault();
+(function () {
+    'use strict';
 
-    const data = {
-        weather_api_key: document.getElementById('weather_api_key').value,
-        weather_city: document.getElementById('weather_city').value,
-        weather_units: document.getElementById('weather_units').value,
-        calendar_ical_url: document.getElementById('calendar_ical_url').value,
-        current_page: document.querySelector('input[name="page"]:checked').value,
-    };
+    var buttons = V.$$('[data-page]');
+    var page = {{ (config.current_page or 'photo') | tojson }};
 
-    fetch('/api/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    })
-    .then(r => r.json())
-    .then(result => {
-        if (result.success) {
-            showToast('OK', 'success');
-            setTimeout(() => window.location.href = '/', 1000);
-        } else {
-            showToast(result.error || 'Failed', 'danger');
-        }
-    })
-    .catch(err => showToast('Error: ' + err, 'danger'));
-});
+    buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            page = btn.getAttribute('data-page');
+            buttons.forEach(function (b) {
+                b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+            });
+        });
+    });
+
+    document.getElementById('setup-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var submit = this.querySelector('button[type="submit"]');
+        var restore = V.busy(submit, V.t('saving'));
+
+        V.api('/api/setup', {
+            method: 'POST',
+            body: {
+                weather_api_key: document.getElementById('weather_api_key').value,
+                weather_city: document.getElementById('weather_city').value,
+                weather_units: document.getElementById('weather_units').value,
+                calendar_ical_url: document.getElementById('calendar_ical_url').value,
+                current_page: page
+            }
+        })
+            .then(function () {
+                V.toast(V.t('saved'), 'success');
+                setTimeout(function () { window.location.href = '/'; }, 800);
+            })
+            .catch(function (err) { V.fail(err); restore(); });
+    });
+})();
 </script>
 {% endblock %}
