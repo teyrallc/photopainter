@@ -54,9 +54,13 @@ from services import display_mgr
 config = Config(CONFIG_PATH)
 
 app = Flask(__name__)
-app.secret_key = config.get("session_secret", os.urandom(24).hex())
-if not config.get("session_secret"):
-    config.set("session_secret", app.secret_key)
+# `config.get` only falls back when the key is absent, so a stored empty string
+# used to hand Flask an empty secret key and break every session. Treat blank
+# as missing, and persist the generated secret so sign-ins survive a restart.
+_session_secret = config.get("session_secret") or os.urandom(24).hex()
+app.secret_key = _session_secret
+if config.get("session_secret") != _session_secret:
+    config.set("session_secret", _session_secret)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # ── Auth System ────────────────────────────────────────────────────────
@@ -143,6 +147,15 @@ def _nmcli_fields(line):
             i += 1
     fields.append(''.join(current))
     return fields
+
+
+def _nmcli_active_ssid(stdout):
+    """Pull the connected SSID out of `nmcli -t -f ACTIVE,SSID dev wifi`."""
+    for line in stdout.strip().split('\n'):
+        parts = _nmcli_fields(line)
+        if len(parts) >= 2 and parts[0] == "yes":
+            return parts[1].strip()
+    return None
 
 
 def _parse_wifi_scan(stdout):
@@ -1416,12 +1429,9 @@ def _get_ip():
 def get_active_ssid():
     """Dynamically get the currently active WiFi from NetworkManager."""
     try:
-        check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+        check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
                                capture_output=True, text=True, timeout=5)
-        for line in check.stdout.strip().split('\n'):
-            parts = _nmcli_fields(line)
-            if len(parts) >= 2 and parts[0] == "yes":
-                return parts[1].strip()
+        return _nmcli_active_ssid(check.stdout)
     except Exception:
         pass
     return None
@@ -1484,17 +1494,29 @@ def api_system_info():
 
 @app.route('/api/system/update', methods=['POST'])
 def api_system_update():
+    """Pull the latest code and hand the log back to the browser.
+
+    The script schedules its own restart in a detached unit, so this request
+    finishes normally instead of being killed along with the service."""
     update_script = os.path.join(PROJECT_DIR, "scripts", "update.sh")
     if not os.path.exists(update_script):
         return jsonify({"error": "Update script not found"}), 500
     try:
         result = subprocess.run(
             ["bash", update_script],
-            capture_output=True, text=True, timeout=300, cwd=PROJECT_DIR)
+            # pip on a Pi Zero is slow; 5 minutes was not always enough.
+            capture_output=True, text=True, timeout=900, cwd=PROJECT_DIR)
+        # git and pip both report progress on stderr, so keep the two streams
+        # together — splitting them hid the reason for every failure.
+        output = (result.stdout or "") + (result.stderr or "")
+        if result.returncode != 0:
+            logger.error(f"Update failed (exit {result.returncode})")
+            return jsonify({"error": output.strip() or
+                            f"Update failed (exit {result.returncode})"}), 500
         return jsonify({
-            "success": result.returncode == 0,
-            "output": result.stdout,
-            "error": result.stderr if result.returncode != 0 else None,
+            "success": True,
+            "output": output,
+            "restarting": "Restart scheduled" in output,
         })
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Update timed out"}), 500
@@ -1537,9 +1559,9 @@ def verify_or_connect_wifi_on_boot():
     # 1. Wait up to 15 seconds for NM auto-connect
     for _ in range(15):
         try:
-            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
                                    capture_output=True, text=True, timeout=5)
-            if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
+            if _nmcli_active_ssid(check.stdout) == ssid:
                 logger.info(f"Boot check: Auto-connected to {ssid} successfully.")
                 return True
         except Exception as e:
@@ -1559,9 +1581,9 @@ def verify_or_connect_wifi_on_boot():
     # 3. Check again for 10 seconds
     for _ in range(10):
         try:
-            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
                                    capture_output=True, text=True, timeout=5)
-            if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
+            if _nmcli_active_ssid(check.stdout) == ssid:
                 logger.info(f"Boot check: Manually connected to {ssid} successfully.")
                 return True
         except Exception:
@@ -1572,42 +1594,43 @@ def verify_or_connect_wifi_on_boot():
     return False
 
 
-if __name__ == '__main__':
-    # --- TESTING MODE: Factory Reset on Boot ---
-    logger.info("TESTING MODE RESTART: Wiping ALL config for fresh test.")
-    config.set("setup_complete", False)
-    config.set("wifi_ssid", "")
-    config.set("wifi_password", "")
-    config.set("admin_email", "")
-    config.set("admin_password_hash", "")
-    config.set("session_secret", "")  # Invalidate all browser sessions
-    # Re-generate a fresh secret key for this boot
-    import secrets
-    new_secret = secrets.token_hex(24)
-    app.secret_key = new_secret
-    config.set("session_secret", new_secret)
-    try:
-        stop_ap_hotspot()
-    except Exception:
-        pass
-    # Also disconnect any existing WiFi so AP mode starts fresh
-    try:
-        subprocess.run(["nmcli", "device", "disconnect", "wlan0"],
-                       capture_output=True, text=True, timeout=5)
-    except Exception:
-        pass
-    # ---------------------------------------------
+def resolve_boot_state():
+    """Decide whether this boot lands in normal mode or the pairing hotspot.
 
-    # Do boot connectivity check first if we have a saved WiFi configuration
+    A boot is not a factory reset. Saved credentials — WiFi, the admin account,
+    the session secret — are never touched here; only whether the device can
+    currently reach its network is re-evaluated. Clearing them on every start
+    is what forced re-pairing and re-registering after every power cut.
+
+    Returns True when the device is on a network and can serve normally.
+    """
     if config.get("wifi_ssid"):
         if verify_or_connect_wifi_on_boot():
-            logger.info("Boot check success. Marking setup as complete.")
+            logger.info("Boot check: reached the saved network.")
             config.set("setup_complete", True)
-        else:
-            logger.error("Could not reach saved WiFi. Reverting to setup mode.")
-            config.set("setup_complete", False)
-    else:
+            return True
+        # Keep the credentials. The router may simply be slower to come back
+        # than we are; the hotspot lets the owner re-pair if the network really
+        # did change, and a retry still has the password to try.
+        logger.error("Boot check: saved WiFi unreachable — starting the setup hotspot.")
         config.set("setup_complete", False)
+        return False
+
+    adopted = get_active_ssid()
+    if adopted:
+        # Joined some other way (raspi-config, a pre-seeded wpa_supplicant), so
+        # there is nothing to pair — adopt the network and carry on.
+        logger.info(f"Boot check: already connected to {adopted}, adopting it.")
+        config.update({"wifi_ssid": adopted, "setup_complete": True})
+        return True
+
+    logger.info("Boot check: no network configured — starting the setup hotspot.")
+    config.set("setup_complete", False)
+    return False
+
+
+if __name__ == '__main__':
+    resolve_boot_state()
 
     ip = _get_ip()
     print("=" * 60)

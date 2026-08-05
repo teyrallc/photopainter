@@ -306,6 +306,27 @@
             .then(restore);
     });
 
+    /**
+     * Wait for the service to come back after it restarts itself, then reload.
+     * A fixed timer used to reload straight into a connection error, because
+     * the Pi Zero needs longer to boot Flask than the timer allowed.
+     */
+    function reloadWhenBack(pre, attempt) {
+        attempt = attempt || 1;
+        if (attempt > 40) {          // ~2 minutes
+            pre.textContent += '\n' + V.t('update_reload_manual');
+            return;
+        }
+        fetch('/api/status', { cache: 'no-store' })
+            .then(function (r) {
+                if (!r.ok) throw new Error('not ready');
+                window.location.reload();
+            })
+            .catch(function () {
+                setTimeout(function () { reloadWhenBack(pre, attempt + 1); }, 3000);
+            });
+    }
+
     document.getElementById('system-update').addEventListener('click', function () {
         var btn = this;
         V.confirm(V.t('confirm_update'), { title: V.t('update_software') }).then(function (ok) {
@@ -319,11 +340,23 @@
             V.api('/api/system/update', { method: 'POST' })
                 .then(function (d) {
                     pre.textContent = d.output || V.t('done');
-                    V.toast(V.t('update_ok'), 'success');
-                    setTimeout(function () { window.location.reload(); }, 5000);
+                    pre.scrollTop = pre.scrollHeight;
+                    if (d.restarting) {
+                        V.toast(V.t('update_ok'), 'success');
+                        pre.textContent += '\n' + V.t('update_waiting');
+                        // Give the detached unit its 3-second delay first.
+                        setTimeout(function () { reloadWhenBack(pre); }, 5000);
+                    } else {
+                        // Nothing to install — no restart, so nothing to wait for.
+                        V.toast(V.t('update_none'), 'info');
+                        restore();
+                    }
                 })
-                .catch(function (err) { pre.textContent = err.message; V.fail(err); })
-                .then(restore);
+                .catch(function (err) {
+                    pre.textContent = err.message;
+                    V.toast(V.t('update_failed'), 'danger');
+                    restore();
+                });
         });
     });
 
