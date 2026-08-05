@@ -1,176 +1,245 @@
 {% extends "base.html" %}
-{% block title %}Vignette - {{ t.wifi_config }}{% endblock %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — {{ t.wifi_config }}{% endblock %}
 
 {% block content %}
-<h2 class="mb-4"><i class="bi bi-wifi"></i> {{ t.wifi_config }}</h2>
-
-<div class="row g-4">
-    <!-- AP Hotspot Status -->
-    <div class="col-12" id="ap-status-card" style="display:none;">
-        <div class="alert alert-info d-flex align-items-center">
-            <i class="bi bi-broadcast display-6 me-3"></i>
-            <div>
-                <strong>Vignette Hotspot Active</strong><br>
-                <span id="ap-info"></span>
-            </div>
-        </div>
+<div class="page-head">
+    <div class="page-head__text">
+        <h1>{{ t.wifi_config }}</h1>
+        <p>{{ t.wifi_sub }}</p>
     </div>
-
-    <!-- Current Connection -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-success text-white">
-                <i class="bi bi-wifi"></i> {{ t.current_connection }}
-            </div>
-            <div class="card-body" id="wifi-status">
-                <p class="text-muted">{{ t.loading }}</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Manual Connect -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-primary text-white">
-                <i class="bi bi-plus-circle"></i> {{ t.connect }}
-            </div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">{{ t.ssid }}</label>
-                    <input type="text" class="form-control" id="wifi-ssid" placeholder="WiFi name">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">{{ t.password }}</label>
-                    <input type="password" class="form-control" id="wifi-pass" placeholder="WiFi password">
-                </div>
-                <button class="btn btn-primary" onclick="connectWifi()" id="connect-btn">
-                    <i class="bi bi-wifi"></i> {{ t.connect }}
-                </button>
-                <div id="connect-result" class="mt-2"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Available Networks -->
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <i class="bi bi-broadcast"></i> {{ t.available_networks }}
-                <button class="btn btn-sm btn-outline-primary float-end" onclick="scanWifi()">
-                    <i class="bi bi-arrow-repeat"></i> {{ t.scan_networks }}
-                </button>
-            </div>
-            <div class="card-body">
-                <div id="wifi-networks">
-                    <p class="text-muted">{{ t.loading }}</p>
-                </div>
-            </div>
-        </div>
+    <div class="page-head__actions">
+        <button type="button" class="btn" id="scan-btn">{{ icon('refresh') }} {{ t.scan_networks }}</button>
     </div>
 </div>
 
+<div class="alert alert--info mb-2 hidden" id="ap-banner">
+    {{ icon('wifi') }}
+    <div>
+        <strong>{{ t.hotspot_active }}</strong><br>
+        <span class="small">{{ t.hotspot_hint }}</span>
+    </div>
+</div>
+
+<div class="grid grid-2">
+
+    <section class="card">
+        <div class="card__head">{{ icon('wifi') }}<h2>{{ t.current_connection }}</h2></div>
+        <div class="card__body" id="wifi-status">
+            <p class="muted small mb-0">{{ t.loading }}</p>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card__head">{{ icon('key') }}<h2>{{ t.connect }}</h2></div>
+        <div class="card__body">
+            <div class="field">
+                <label class="label" for="wifi-ssid">{{ t.ssid }}</label>
+                <input type="text" class="input" id="wifi-ssid" placeholder="{{ t.ssid }}"
+                       autocomplete="off" autocapitalize="none" spellcheck="false">
+            </div>
+            <div class="field">
+                <label class="label" for="wifi-pass">{{ t.password }}</label>
+                <div class="input-group">
+                    <input type="password" class="input" id="wifi-pass" placeholder="{{ t.password }}"
+                           autocomplete="current-password" autocapitalize="none" spellcheck="false">
+                    <button type="button" class="input-group__btn" id="toggle-pass"
+                            aria-label="{{ t.show_password }}" aria-pressed="false">{{ icon('eye') }}</button>
+                </div>
+            </div>
+            <button type="button" class="btn btn--primary btn--block" id="connect-btn">
+                {{ icon('wifi') }} {{ t.connect }}
+            </button>
+            <div id="connect-result" class="mt-2"></div>
+        </div>
+    </section>
+
+    <section class="card span-2">
+        <div class="card__head">{{ icon('globe') }}<h2>{{ t.available_networks }}</h2></div>
+        <div class="card__body">
+            <div id="wifi-networks">
+                <p class="muted small mb-0">{{ t.loading }}</p>
+            </div>
+        </div>
+    </section>
+</div>
+
 {% if not config.setup_complete %}
-<div class="text-center mt-4">
-    <a href="/setup" class="btn btn-success btn-lg">
-        <i class="bi bi-arrow-right-circle"></i> Continue to Setup
-    </a>
+<div class="center mt-3">
+    <a class="btn btn--success btn--lg" href="/setup">{{ icon('arrow-right') }} {{ t.continue_setup }}</a>
 </div>
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
-function loadWifiStatus() {
-    fetch('/api/wifi/status').then(r => r.json()).then(d => {
-        const div = document.getElementById('wifi-status');
-        const apCard = document.getElementById('ap-status-card');
+(function () {
+    'use strict';
 
-        // Show AP hotspot info if active
-        if (d.ap_active) {
-            apCard.style.display = 'block';
-            document.getElementById('ap-info').innerHTML =
-                'SSID: <strong>Vignette-Setup</strong> | Password: <strong>vignette123</strong><br>' +
-                '<small class="text-muted">Connect your phone to this network, then select your home WiFi below.</small>';
-        } else {
-            apCard.style.display = 'none';
-        }
+    var statusBox   = document.getElementById('wifi-status');
+    var networksBox = document.getElementById('wifi-networks');
+    var banner      = document.getElementById('ap-banner');
 
-        if (d.connected) {
-            div.innerHTML = `
-                <p><strong>SSID:</strong> ${d.ssid}</p>
-                <p><strong>IP:</strong> ${d.ip}</p>
-                <p><strong>{{ t.signal }}:</strong> ${d.signal || '-'}</p>
-                <span class="badge bg-success">{{ t.connected }}</span>`;
-        } else {
-            div.innerHTML = `<span class="badge bg-warning">{{ t.not_connected }}</span>`;
-        }
-    }).catch(() => {
-        document.getElementById('wifi-status').innerHTML = '<p class="text-danger">Failed to load</p>';
+    function signalLevel(signal) {
+        var pct = parseInt(String(signal).replace('%', ''), 10);
+        if (isNaN(pct)) return 0;
+        return pct >= 70 ? 4 : pct >= 50 ? 3 : pct >= 30 ? 2 : 1;
+    }
+
+    function row(label, value) {
+        var r = document.createElement('div');
+        r.className = 'datarow';
+        var l = document.createElement('span');
+        l.className = 'datarow__label';
+        l.textContent = label;
+        var v = document.createElement('span');
+        v.className = 'datarow__value';
+        v.textContent = value;
+        r.appendChild(l);
+        r.appendChild(v);
+        return r;
+    }
+
+    function loadStatus() {
+        V.api('/api/wifi/status')
+            .then(function (d) {
+                banner.classList.toggle('hidden', !d.ap_active);
+
+                statusBox.innerHTML = '';
+                if (d.connected) {
+                    var badge = document.createElement('span');
+                    badge.className = 'badge badge--success mb-2';
+                    badge.textContent = V.t('connected');
+                    statusBox.appendChild(badge);
+
+                    var list = document.createElement('div');
+                    list.className = 'datalist mt-1';
+                    list.appendChild(row(V.t('ssid'), d.ssid || '—'));
+                    list.appendChild(row(V.t('ip'), d.ip || '—'));
+                    list.appendChild(row(V.t('signal'), d.signal || '—'));
+                    statusBox.appendChild(list);
+                } else {
+                    var warn = document.createElement('span');
+                    warn.className = 'badge badge--warning';
+                    warn.textContent = V.t('not_connected');
+                    statusBox.appendChild(warn);
+                }
+            })
+            .catch(function (err) {
+                statusBox.innerHTML = '';
+                var p = document.createElement('p');
+                p.className = 'small mb-0';
+                p.style.color = 'var(--danger)';
+                p.textContent = err.message;
+                statusBox.appendChild(p);
+            });
+    }
+
+    function scan(btn) {
+        var restore = btn ? V.busy(btn) : function () {};
+        networksBox.innerHTML = '<p class="muted small mb-0">' + V.t('scanning') + '</p>';
+
+        V.api('/api/wifi/scan')
+            .then(function (d) {
+                var nets = (d.networks || []).filter(function (n) { return n && n.ssid; });
+                networksBox.innerHTML = '';
+
+                if (!nets.length) {
+                    var p = document.createElement('p');
+                    p.className = 'muted small mb-0';
+                    p.textContent = V.t('no_networks');
+                    networksBox.appendChild(p);
+                    return;
+                }
+
+                var list = document.createElement('div');
+                list.className = 'list';
+
+                nets.forEach(function (net) {
+                    var item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'list__item';
+
+                    var bars = document.createElement('span');
+                    bars.className = 'signal';
+                    bars.setAttribute('data-level', signalLevel(net.signal));
+                    bars.innerHTML = '<i></i><i></i><i></i><i></i>';
+
+                    var name = document.createElement('span');
+                    name.style.flex = '1';
+                    name.style.minWidth = '0';
+                    name.className = 'truncate';
+                    name.textContent = net.ssid;   // SSIDs are untrusted text
+
+                    var sec = document.createElement('span');
+                    sec.className = 'badge';
+                    sec.textContent = (net.security || '').trim() || V.t('open_network');
+
+                    item.appendChild(bars);
+                    item.appendChild(name);
+                    item.appendChild(sec);
+
+                    item.addEventListener('click', function () {
+                        document.getElementById('wifi-ssid').value = net.ssid;
+                        document.getElementById('wifi-pass').focus();
+                    });
+
+                    list.appendChild(item);
+                });
+
+                networksBox.appendChild(list);
+            })
+            .catch(function (err) {
+                networksBox.innerHTML = '';
+                var p = document.createElement('p');
+                p.className = 'small mb-0';
+                p.style.color = 'var(--danger)';
+                p.textContent = err.message;
+                networksBox.appendChild(p);
+            })
+            .then(restore);
+    }
+
+    document.getElementById('scan-btn').addEventListener('click', function () { scan(this); });
+
+    document.getElementById('toggle-pass').addEventListener('click', function () {
+        var input = document.getElementById('wifi-pass');
+        var shown = input.type === 'text';
+        input.type = shown ? 'password' : 'text';
+        this.setAttribute('aria-pressed', shown ? 'false' : 'true');
     });
-}
 
-function scanWifi() {
-    const div = document.getElementById('wifi-networks');
-    div.innerHTML = '<p class="text-muted">Scanning...</p>';
-    fetch('/api/wifi/scan').then(r => r.json()).then(d => {
-        if (!d.networks || d.networks.length === 0) {
-            div.innerHTML = '<p class="text-muted">No networks found</p>';
+    document.getElementById('connect-btn').addEventListener('click', function () {
+        var ssid = document.getElementById('wifi-ssid').value.trim();
+        var out  = document.getElementById('connect-result');
+        if (!ssid) {
+            out.className = 'mt-2 alert alert--warning';
+            out.textContent = V.t('enter_network_name');
             return;
         }
-        let html = '<div class="list-group">';
-        for (const net of d.networks) {
-            const escaped = net.ssid.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            html += `<button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
-                       onclick="document.getElementById('wifi-ssid').value='${escaped}'">
-                <span><i class="bi bi-wifi"></i> ${net.ssid}</span>
-                <span>
-                    <span class="badge bg-secondary">${net.signal}</span>
-                    <span class="badge bg-outline-secondary">${net.security || ''}</span>
-                </span>
-            </button>`;
-        }
-        html += '</div>';
-        div.innerHTML = html;
-    }).catch(e => {
-        div.innerHTML = `<p class="text-danger">${e}</p>`;
+
+        var restore = V.busy(this, V.t('connecting'));
+        out.className = 'mt-2 alert alert--info';
+        out.textContent = V.t('wifi_switch_warning');
+
+        V.api('/api/wifi/connect', {
+            method: 'POST',
+            body: { ssid: ssid, password: document.getElementById('wifi-pass').value }
+        })
+            .then(function () {
+                out.className = 'mt-2 alert alert--info';
+                out.textContent = V.t('wifi_switch_pending');
+                setTimeout(loadStatus, 8000);
+            })
+            .catch(function (err) {
+                out.className = 'mt-2 alert alert--danger';
+                out.textContent = err.message;
+            })
+            .then(restore);
     });
-}
 
-function connectWifi() {
-    const ssid = document.getElementById('wifi-ssid').value;
-    const pass = document.getElementById('wifi-pass').value;
-    if (!ssid) { showToast('Enter network name', 'warning'); return; }
-
-    const btn = document.getElementById('connect-btn');
-    const div = document.getElementById('connect-result');
-    btn.disabled = true;
-    div.innerHTML = '<span class="text-info">{{ t.connecting }}<br><small>This may take 15-30 seconds. If you lose connection, the hotspot will restart.</small></span>';
-
-    fetch('/api/wifi/connect', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ssid, password: pass})
-    }).then(r => r.json()).then(d => {
-        btn.disabled = false;
-        if (d.success) {
-            div.innerHTML = `<span class="text-success">{{ t.connected }}! IP: ${d.ip || '...'}</span>`;
-            showToast('WiFi connected!', 'success');
-            setTimeout(loadWifiStatus, 3000);
-            // If new IP is different, offer to redirect
-            if (d.ip && d.ip !== window.location.hostname) {
-                div.innerHTML += `<br><a href="http://${d.ip}:5000/wifi" class="btn btn-sm btn-outline-primary mt-2">
-                    <i class="bi bi-box-arrow-up-right"></i> Open on new IP: ${d.ip}</a>`;
-            }
-        } else {
-            div.innerHTML = `<span class="text-danger">${d.error}</span>`;
-        }
-    }).catch(e => {
-        btn.disabled = false;
-        div.innerHTML = `<span class="text-danger">${e}<br><small>If hotspot restarted, reconnect to Vignette-Setup and try again.</small></span>`;
-    });
-}
-
-loadWifiStatus();
-scanWifi();
+    loadStatus();
+    scan(null);
+})();
 </script>
 {% endblock %}

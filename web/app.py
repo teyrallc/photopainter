@@ -120,6 +120,54 @@ AP_CONN_NAME = "Vignette-Hotspot"
 _cached_wifi_networks = []
 
 
+def _nmcli_fields(line):
+    """Split one line of `nmcli -t` output into its fields.
+
+    Terse mode escapes literal colons inside values as ``\\:``, so splitting on
+    a plain ':' mangles any SSID that contains one and shifts every field after
+    it — the signal strength lands in the security column and the network
+    becomes unselectable. Unescape while splitting instead."""
+    fields, current = [], []
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == '\\' and i + 1 < len(line):
+            current.append(line[i + 1])
+            i += 2
+        elif ch == ':':
+            fields.append(''.join(current))
+            current = []
+            i += 1
+        else:
+            current.append(ch)
+            i += 1
+    fields.append(''.join(current))
+    return fields
+
+
+def _parse_wifi_scan(stdout):
+    """Parse `nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list` into a
+    de-duplicated list, strongest signal first."""
+    networks, seen = [], set()
+    for line in stdout.strip().split('\n'):
+        if not line:
+            continue
+        parts = _nmcli_fields(line)
+        if len(parts) < 3 or not parts[0] or parts[0] in seen:
+            continue
+        seen.add(parts[0])
+        try:
+            signal = int(parts[1])
+        except (TypeError, ValueError):
+            # A non-numeric SIGNAL used to blow up the sort and lose the whole
+            # scan; treat it as "unknown, weakest" instead.
+            signal = 0
+        networks.append({"ssid": parts[0], "signal": f"{signal}%",
+                         "security": parts[2]})
+    networks.sort(key=lambda n: int(n["signal"].rstrip('%')), reverse=True)
+    return networks
+
+
 def scan_and_cache_wifi():
     """Scan WiFi networks BEFORE starting AP. Cache results for the setup page.
     Must be called while wlan0 is in station mode (not AP)."""
@@ -129,17 +177,8 @@ def scan_and_cache_wifi():
         result = subprocess.run(
             ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
             capture_output=True, text=True, timeout=30)
-        networks = []
-        seen = set()
-        for line in result.stdout.strip().split('\n'):
-            parts = line.split(':')
-            if len(parts) >= 3 and parts[0] and parts[0] not in seen:
-                seen.add(parts[0])
-                networks.append({"ssid": parts[0], "signal": parts[1] + '%',
-                                 "security": parts[2]})
-        networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
-        _cached_wifi_networks = networks
-        logger.info(f"Cached {len(networks)} WiFi networks")
+        _cached_wifi_networks = _parse_wifi_scan(result.stdout)
+        logger.info(f"Cached {len(_cached_wifi_networks)} WiFi networks")
     except Exception as e:
         logger.error(f"WiFi pre-scan error: {e}")
         _cached_wifi_networks = []
@@ -1109,7 +1148,7 @@ def api_wifi_status():
             ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"],
             capture_output=True, text=True, timeout=10)
         for line in result.stdout.strip().split('\n'):
-            parts = line.split(':')
+            parts = _nmcli_fields(line)
             if len(parts) >= 3 and parts[0] == 'yes':
                 return jsonify({"connected": True, "ssid": parts[1],
                                 "signal": parts[2] + '%', "ip": _get_ip(),
@@ -1132,16 +1171,7 @@ def api_wifi_scan():
         result = subprocess.run(
             ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
             capture_output=True, text=True, timeout=30)
-        networks = []
-        seen = set()
-        for line in result.stdout.strip().split('\n'):
-            parts = line.split(':')
-            if len(parts) >= 3 and parts[0] and parts[0] not in seen:
-                seen.add(parts[0])
-                networks.append({"ssid": parts[0], "signal": parts[1] + '%',
-                                 "security": parts[2]})
-        networks.sort(key=lambda x: int(x["signal"].rstrip('%')), reverse=True)
-        return jsonify({"networks": networks})
+        return jsonify({"networks": _parse_wifi_scan(result.stdout)})
     except Exception as e:
         return jsonify({"networks": [], "error": str(e)})
 
@@ -1210,10 +1240,14 @@ def _background_wifi_connect(ssid, password):
         # Step 4: Verify connection (nmcli can return failure/timeout but still connect)
         is_connected = False
         for _ in range(5):  # Poll up to 10 seconds
-            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
+            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
                                    capture_output=True, text=True, timeout=5)
-            if any(line.startswith(f"yes:{ssid}") for line in check.stdout.strip().split('\n')):
-                is_connected = True
+            for line in check.stdout.strip().split('\n'):
+                parts = _nmcli_fields(line)
+                if len(parts) >= 2 and parts[0] == "yes" and parts[1] == ssid:
+                    is_connected = True
+                    break
+            if is_connected:
                 break
             time.sleep(2)
 
@@ -1385,8 +1419,9 @@ def get_active_ssid():
         check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"], 
                                capture_output=True, text=True, timeout=5)
         for line in check.stdout.strip().split('\n'):
-            if line.startswith("yes:"):
-                return line.split(':', 1)[1].strip()
+            parts = _nmcli_fields(line)
+            if len(parts) >= 2 and parts[0] == "yes":
+                return parts[1].strip()
     except Exception:
         pass
     return None

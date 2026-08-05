@@ -1,296 +1,361 @@
 {% extends "base.html" %}
-{% block title %}Vignette - {{ t.settings }}{% endblock %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — {{ t.settings }}{% endblock %}
 
 {% block content %}
-<h2 class="mb-4"><i class="bi bi-gear"></i> {{ t.settings }}</h2>
+<div class="page-head">
+    <div class="page-head__text">
+        <h1>{{ t.settings }}</h1>
+        <p>{{ t.settings_sub }}</p>
+    </div>
+</div>
 
-<div class="row g-4">
-    <!-- Weather -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-info text-white">
-                <i class="bi bi-cloud-sun"></i> {{ t.weather_settings }}
+<div class="grid grid-2">
+
+    <!-- ══ Weather ════════════════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">{{ icon('weather') }}<h2>{{ t.weather_settings }}</h2></div>
+        <div class="card__body">
+            <div class="field">
+                <label class="label" for="s-weather-key">{{ t.api_key }}</label>
+                <input type="text" class="input" id="s-weather-key"
+                       value="{{ config.weather_api_key }}" autocomplete="off" spellcheck="false">
+                <p class="hint"><a href="https://openweathermap.org/api" target="_blank" rel="noopener">openweathermap.org</a></p>
             </div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">{{ t.api_key }}</label>
-                    <input type="text" class="form-control" id="s-weather-key"
-                           value="{{ config.weather_api_key }}">
-                    <div class="form-text"><a href="https://openweathermap.org/api" target="_blank">openweathermap.org</a></div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">{{ t.city }}</label>
-                    <input type="text" class="form-control" id="s-weather-city"
-                           value="{{ config.weather_city }}" placeholder="Taipei">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">{{ t.units }}</label>
-                    <select class="form-select" id="s-weather-units">
-                        <option value="metric" {% if config.weather_units == 'metric' %}selected{% endif %}>{{ t.celsius }}</option>
-                        <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
-                    </select>
-                </div>
-                <button class="btn btn-primary" onclick="saveWeather()">
-                    <i class="bi bi-save"></i> {{ t.save }}
-                </button>
-                <button class="btn btn-outline-info" onclick="testWeather()">
-                    <i class="bi bi-cloud-sun"></i> {{ t.test }}
-                </button>
-                <div id="weather-test-result" class="mt-2"></div>
+            <div class="field">
+                <label class="label" for="s-weather-city">{{ t.city }}</label>
+                <input type="text" class="input" id="s-weather-city"
+                       value="{{ config.weather_city }}" placeholder="{{ t.city_placeholder }}">
+            </div>
+            <div class="field">
+                <label class="label" for="s-weather-units">{{ t.units }}</label>
+                <select class="select" id="s-weather-units">
+                    <option value="metric"   {% if config.weather_units != 'imperial' %}selected{% endif %}>{{ t.celsius }}</option>
+                    <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
+                </select>
+            </div>
+            {# Left empty (and marginless) until a test actually runs. #}
+            <div id="weather-test-result"></div>
+        </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="save-weather">{{ icon('save') }} {{ t.save }}</button>
+            <button type="button" class="btn" id="test-weather">{{ icon('weather') }} {{ t.test }}</button>
+        </div>
+    </section>
+
+    <!-- ══ Calendar ═══════════════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">{{ icon('calendar') }}<h2>{{ t.calendar_settings }}</h2></div>
+        <div class="card__body">
+            <div class="field">
+                <label class="label" for="s-cal-url">{{ t.ical_url }}</label>
+                <input type="url" class="input" id="s-cal-url" value="{{ config.calendar_ical_url }}"
+                       placeholder="{{ t.ical_placeholder }}" spellcheck="false">
+                <p class="hint">{{ t.ical_hint }}</p>
+            </div>
+            <div id="cal-test-result"></div>
+        </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="save-calendar">{{ icon('save') }} {{ t.save }}</button>
+            <button type="button" class="btn" id="test-calendar">{{ icon('calendar') }} {{ t.test }}</button>
+        </div>
+    </section>
+
+    <!-- ══ Photo defaults ═════════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">{{ icon('camera') }}<h2>{{ t.photo_settings }}</h2></div>
+        <div class="card__body">
+            <div class="field">
+                <label class="label" for="s-rotation">{{ t.default_rotation }}</label>
+                <select class="select" id="s-rotation">
+                    <option value="0"   {% if config.photo_rotation == 0 %}selected{% endif %}>0° ({{ t.normal }})</option>
+                    <option value="90"  {% if config.photo_rotation == 90 %}selected{% endif %}>90° CW</option>
+                    <option value="180" {% if config.photo_rotation == 180 %}selected{% endif %}>180°</option>
+                    <option value="270" {% if config.photo_rotation == 270 %}selected{% endif %}>270° CW</option>
+                </select>
+            </div>
+            <div class="field mb-0">
+                <label class="label" for="s-fit-mode">{{ t.fit_mode }}</label>
+                <select class="select" id="s-fit-mode">
+                    <option value="fit"     {% if config.photo_fit_mode != 'stretch' %}selected{% endif %}>{{ t.fit_letterbox }}</option>
+                    <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>{{ t.stretch_fill }}</option>
+                </select>
             </div>
         </div>
-    </div>
-
-    <!-- Calendar -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-danger text-white">
-                <i class="bi bi-calendar3"></i> {{ t.calendar_settings }}
-            </div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">{{ t.ical_url }}</label>
-                    <input type="url" class="form-control" id="s-cal-url"
-                           value="{{ config.calendar_ical_url }}"
-                           placeholder="https://calendar.google.com/calendar/ical/...">
-                    <div class="form-text">{{ t.ical_hint }}</div>
-                </div>
-                <button class="btn btn-primary" onclick="saveCalendar()">
-                    <i class="bi bi-save"></i> {{ t.save }}
-                </button>
-                <button class="btn btn-outline-info" onclick="testCalendar()">
-                    <i class="bi bi-calendar-check"></i> {{ t.test }}
-                </button>
-                <div id="cal-test-result" class="mt-2"></div>
-            </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="save-photo">{{ icon('save') }} {{ t.save }}</button>
         </div>
-    </div>
+    </section>
 
-    <!-- Photo Display -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-success text-white">
-                <i class="bi bi-camera"></i> {{ t.photo_settings }}
-            </div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">{{ t.default_rotation }}</label>
-                    <select class="form-select" id="s-rotation">
-                        <option value="0" {% if config.photo_rotation == 0 %}selected{% endif %}>0° ({{ t.normal }})</option>
-                        <option value="90" {% if config.photo_rotation == 90 %}selected{% endif %}>90° CW</option>
-                        <option value="180" {% if config.photo_rotation == 180 %}selected{% endif %}>180°</option>
-                        <option value="270" {% if config.photo_rotation == 270 %}selected{% endif %}>270° CW</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">{{ t.fit_mode }}</label>
-                    <select class="form-select" id="s-fit-mode">
-                        <option value="fit" {% if config.photo_fit_mode == 'fit' %}selected{% endif %}>{{ t.fit_letterbox }}</option>
-                        <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>{{ t.stretch_fill }}</option>
-                    </select>
-                </div>
-                <button class="btn btn-primary" onclick="savePhotoSettings()">
-                    <i class="bi bi-save"></i> {{ t.save }}
-                </button>
-            </div>
+    <!-- ══ Google Drive ═══════════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">
+            {{ icon('drive') }}<h2>Google Drive</h2>
+            <span class="spacer"></span>
+            {% if config.gdrive_connected %}
+            <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+            {% endif %}
         </div>
-    </div>
-
-    <!-- Google Drive -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-success text-white">
-                <i class="bi bi-google"></i> Google Drive
+        <div class="card__body">
+            <div class="field">
+                <label class="label" for="s-gdrive-id">Client ID</label>
+                <input type="text" class="input" id="s-gdrive-id" value="{{ config.gdrive_client_id }}"
+                       placeholder="xxxxxxxx.apps.googleusercontent.com" spellcheck="false" autocomplete="off">
             </div>
-            <div class="card-body">
-                {% if config.gdrive_connected %}
-                <div class="alert alert-success py-2">
-                    <i class="bi bi-check-circle"></i> {{ t.connected }}
-                </div>
-                {% endif %}
-                <div class="mb-3">
-                    <label class="form-label">Client ID</label>
-                    <input type="text" class="form-control form-control-sm" id="s-gdrive-id"
-                           value="{{ config.gdrive_client_id }}" placeholder="xxxxxxxx.apps.googleusercontent.com">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Client Secret</label>
-                    <input type="password" class="form-control form-control-sm" id="s-gdrive-secret"
-                           value="{{ config.gdrive_client_secret }}">
-                </div>
-                <div class="alert alert-info small py-2 mb-3">
-                    <strong>{{ t.gdrive_steps_title }}:</strong><br>
-                    1. {{ t.gdrive_step1 }}<br>
-                    2. {{ t.gdrive_step2 }}<br>
-                    3. {{ t.gdrive_step3 }}<br>
-                    4. {{ t.gdrive_step4 }}
-                </div>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-primary" onclick="saveGDrive()">
-                        <i class="bi bi-save"></i> {{ t.save }}
+            <div class="field">
+                <label class="label" for="s-gdrive-secret">Client Secret</label>
+                <input type="password" class="input" id="s-gdrive-secret"
+                       value="{{ config.gdrive_client_secret }}" autocomplete="off">
+            </div>
+
+            <div class="accordion">
+                <div class="accordion__item">
+                    <button type="button" class="accordion__trigger" data-accordion-trigger="gdrive-steps"
+                            aria-expanded="false">
+                        {{ icon('info') }} {{ t.gdrive_steps_title }} {{ icon('chevron-down') }}
                     </button>
-                    {% if config.gdrive_client_id and not config.gdrive_connected %}
-                    <button class="btn btn-success" onclick="testGDriveConnect()">
-                        <i class="bi bi-google"></i> {{ t.gdrive_connect }}
-                    </button>
-                    {% endif %}
+                    <div class="accordion__panel" id="gdrive-steps" hidden>
+                        <ol style="padding-left:18px;margin:0;">
+                            <li>{{ t.gdrive_step1 }}</li>
+                            <li>{{ t.gdrive_step2 }}</li>
+                            <li>{{ t.gdrive_step3 }}</li>
+                            <li>{{ t.gdrive_step4 }}</li>
+                        </ol>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="save-gdrive">{{ icon('save') }} {{ t.save }}</button>
+            {% if config.gdrive_client_id and not config.gdrive_connected %}
+            <button type="button" class="btn btn--success" id="connect-gdrive">{{ icon('drive') }} {{ t.gdrive_connect }}</button>
+            {% endif %}
+        </div>
+    </section>
 
-    <!-- System -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-dark text-white">
-                <i class="bi bi-wrench"></i> {{ t.system_settings }}
+    <!-- ══ Network ════════════════════════════════════════════════════════ -->
+    <section class="card">
+        <div class="card__head">{{ icon('wifi') }}<h2>{{ t.wifi_config }}</h2></div>
+        <div class="card__body">
+            <p class="small muted">{{ t.wifi_settings_hint }}</p>
+            <a class="btn btn--block" href="/wifi">{{ icon('wifi') }} {{ t.manage_wifi }}</a>
+        </div>
+    </section>
+
+    <!-- ══ System ═════════════════════════════════════════════════════════
+         Power actions moved off the dashboard: they belong with the other
+         device-level settings, not next to the daily display controls. -->
+    <section class="card">
+        <div class="card__head">{{ icon('sliders') }}<h2>{{ t.system_settings }}</h2></div>
+        <div class="card__body stack">
+            <button type="button" class="btn btn--block" id="show-qr">{{ icon('qr') }} {{ t.show_qr }}</button>
+            <button type="button" class="btn btn--block" id="system-update">{{ icon('download') }} {{ t.update_software }}</button>
+            <button type="button" class="btn btn--block" id="system-reboot">{{ icon('refresh') }} {{ t.reboot }}</button>
+            <button type="button" class="btn btn--quiet-danger btn--block" id="system-shutdown">{{ icon('power') }} {{ t.shutdown }}</button>
+
+            <div class="hidden" id="update-output">
+                <pre class="console"></pre>
             </div>
-            <div class="card-body">
-                <div class="d-grid gap-2">
-                    <button class="btn btn-outline-warning" onclick="showQR()">
-                        <i class="bi bi-qr-code"></i> {{ t.show_qr }}
-                    </button>
-                    <button class="btn btn-outline-danger" onclick="resetAll()">
-                        <i class="bi bi-arrow-counterclockwise"></i> {{ t.factory_reset }}
-                    </button>
-                </div>
-                <div class="alert alert-warning mt-3 mb-0 small">
-                    <i class="bi bi-exclamation-triangle"></i>
-                    {{ t.factory_reset_warn }}
-                </div>
+
+            <hr>
+
+            <button type="button" class="btn btn--quiet-danger btn--block" id="factory-reset">
+                {{ icon('rotate') }} {{ t.factory_reset }}
+            </button>
+            <div class="alert alert--warning">
+                {{ icon('alert') }}<span>{{ t.factory_reset_warn }}</span>
             </div>
         </div>
-    </div>
+    </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-function saveWeather() {
-    fetch('/api/config', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
+(function () {
+    'use strict';
+
+    function saveConfig(btn, body) {
+        var restore = V.busy(btn);
+        return V.api('/api/config', { method: 'POST', body: body })
+            .then(function () { V.toast(V.t('saved'), 'success'); })
+            .catch(V.fail)
+            .then(restore);
+    }
+
+    /* ── Weather ────────────────────────────────────────────────────────── */
+
+    document.getElementById('save-weather').addEventListener('click', function () {
+        saveConfig(this, {
             weather_api_key: document.getElementById('s-weather-key').value,
             weather_city: document.getElementById('s-weather-city').value,
-            weather_units: document.getElementById('s-weather-units').value,
-        })
-    }).then(r => r.json()).then(d => {
-        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
+            weather_units: document.getElementById('s-weather-units').value
+        });
     });
-}
 
-function testWeather() {
-    const div = document.getElementById('weather-test-result');
-    div.innerHTML = '<span class="text-muted">{{ t.loading }}</span>';
-    fetch('/api/weather').then(r => r.json()).then(d => {
-        if (d.error) {
-            div.innerHTML = `<span class="text-danger">${d.error}</span>`;
-        } else {
-            div.innerHTML = `<span class="text-success">${d.city}: ${d.temp}° ${d.description}</span>`;
-        }
-    }).catch(e => { div.innerHTML = `<span class="text-danger">${e}</span>`; });
-}
-
-function saveCalendar() {
-    fetch('/api/config', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ calendar_ical_url: document.getElementById('s-cal-url').value })
-    }).then(r => r.json()).then(d => {
-        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
+    document.getElementById('test-weather').addEventListener('click', function () {
+        var out = document.getElementById('weather-test-result');
+        var restore = V.busy(this);
+        out.className = 'alert mt-2';
+        out.textContent = V.t('loading');
+        V.api('/api/weather')
+            .then(function (d) {
+                out.className = 'alert alert--success mt-2';
+                out.textContent = d.city + ': ' + d.temp + '° ' + (d.description || '');
+            })
+            .catch(function (err) {
+                out.className = 'alert alert--danger mt-2';
+                out.textContent = err.message;
+            })
+            .then(restore);
     });
-}
 
-function testCalendar() {
-    const div = document.getElementById('cal-test-result');
-    div.innerHTML = '<span class="text-muted">{{ t.loading }}</span>';
-    fetch('/api/calendar').then(r => r.json()).then(d => {
-        const count = d.events ? d.events.length : 0;
-        div.innerHTML = `<span class="text-success">${d.today.date_str} (${d.today.weekday}) - ${count} events</span>`;
-    }).catch(e => { div.innerHTML = `<span class="text-danger">${e}</span>`; });
-}
+    /* ── Calendar ───────────────────────────────────────────────────────── */
 
-function savePhotoSettings() {
-    const rotation = parseInt(document.getElementById('s-rotation').value);
-    const fitMode = document.getElementById('s-fit-mode').value;
-    Promise.all([
-        fetch('/api/photo/rotation', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({rotation})
-        }),
-        fetch('/api/photo/fit_mode', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({fit_mode: fitMode})
-        })
-    ]).then(() => showToast('OK', 'success'));
-}
+    document.getElementById('save-calendar').addEventListener('click', function () {
+        saveConfig(this, { calendar_ical_url: document.getElementById('s-cal-url').value });
+    });
 
-function testGDriveConnect() {
-    // Load GIS library and trigger sign-in
-    if (typeof google !== 'undefined' && google.accounts) {
-        _doGDriveSignIn();
-        return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.onload = _doGDriveSignIn;
-    script.onerror = () => showToast('Failed to load Google Sign-In', 'danger');
-    document.head.appendChild(script);
-}
-function _doGDriveSignIn() {
-    const clientId = document.getElementById('s-gdrive-id').value;
-    if (!clientId) { showToast('Enter Client ID first', 'warning'); return; }
-    const client = google.accounts.oauth2.initCodeClient({
-        client_id: clientId,
-        scope: 'https://www.googleapis.com/auth/drive.readonly',
-        ux_mode: 'popup',
-        callback: (response) => {
-            if (response.error) { showToast('Error: ' + response.error, 'danger'); return; }
-            fetch('/api/gdrive/auth', {
+    document.getElementById('test-calendar').addEventListener('click', function () {
+        var out = document.getElementById('cal-test-result');
+        var restore = V.busy(this);
+        out.className = 'alert';
+        out.textContent = V.t('loading');
+        V.api('/api/calendar')
+            .then(function (d) {
+                var count = (d.events || []).length;
+                var today = d.today || {};
+                out.className = 'alert alert--success';
+                out.textContent = (today.date_str || '') + ' (' + (today.weekday || '') + ') — ' +
+                                  count + ' ' + V.t('events');
+            })
+            .catch(function (err) {
+                out.className = 'alert alert--danger';
+                out.textContent = err.message;
+            })
+            .then(restore);
+    });
+
+    /* ── Photo defaults ─────────────────────────────────────────────────── */
+
+    document.getElementById('save-photo').addEventListener('click', function () {
+        var restore = V.busy(this);
+        Promise.all([
+            V.api('/api/photo/rotation', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ code: response.code })
-            }).then(r => r.json()).then(d => {
-                if (d.success) {
-                    showToast('Google Drive connected!', 'success');
-                    location.reload();
-                } else showToast(d.error || 'Failed', 'danger');
-            });
-        }
+                body: { rotation: parseInt(document.getElementById('s-rotation').value, 10) }
+            }),
+            V.api('/api/photo/fit_mode', {
+                method: 'POST',
+                body: { fit_mode: document.getElementById('s-fit-mode').value }
+            })
+        ])
+            .then(function () { V.toast(V.t('saved'), 'success'); })
+            .catch(V.fail)
+            .then(restore);
     });
-    client.requestCode();
-}
 
-function saveGDrive() {
-    fetch('/api/config', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
+    /* ── Google Drive ───────────────────────────────────────────────────── */
+
+    document.getElementById('save-gdrive').addEventListener('click', function () {
+        saveConfig(this, {
             gdrive_client_id: document.getElementById('s-gdrive-id').value,
-            gdrive_client_secret: document.getElementById('s-gdrive-secret').value,
-        })
-    }).then(r => r.json()).then(d => {
-        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
+            gdrive_client_secret: document.getElementById('s-gdrive-secret').value
+        });
     });
-}
 
-function showQR() {
-    fetch('/api/page/qr', {method: 'POST'}).then(r => r.json()).then(d => {
-        showToast(d.success ? 'OK' : d.error, d.success ? 'success' : 'danger');
-    });
-}
+    var connectGdrive = document.getElementById('connect-gdrive');
+    if (connectGdrive) {
+        connectGdrive.addEventListener('click', function () {
+            var clientId = document.getElementById('s-gdrive-id').value.trim();
+            if (!clientId) { V.toast(V.t('gdrive_need_client_id'), 'warning'); return; }
 
-function resetAll() {
-    if (!confirm('{{ t.confirm_reset }}')) return;
-    fetch('/api/reset', {method: 'POST'}).then(r => r.json()).then(d => {
-        if (d.success) {
-            showToast('OK', 'success');
-            setTimeout(() => window.location.href = '/setup', 2000);
-        } else {
-            showToast(d.error, 'danger');
-        }
+            var start = function () {
+                window.google.accounts.oauth2.initCodeClient({
+                    client_id: clientId,
+                    scope: 'https://www.googleapis.com/auth/drive.readonly',
+                    ux_mode: 'popup',
+                    callback: function (response) {
+                        if (response.error) { V.toast(response.error, 'danger'); return; }
+                        V.api('/api/gdrive/auth', { method: 'POST', body: { code: response.code } })
+                            .then(function () {
+                                V.toast('Google Drive ' + V.t('connected'), 'success');
+                                window.location.reload();
+                            })
+                            .catch(V.fail);
+                    }
+                }).requestCode();
+            };
+
+            if (window.google && window.google.accounts) { start(); return; }
+            var s = document.createElement('script');
+            s.src = 'https://accounts.google.com/gsi/client';
+            s.onload = start;
+            s.onerror = function () { V.toast(V.t('gdrive_offline'), 'danger'); };
+            document.head.appendChild(s);
+        });
+    }
+
+    /* ── System ─────────────────────────────────────────────────────────── */
+
+    document.getElementById('show-qr').addEventListener('click', function () {
+        var restore = V.busy(this);
+        V.api('/api/page/qr', { method: 'POST' })
+            .then(function () { V.toast(V.t('qr_shown'), 'success'); })
+            .catch(V.fail)
+            .then(restore);
     });
-}
+
+    document.getElementById('system-update').addEventListener('click', function () {
+        var btn = this;
+        V.confirm(V.t('confirm_update'), { title: V.t('update_software') }).then(function (ok) {
+            if (!ok) return;
+            var out = document.getElementById('update-output');
+            var pre = out.querySelector('pre');
+            var restore = V.busy(btn);
+            out.classList.remove('hidden');
+            pre.textContent = V.t('loading') + '\n';
+
+            V.api('/api/system/update', { method: 'POST' })
+                .then(function (d) {
+                    pre.textContent = d.output || V.t('done');
+                    V.toast(V.t('update_ok'), 'success');
+                    setTimeout(function () { window.location.reload(); }, 5000);
+                })
+                .catch(function (err) { pre.textContent = err.message; V.fail(err); })
+                .then(restore);
+        });
+    });
+
+    document.getElementById('system-reboot').addEventListener('click', function () {
+        V.confirm(V.t('confirm_reboot'), { title: V.t('reboot'), danger: true }).then(function (ok) {
+            if (!ok) return;
+            fetch('/api/system/reboot', { method: 'POST' });
+            V.toast(V.t('rebooting'), 'info', { duration: 15000 });
+        });
+    });
+
+    document.getElementById('system-shutdown').addEventListener('click', function () {
+        V.confirm(V.t('confirm_shutdown'), { title: V.t('shutdown'), danger: true }).then(function (ok) {
+            if (!ok) return;
+            fetch('/api/system/shutdown', { method: 'POST' });
+            V.toast(V.t('shutting_down'), 'warning', { duration: 15000 });
+        });
+    });
+
+    document.getElementById('factory-reset').addEventListener('click', function () {
+        V.confirm(V.t('confirm_reset'), {
+            title: V.t('factory_reset'), confirmText: V.t('factory_reset'), danger: true
+        }).then(function (ok) {
+            if (!ok) return;
+            V.api('/api/reset', { method: 'POST' })
+                .then(function () {
+                    V.toast(V.t('reset_done'), 'success');
+                    setTimeout(function () { window.location.href = '/setup'; }, 2000);
+                })
+                .catch(V.fail);
+        });
+    });
+})();
 </script>
 {% endblock %}

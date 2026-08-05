@@ -1,187 +1,137 @@
-/* Vignette - Client-side JavaScript */
+/* ===========================================================================
+   Vignette — shared application actions
+   ---------------------------------------------------------------------------
+   Thin wrappers over the device API plus the handful of display actions that
+   more than one page needs. Page-specific behaviour lives in its template.
+   =========================================================================== */
 
-/**
- * Get i18n string from the global translations object.
- * Falls back to the key itself if not found.
- */
-function _t(key) {
-    return (window.VIGNETTE_I18N && window.VIGNETTE_I18N[key]) || key;
-}
+(function (window, document) {
+    'use strict';
 
-/**
- * Show a toast notification.
- */
-function showToast(message, type) {
-    type = type || 'info';
-    var container = document.getElementById('toast-container');
-    if (!container) return;
+    var V = window.V = window.V || {};
 
-    var toastId = 'toast-' + Date.now();
-    var bgClass = {
-        'success': 'bg-success',
-        'danger': 'bg-danger',
-        'warning': 'bg-warning text-dark',
-        'info': 'bg-info text-dark',
-    }[type] || 'bg-info text-dark';
+    /* ── API helper ─────────────────────────────────────────────────────── */
 
-    var html =
-        '<div id="' + toastId + '" class="toast align-items-center ' + bgClass + ' text-white border-0" role="alert">' +
-            '<div class="d-flex">' +
-                '<div class="toast-body">' + message + '</div>' +
-                '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>' +
-            '</div>' +
-        '</div>';
-    container.insertAdjacentHTML('beforeend', html);
+    /**
+     * Call the device API and resolve with the parsed JSON body.
+     *
+     * Rejects with an Error carrying the server's `error` field when there is
+     * one, so callers can surface a real message instead of "[object Object]".
+     * A 401 means the session expired — bounce to the login page rather than
+     * showing a toast the user cannot act on.
+     */
+    V.api = function (path, options) {
+        options = options || {};
+        var init = { method: options.method || 'GET', cache: 'no-store' };
 
-    var toastEl = document.getElementById(toastId);
-    var toast = new bootstrap.Toast(toastEl, { delay: 4000 });
-    toast.show();
-
-    toastEl.addEventListener('hidden.bs.toast', function() { toastEl.remove(); });
-}
-
-/**
- * Display an image on the e-paper display.
- */
-function displayImage(filename) {
-    showToast(_t('sending_to_epaper'), 'info');
-
-    fetch('/api/display', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: filename })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.success) {
-            showToast(_t('displayed_ok'), 'success');
-        } else {
-            showToast(data.error, 'danger');
+        if (options.body !== undefined && !(options.body instanceof FormData)) {
+            init.headers = { 'Content-Type': 'application/json' };
+            init.body = JSON.stringify(options.body);
+        } else if (options.body instanceof FormData) {
+            init.body = options.body;
         }
-    })
-    .catch(function(err) {
-        showToast('Error: ' + err, 'danger');
-    });
-}
 
-/**
- * Clear the e-paper display.
- */
-function clearDisplay() {
-    if (!confirm(_t('confirm_clear'))) return;
+        return fetch(path, init).then(function (res) {
+            return res.text().then(function (text) {
+                var data = {};
+                if (text) {
+                    try { data = JSON.parse(text); }
+                    catch (e) { data = { error: text.slice(0, 300) }; }
+                }
 
-    showToast(_t('clearing'), 'info');
-    fetch('/api/clear', { method: 'POST' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.success) showToast('OK', 'success');
-            else showToast(data.error, 'danger');
-        })
-        .catch(function(err) { showToast('Error: ' + err, 'danger'); });
-}
+                if (res.status === 401) {
+                    window.location.href = data.redirect || '/auth/login';
+                    throw new Error(data.error || 'Unauthorized');
+                }
+                if (!res.ok || data.error) {
+                    throw new Error(data.error || ('HTTP ' + res.status));
+                }
+                return data;
+            });
+        });
+    };
 
-/**
- * Put display to sleep.
- */
-function sleepDisplay() {
-    fetch('/api/sleep', { method: 'POST' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.success) showToast(_t('sleep_ok'), 'success');
-            else showToast(data.error, 'danger');
-        })
-        .catch(function(err) { showToast('Error: ' + err, 'danger'); });
-}
+    /** Toast the message of a rejected V.api() call. */
+    V.fail = function (err) {
+        V.toast((err && err.message) || String(err), 'danger');
+    };
 
-/**
- * Photo navigation: next photo.
- */
-function photoNext() {
-    showToast(_t('loading_next'), 'info');
-    fetch('/api/photo/next', { method: 'POST' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.success) {
-                updatePhotoUI(data.photo);
-                showToast('OK', 'success');
-            } else {
-                showToast(data.error || 'Failed', 'danger');
-            }
-        })
-        .catch(function(err) { showToast('Error: ' + err, 'danger'); });
-}
+    /* ── Display actions ────────────────────────────────────────────────── */
 
-/**
- * Photo navigation: previous photo.
- */
-function photoPrev() {
-    showToast(_t('loading_prev'), 'info');
-    fetch('/api/photo/prev', { method: 'POST' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.success) {
-                updatePhotoUI(data.photo);
-                showToast('OK', 'success');
-            } else {
-                showToast(data.error || 'Failed', 'danger');
-            }
-        })
-        .catch(function(err) { showToast('Error: ' + err, 'danger'); });
-}
+    /** Push a stored photo to the e-paper panel. */
+    V.displayImage = function (filename, btn) {
+        var restore = btn ? V.busy(btn, V.t('updating', 'Updating')) : null;
+        var pending = V.toast(V.t('sending_to_epaper'), 'info', { duration: 0 });
 
-/**
- * Photo navigation: show latest photo.
- */
-function photoLatest() {
-    showToast(_t('loading_latest'), 'info');
-    fetch('/api/photo/latest', { method: 'POST' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.success) {
-                updatePhotoUI(data.photo);
-                showToast('OK', 'success');
-            } else {
-                showToast(data.error || 'Failed', 'danger');
-            }
-        })
-        .catch(function(err) { showToast('Error: ' + err, 'danger'); });
-}
+        return V.api('/api/display', { method: 'POST', body: { filename: filename } })
+            .then(function () {
+                V.toast(V.t('displayed_ok'), 'success');
+                document.dispatchEvent(new CustomEvent('vignette:displayed', {
+                    detail: { filename: filename }
+                }));
+            })
+            .catch(V.fail)
+            .then(function () {
+                pending.dismiss();
+                if (restore) restore();
+            });
+    };
 
-/**
- * Send test pattern to e-paper.
- */
-function displayTest() {
-    if (!confirm(_t('confirm_test'))) return;
+    V.clearDisplay = function () {
+        return V.confirm(V.t('confirm_clear'), {
+            title: V.t('clear'),
+            confirmText: V.t('clear'),
+            danger: true
+        }).then(function (ok) {
+            if (!ok) return;
+            var pending = V.toast(V.t('clearing'), 'info', { duration: 0 });
+            return V.api('/api/clear', { method: 'POST' })
+                .then(function () { V.toast(V.t('cleared_ok', 'Display cleared'), 'success'); })
+                .catch(V.fail)
+                .then(function () { pending.dismiss(); });
+        });
+    };
 
-    showToast(_t('sending_test'), 'info');
-    fetch('/api/display/test', { method: 'POST' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.success) showToast('OK', 'success');
-            else showToast(data.error, 'danger');
-        })
-        .catch(function(err) { showToast('Error: ' + err, 'danger'); });
-}
+    V.sleepDisplay = function () {
+        return V.api('/api/sleep', { method: 'POST' })
+            .then(function () { V.toast(V.t('sleep_ok'), 'success'); })
+            .catch(V.fail);
+    };
 
-/**
- * Update photo navigation UI after a navigation action.
- */
-function updatePhotoUI(photo) {
-    if (!photo) return;
+    V.displayTest = function () {
+        return V.confirm(V.t('confirm_test'), {
+            title: V.t('test_pattern'),
+            confirmText: V.t('send', 'Send')
+        }).then(function (ok) {
+            if (!ok) return;
+            var pending = V.toast(V.t('sending_test'), 'info', { duration: 0 });
+            return V.api('/api/display/test', { method: 'POST' })
+                .then(function () { V.toast(V.t('displayed_ok'), 'success'); })
+                .catch(V.fail)
+                .then(function () { pending.dismiss(); });
+        });
+    };
 
-    var indexEl = document.getElementById('photo-index');
-    var totalEl = document.getElementById('photo-total');
-    var previewDiv = document.getElementById('photo-preview');
+    /* ── Formatting ─────────────────────────────────────────────────────── */
 
-    if (indexEl) indexEl.textContent = photo.current_index + 1;
-    if (totalEl) totalEl.textContent = photo.total;
+    V.formatBytes = function (bytes) {
+        if (!bytes && bytes !== 0) return '—';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    };
 
-    if (previewDiv && photo.current_image) {
-        previewDiv.innerHTML =
-            '<div class="epaper-frame">' +
-                '<img src="/output/' + photo.current_image + '" class="img-fluid rounded" ' +
-                     'alt="Current" style="max-height: 200px; object-fit: contain;">' +
-            '</div>' +
-            '<p class="mt-2 mb-0"><strong>' + photo.current_image + '</strong></p>';
-    }
-}
+    /** Cache-busting query for an image whose bytes change behind a fixed URL. */
+    V.bust = function (url) {
+        return url + (url.indexOf('?') === -1 ? '?' : '&') + 't=' + Date.now();
+    };
+
+    /* ── Language ───────────────────────────────────────────────────────── */
+
+    V.setLanguage = function (lang) {
+        return V.api('/api/lang', { method: 'POST', body: { lang: lang } })
+            .then(function () { window.location.reload(); })
+            .catch(V.fail);
+    };
+
+})(window, document);

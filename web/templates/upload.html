@@ -1,146 +1,158 @@
 {% extends "base.html" %}
-{% block title %}Vignette - {{ t.upload }}{% endblock %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — {{ t.upload }}{% endblock %}
 
 {% block content %}
-<h2 class="mb-4"><i class="bi bi-upload"></i> {{ t.upload }}</h2>
+<div class="page-head">
+    <div class="page-head__text">
+        <h1>{{ t.upload }}</h1>
+        <p>{{ t.upload_sub }}</p>
+    </div>
+    <div class="page-head__actions">
+        <a class="btn btn--ghost" href="/gallery">{{ icon('gallery') }} {{ t.gallery }}</a>
+    </div>
+</div>
 
-<div class="row g-4">
-    <!-- Upload Area -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">{{ t.select_image }}</div>
-            <div class="card-body">
-                <div id="drop-zone" class="drop-zone text-center p-5 border border-2 border-dashed rounded">
-                    <i class="bi bi-cloud-upload display-4 text-muted"></i>
-                    <p class="mt-2 text-muted">{{ t.drag_or_click }}</p>
-                    <p class="small text-muted">PNG, JPG, JPEG, BMP, GIF</p>
-                    <input type="file" id="file-input" accept="image/*" class="d-none">
+<div class="stack" style="gap:16px;">
+
+    <section class="card">
+        <div class="card__body">
+            <div class="dropzone" id="drop-zone" role="button" tabindex="0"
+                 aria-label="{{ t.drag_or_click }}">
+                {{ icon('upload', 'icon-xl') }}
+                <p class="strong mb-0">{{ t.drag_or_click }}</p>
+                <p class="tiny dim mb-0">PNG · JPG · BMP · GIF — 800 × 480 {{ t.recommended }}</p>
+                <input type="file" id="file-input" accept="image/*" class="sr-only">
+            </div>
+
+            <div class="grid mt-2" style="grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="field mb-0">
+                    <label class="label" for="upload-rotation">{{ t.rotation }}</label>
+                    <select class="select" id="upload-rotation">
+                        {# Mirrors the saved default so the form and the device agree. #}
+                        <option value="0"   {% if config.photo_rotation == 0 %}selected{% endif %}>0° ({{ t.normal }})</option>
+                        <option value="90"  {% if config.photo_rotation == 90 %}selected{% endif %}>90° CW</option>
+                        <option value="180" {% if config.photo_rotation == 180 %}selected{% endif %}>180°</option>
+                        <option value="270" {% if config.photo_rotation == 270 %}selected{% endif %}>270° CW</option>
+                    </select>
                 </div>
-
-                <!-- Rotation & Fit Mode -->
-                <div class="row mt-3">
-                    <div class="col-6">
-                        <label class="form-label small">{{ t.rotation }}</label>
-                        <select class="form-select form-select-sm" id="upload-rotation">
-                            <option value="0">0° ({{ t.normal }})</option>
-                            <option value="90">90° CW</option>
-                            <option value="180">180°</option>
-                            <option value="270">270° CW</option>
-                        </select>
-                    </div>
-                    <div class="col-6">
-                        <label class="form-label small">{{ t.fit_mode }}</label>
-                        <select class="form-select form-select-sm" id="upload-fit-mode">
-                            <option value="fit" {% if config.photo_fit_mode == 'fit' %}selected{% endif %}>{{ t.fit_letterbox }}</option>
-                            <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>{{ t.stretch_fill }}</option>
-                        </select>
-                    </div>
+                <div class="field mb-0">
+                    <label class="label" for="upload-fit-mode">{{ t.fit_mode }}</label>
+                    <select class="select" id="upload-fit-mode">
+                        <option value="fit"     {% if config.photo_fit_mode != 'stretch' %}selected{% endif %}>{{ t.fit_letterbox }}</option>
+                        <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>{{ t.stretch_fill }}</option>
+                    </select>
                 </div>
+            </div>
 
-                <div id="upload-progress" class="mt-3 d-none">
-                    <div class="progress">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated"
-                             role="progressbar" style="width: 100%">{{ t.uploading }}</div>
-                    </div>
+            <div class="mt-2 hidden" id="upload-progress">
+                <div class="progress"><div class="progress__bar progress__bar--striped" style="width:100%"></div></div>
+                <p class="tiny dim center mt-1 mb-0">{{ t.uploading }}</p>
+            </div>
+
+            <div class="mt-2 hidden" id="upload-result"></div>
+        </div>
+    </section>
+
+    <!-- Before / after. The panel only renders six colours, so showing the
+         quantised result next to the source is the honest preview. -->
+    <section class="card hidden" id="preview-card">
+        <div class="card__head">
+            {{ icon('image') }}<h2>{{ t.preview }}</h2>
+            <span class="spacer"></span>
+            <span class="badge truncate" id="preview-filename" style="max-width:min(52vw,320px)"></span>
+        </div>
+        <div class="card__body">
+            <div class="grid grid-2">
+                <div>
+                    <p class="label">{{ t.original }}</p>
+                    <div class="epaper"><div class="epaper__screen">
+                        <img id="preview-original" alt="{{ t.original }}">
+                    </div></div>
                 </div>
-
-                <div id="upload-result" class="mt-3 d-none">
-                    <div class="alert" role="alert"></div>
+                <div>
+                    <p class="label">{{ t.epaper_preview }}</p>
+                    <div class="epaper"><div class="epaper__screen">
+                        <img id="preview-quantized" alt="{{ t.epaper_preview }}">
+                    </div></div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Preview Area -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">{{ t.preview }}</div>
-            <div class="card-body">
-                <div id="preview-container" class="text-center">
-                    <p class="text-muted">{{ t.upload_preview_hint }}</p>
-                </div>
-
-                <div id="preview-actions" class="d-none mt-3">
-                    <h6>{{ t.original }}:</h6>
-                    <div class="epaper-frame mb-3">
-                        <img id="preview-original" class="img-fluid" alt="Original">
-                    </div>
-
-                    <h6>{{ t.epaper_preview }}:</h6>
-                    <div class="epaper-frame mb-3">
-                        <img id="preview-quantized" class="img-fluid" alt="E-paper preview">
-                    </div>
-
-                    <div class="d-grid gap-2">
-                        <button id="btn-display" class="btn btn-primary" onclick="displayUploadedImage()">
-                            <i class="bi bi-display"></i> {{ t.display_on_epaper }}
-                        </button>
-                    </div>
-                </div>
-            </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="btn-display">
+                {{ icon('display') }} {{ t.display_on_epaper }}
+            </button>
+            <a class="btn btn--subtle" href="/gallery">{{ icon('gallery') }} {{ t.gallery }}</a>
         </div>
-    </div>
+    </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-const dropZone = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
-let uploadedFilename = null;
+(function () {
+    'use strict';
 
-dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-    if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
-});
-fileInput.addEventListener('change', () => { if (fileInput.files.length) uploadFile(fileInput.files[0]); });
+    var zone       = document.getElementById('drop-zone');
+    var input      = document.getElementById('file-input');
+    var progress   = document.getElementById('upload-progress');
+    var result     = document.getElementById('upload-result');
+    var card       = document.getElementById('preview-card');
+    var uploaded   = null;
 
-function uploadFile(file) {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('rotation', document.getElementById('upload-rotation').value);
-    formData.append('fit_mode', document.getElementById('upload-fit-mode').value);
+    zone.addEventListener('click', function () { input.click(); });
+    zone.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+    });
+    zone.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        zone.classList.add('is-over');
+    });
+    zone.addEventListener('dragleave', function () { zone.classList.remove('is-over'); });
+    zone.addEventListener('drop', function (e) {
+        e.preventDefault();
+        zone.classList.remove('is-over');
+        if (e.dataTransfer.files.length) upload(e.dataTransfer.files[0]);
+    });
+    input.addEventListener('change', function () {
+        if (input.files.length) upload(input.files[0]);
+        input.value = '';
+    });
 
-    document.getElementById('upload-progress').classList.remove('d-none');
-    document.getElementById('upload-result').classList.add('d-none');
+    function showResult(message, type) {
+        result.className = 'mt-2 alert alert--' + type;
+        result.textContent = message;
+        result.classList.remove('hidden');
+    }
 
-    fetch('/api/upload', { method: 'POST', body: formData })
-        .then(r => r.json())
-        .then(data => {
-            document.getElementById('upload-progress').classList.add('d-none');
-            const resultDiv = document.getElementById('upload-result');
-            const alertDiv = resultDiv.querySelector('.alert');
-            resultDiv.classList.remove('d-none');
+    function upload(file) {
+        var form = new FormData();
+        form.append('file', file);
+        form.append('rotation', document.getElementById('upload-rotation').value);
+        form.append('fit_mode', document.getElementById('upload-fit-mode').value);
 
-            if (data.success) {
-                alertDiv.className = 'alert alert-success';
-                alertDiv.textContent = data.message;
-                uploadedFilename = data.filename;
-                showPreview(data.filename);
-            } else {
-                alertDiv.className = 'alert alert-danger';
-                alertDiv.textContent = data.error;
-            }
-        })
-        .catch(err => {
-            document.getElementById('upload-progress').classList.add('d-none');
-            showToast('Upload failed: ' + err, 'danger');
-        });
-}
+        progress.classList.remove('hidden');
+        result.classList.add('hidden');
 
-function showPreview(filename) {
-    document.getElementById('preview-container').classList.add('d-none');
-    document.getElementById('preview-actions').classList.remove('d-none');
-    document.getElementById('preview-original').src = '/output/' + filename;
-    document.getElementById('preview-quantized').src = '/api/preview/' + filename;
-}
+        V.api('/api/upload', { method: 'POST', body: form })
+            .then(function (data) {
+                uploaded = data.filename;
+                showResult(data.message || V.t('upload_complete'), 'success');
+                document.getElementById('preview-filename').textContent = data.filename;
+                document.getElementById('preview-original').src =
+                    '/output/' + encodeURIComponent(data.filename);
+                document.getElementById('preview-quantized').src =
+                    '/api/preview/' + encodeURIComponent(data.filename);
+                card.classList.remove('hidden');
+                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            })
+            .catch(function (err) { showResult(err.message, 'danger'); })
+            .then(function () { progress.classList.add('hidden'); });
+    }
 
-function displayUploadedImage() {
-    if (uploadedFilename) displayImage(uploadedFilename);
-}
+    document.getElementById('btn-display').addEventListener('click', function () {
+        if (uploaded) V.displayImage(uploaded, this);
+    });
+})();
 </script>
 {% endblock %}
