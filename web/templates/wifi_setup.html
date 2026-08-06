@@ -1,777 +1,478 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vignette - WiFi Setup</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 420px;
-        }
-
-        /* ── Brand Header ─────────────────────── */
-        .brand {
-            text-align: center;
-            margin-bottom: 24px;
-        }
-
-        .brand-icon {
-            width: 56px;
-            height: 56px;
-            margin: 0 auto 12px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.15);
-        }
-
-        .brand-icon svg {
-            width: 32px;
-            height: 32px;
-            fill: #a78bfa;
-        }
-
-        .brand h1 {
-            font-size: 26px;
-            font-weight: 700;
-            color: #fff;
-            letter-spacing: -0.5px;
-        }
-
-        .brand p {
-            font-size: 14px;
-            color: rgba(255,255,255,0.55);
-            margin-top: 4px;
-        }
-
-        /* ── Card ─────────────────────────────── */
-        .card {
-            background: rgba(255,255,255,0.06);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 28px 24px;
-            box-shadow: 0 24px 64px rgba(0,0,0,0.4);
-        }
-
-        /* ── Phase indicator ─────────────────── */
-        .steps {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 24px;
-        }
-
-        .step {
-            flex: 1;
-            height: 4px;
-            border-radius: 2px;
-            background: rgba(255,255,255,0.12);
-            transition: background 0.4s ease;
-        }
-
-        .step.active {
-            background: #a78bfa;
-        }
-
-        .step.done {
-            background: #34d399;
-        }
-
-        /* ── Form Fields ─────────────────────── */
-        .field {
-            margin-bottom: 18px;
-        }
-
-        .field label {
-            display: block;
-            font-size: 13px;
-            font-weight: 600;
-            color: rgba(255,255,255,0.7);
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .field select,
-        .field input[type="text"],
-        .field input[type="password"] {
-            width: 100%;
-            padding: 14px 16px;
-            font-size: 16px;
-            color: #fff;
-            background: rgba(255,255,255,0.08);
-            border: 1.5px solid rgba(255,255,255,0.15);
-            border-radius: 12px;
-            outline: none;
-            transition: border-color 0.25s, background 0.25s;
-            -webkit-appearance: none;
-            appearance: none;
-        }
-
-        .field select {
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23a78bfa' d='M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 16px center;
-            padding-right: 40px;
-        }
-
-        .field select option {
-            background: #1e1b4b;
-            color: #fff;
-        }
-
-        .field input:focus,
-        .field select:focus {
-            border-color: #a78bfa;
-            background: rgba(255,255,255,0.12);
-        }
-
-        .field input::placeholder {
-            color: rgba(255,255,255,0.3);
-        }
-
-        .pass-wrap {
-            position: relative;
-        }
-
-        .pass-wrap input {
-            padding-right: 52px;
-        }
-
-        .toggle-pass {
-            position: absolute;
-            right: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
-            font-size: 18px;
-            cursor: pointer;
-            color: rgba(255,255,255,0.45);
-            padding: 4px;
-            line-height: 1;
-            transition: color 0.2s;
-        }
-
-        .toggle-pass:hover {
-            color: rgba(255,255,255,0.75);
-        }
-
-        .toggle-row {
-            text-align: right;
-            margin-top: 6px;
-        }
-
-        .manual-toggle {
-            font-size: 12px;
-            color: #a78bfa;
-            text-decoration: none;
-            cursor: pointer;
-            transition: color 0.2s;
-        }
-
-        .manual-toggle:hover {
-            color: #c4b5fd;
-            text-decoration: underline;
-        }
-
-        /* ── Buttons ──────────────────────────── */
-        .btn {
-            display: block;
-            width: 100%;
-            padding: 15px;
-            font-size: 16px;
-            font-weight: 600;
-            color: #fff;
-            background: linear-gradient(135deg, #7c3aed, #a78bfa);
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: opacity 0.2s, transform 0.15s;
-            margin-top: 6px;
-            letter-spacing: 0.3px;
-        }
-
-        .btn:hover {
-            opacity: 0.9;
-            transform: translateY(-1px);
-        }
-
-        .btn:active {
-            transform: translateY(0);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .btn-success {
-            background: linear-gradient(135deg, #059669, #34d399);
-        }
-
-        /* ── Spinner ──────────────────────────── */
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-top-color: #fff;
-            border-radius: 50%;
-            animation: spin 0.7s linear infinite;
-            margin-right: 8px;
-            vertical-align: middle;
-        }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* ── Alerts ───────────────────────────── */
-        .alert {
-            margin-top: 16px;
-            padding: 14px 16px;
-            border-radius: 12px;
-            font-size: 13px;
-            line-height: 1.6;
-            text-align: center;
-        }
-
-        .alert-info {
-            background: rgba(59,130,246,0.15);
-            color: #93c5fd;
-            border: 1px solid rgba(59,130,246,0.2);
-        }
-
-        .alert-warning {
-            background: rgba(245,158,11,0.15);
-            color: #fcd34d;
-            border: 1px solid rgba(245,158,11,0.2);
-        }
-
-        .alert-danger {
-            background: rgba(239,68,68,0.15);
-            color: #fca5a5;
-            border: 1px solid rgba(239,68,68,0.2);
-        }
-
-        /* ── Connecting View (Phase 2) ────────── */
-        .connecting-view {
-            text-align: center;
-            padding: 20px 0 8px;
-        }
-
-        .connecting-animation {
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 20px;
-            position: relative;
-        }
-
-        .connecting-animation .ring {
-            position: absolute;
-            inset: 0;
-            border: 3px solid transparent;
-            border-top-color: #a78bfa;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        .connecting-animation .ring:nth-child(2) {
-            inset: 8px;
-            border-top-color: #7c3aed;
-            animation-duration: 1.5s;
-            animation-direction: reverse;
-        }
-
-        .connecting-animation .ring:nth-child(3) {
-            inset: 16px;
-            border-top-color: #c4b5fd;
-            animation-duration: 2s;
-        }
-
-        .connecting-animation .wifi-icon {
-            position: absolute;
-            inset: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .connecting-animation .wifi-icon svg {
-            width: 24px;
-            height: 24px;
-            fill: #a78bfa;
-        }
-
-        .connecting-view h3 {
-            color: #fff;
-            font-size: 18px;
-            margin-bottom: 6px;
-        }
-
-        .connecting-view .sub {
-            color: rgba(255,255,255,0.5);
-            font-size: 13px;
-            margin-bottom: 20px;
-        }
-
-        .countdown-bar {
-            width: 100%;
-            height: 4px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 2px;
-            overflow: hidden;
-            margin-bottom: 16px;
-        }
-
-        .countdown-bar .fill {
-            height: 100%;
-            background: linear-gradient(90deg, #7c3aed, #a78bfa);
-            border-radius: 2px;
-            transition: width 1s linear;
-        }
-
-        .countdown-text {
-            font-size: 12px;
-            color: rgba(255,255,255,0.4);
-        }
-
-        /* ── Redirect View (Phase 3) ──────────── */
-        .redirect-view {
-            text-align: center;
-            padding: 16px 0 8px;
-        }
-
-        .redirect-view .check-icon {
-            width: 64px;
-            height: 64px;
-            margin: 0 auto 16px;
-            background: rgba(52,211,153,0.15);
-            border: 2px solid rgba(52,211,153,0.3);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-
-        @keyframes popIn {
-            0% { transform: scale(0); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-
-        .redirect-view .check-icon svg {
-            width: 32px;
-            height: 32px;
-            fill: #34d399;
-        }
-
-        .redirect-view h3 {
-            color: #34d399;
-            font-size: 20px;
-            margin-bottom: 4px;
-        }
-
-        .redirect-view .ssid-name {
-            color: #fff;
-            font-size: 14px;
-            margin-bottom: 16px;
-        }
-
-        .redirect-view .ip-display {
-            display: inline-block;
-            background: rgba(167,139,250,0.15);
-            border: 1px solid rgba(167,139,250,0.25);
-            border-radius: 10px;
-            padding: 10px 20px;
-            margin-bottom: 16px;
-        }
-
-        .redirect-view .ip-display .label {
-            font-size: 11px;
-            color: rgba(255,255,255,0.45);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .redirect-view .ip-display .ip {
-            font-size: 22px;
-            font-weight: 700;
-            color: #a78bfa;
-            font-family: "SF Mono", "Fira Code", monospace;
-        }
-
-        .redirect-view .hint {
-            font-size: 12px;
-            color: rgba(255,255,255,0.4);
-            line-height: 1.6;
-            margin-bottom: 16px;
-        }
-
-        /* ── Fallback View ────────────────────── */
-        .fallback-view {
-            text-align: center;
-            padding: 16px 0 8px;
-        }
-
-        .fallback-view .warn-icon {
-            width: 64px;
-            height: 64px;
-            margin: 0 auto 16px;
-            background: rgba(245,158,11,0.15);
-            border: 2px solid rgba(245,158,11,0.3);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .fallback-view .warn-icon svg {
-            width: 32px;
-            height: 32px;
-            fill: #fbbf24;
-        }
-
-        .fallback-view h3 {
-            color: #fbbf24;
-            font-size: 18px;
-            margin-bottom: 8px;
-        }
-
-        .fallback-view p {
-            color: rgba(255,255,255,0.55);
-            font-size: 13px;
-            line-height: 1.6;
-            margin-bottom: 16px;
-        }
-
-        .fallback-view .btn {
-            background: linear-gradient(135deg, #d97706, #f59e0b);
-        }
-
-        /* ── Footer ───────────────────────────── */
-        .footer {
-            text-align: center;
-            color: rgba(255,255,255,0.2);
-            font-size: 11px;
-            margin-top: 20px;
-        }
-
-        /* ── Utility ──────────────────────────── */
-        .hidden { display: none !important; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <!-- Brand -->
-        <div class="brand">
-            <img src="/static/img/vignette-logo.svg" alt="Vignette"
-                 style="height:68px; filter: brightness(0) invert(1); opacity:0.92; display:block; margin:0 auto 10px;">
-            <p>Connect your display to WiFi</p>
-        </div>
-
-        <!-- Card -->
-        <div class="card">
-            <!-- Step indicators -->
-            <div class="steps">
-                <div class="step active" id="step1"></div>
-                <div class="step" id="step2"></div>
-                <div class="step" id="step3"></div>
-            </div>
-
-            <!-- ═══ Phase 1: WiFi Form ═══ -->
-            <div id="wifi-form">
-                <div class="field">
-                    <label>WiFi Network</label>
-                    <select id="ssid-select" onchange="onSelectSSID()">
-                        <option value="">-- Loading networks... --</option>
-                    </select>
-                    <div id="ssid-manual-row" class="hidden" style="margin-top:8px;">
-                        <input type="text" id="ssid-manual" placeholder="Enter WiFi name" autocomplete="off">
-                    </div>
-                    <div class="toggle-row">
-                        <a class="manual-toggle" onclick="toggleManual();" id="toggle-link">Enter manually</a>
-                    </div>
-                </div>
-                <div class="field">
-                    <label>Password</label>
-                    <div class="pass-wrap">
-                        <input type="password" id="password" placeholder="WiFi password">
-                        <button class="toggle-pass" onclick="togglePass()" type="button">&#128065;</button>
-                    </div>
-                </div>
-                <button class="btn" onclick="connectWifi()" id="connect-btn">Connect</button>
-                <div id="status" class="hidden"></div>
-            </div>
-
-            <!-- ═══ Phase 2: Connecting Animation ═══ -->
-            <div id="connecting-view" class="connecting-view hidden">
-                <div class="connecting-animation">
-                    <div class="ring"></div>
-                    <div class="ring"></div>
-                    <div class="ring"></div>
-                    <div class="wifi-icon">
-                        <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
-                    </div>
-                </div>
-                <h3>Connecting to WiFi...</h3>
-                <p class="sub" id="connecting-ssid-text">Attempting to connect</p>
-                <div class="countdown-bar"><div class="fill" id="countdown-fill"></div></div>
-                <p class="countdown-text">Auto-redirect in <strong id="countdown-num">20</strong>s</p>
-            </div>
-
-            <!-- ═══ Phase 3a: Redirect / Success ═══ -->
-            <div id="redirect-view" class="redirect-view hidden">
-                <div class="check-icon">
-                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
-                </div>
-                <h3>Connection Sent!</h3>
-                <p class="ssid-name">Redirecting to control page...</p>
-                <div class="ip-display">
-                    <div class="label">New Address</div>
-                    <div class="ip" id="new-ip">loading...</div>
-                </div>
-                <p class="hint">
-                    If the page doesn't load, the password may be incorrect.<br>
-                    The hotspot will restart automatically for retry.
-                </p>
-                <a id="go-link" href="#" class="btn btn-success">Open Vignette Dashboard</a>
-            </div>
-
-            <!-- ═══ Fallback: Connection Failed ═══ -->
-            <div id="fallback-view" class="fallback-view hidden">
-                <div class="warn-icon">
-                    <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
-                </div>
-                <h3>Check Your E-Paper Display</h3>
-                <p>
-                    <strong>If WiFi connected successfully:</strong><br>
-                    The e-paper screen will show the new IP address.<br>
-                    Connect your phone to the same WiFi and open that address.
-                </p>
-                <p>
-                    <strong>If the password was wrong:</strong><br>
-                    The <strong>Vignette-Setup</strong> hotspot will restart automatically.<br>
-                    Reconnect to it and try again.
-                </p>
-                <button class="btn" onclick="location.reload()">Back to Setup</button>
-            </div>
-        </div>
-
-        <div class="footer">
-            <img src="/static/img/vignette-logo.svg" alt="Vignette"
-                 style="height:28px; filter: brightness(0) invert(1); opacity:0.25; display:block; margin:0 auto 4px;">
-            &copy; 2026 Teyra LLC</div>
+{% extends "_kiosk.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — Set up WiFi{% endblock %}
+
+{% block brand %}
+<p>Connect your display to WiFi</p>
+{% endblock %}
+
+{% block card %}
+<ol class="stepper" id="stepper">
+    <li class="stepper__step is-active" data-step="1">
+        <div class="stepper__bar"></div><span class="stepper__label">Network</span>
+    </li>
+    <li class="stepper__step" data-step="2">
+        <div class="stepper__bar"></div><span class="stepper__label">Connect</span>
+    </li>
+    <li class="stepper__step" data-step="3">
+        <div class="stepper__bar"></div><span class="stepper__label">Done</span>
+    </li>
+</ol>
+
+<!-- ═══ 1a — pick a network ═══════════════════════════════════════════════ -->
+<section id="view-pick">
+    <div class="row-between mb-2">
+        <h2 style="font-size:1.05rem;color:#fff;">Choose your WiFi</h2>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm" id="rescan-btn"
+                aria-label="Refresh network list">{{ icon('refresh') }}</button>
     </div>
 
-    <script>
-    var manualMode = false;
-    var REDIRECT_DELAY = 20; // seconds
+    <div class="field hidden" id="filter-wrap">
+        <input type="search" class="input" id="net-filter" placeholder="Search networks"
+               autocomplete="off" autocorrect="off" spellcheck="false">
+    </div>
 
-    function togglePass() {
-        var inp = document.getElementById('password');
-        inp.type = inp.type === 'password' ? 'text' : 'password';
-    }
+    <div class="netlist" id="netlist">
+        <p class="netlist__empty">Looking for networks…</p>
+    </div>
 
-    function toggleManual() {
-        manualMode = !manualMode;
-        document.getElementById('ssid-manual-row').classList.toggle('hidden', !manualMode);
-        document.getElementById('ssid-select').classList.toggle('hidden', manualMode);
-        document.getElementById('toggle-link').textContent = manualMode ? 'Select from list' : 'Enter manually';
-    }
+    <button type="button" class="netlist__item netlist__item--manual mt-1" id="manual-entry">
+        {{ icon('plus') }}
+        <span class="netlist__name">Join another network</span>
+        {{ icon('chevron-right') }}
+    </button>
+</section>
 
-    function onSelectSSID() {}
+<!-- ═══ 1b — password ═════════════════════════════════════════════════════ -->
+<section id="view-auth" class="hidden">
+    <button type="button" class="btn btn--ghost btn--sm mb-2" id="back-to-list"
+            style="padding-left:6px;">{{ icon('chevron-left') }} All networks</button>
 
-    function getSSID() {
-        if (manualMode) {
-            return document.getElementById('ssid-manual').value.trim();
-        }
-        return document.getElementById('ssid-select').value;
-    }
+    <div class="selected-net">
+        {{ icon('wifi') }}
+        <span class="netlist__name" id="selected-ssid">—</span>
+        <span id="selected-lock">{{ icon('lock') }}</span>
+    </div>
 
-    function loadNetworks() {
-        var sel = document.getElementById('ssid-select');
-        fetch('/api/wifi/scan')
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-            if (d.networks && d.networks.length) {
-                sel.innerHTML = '<option value="">-- Select WiFi network --</option>';
-                d.networks.forEach(function(n) {
-                    var opt = document.createElement('option');
-                    opt.value = n.ssid;
-                    var bars = parseInt(n.signal) > 70 ? '▰▰▰' : parseInt(n.signal) > 40 ? '▰▰▱' : '▰▱▱';
-                    opt.textContent = n.ssid + '  ' + bars + '  ' + n.signal;
-                    sel.appendChild(opt);
-                });
-            } else {
-                sel.innerHTML = '<option value="">-- No networks found --</option>';
-                toggleManual();
-            }
-        })
-        .catch(function() {
-            sel.innerHTML = '<option value="">-- Could not load --</option>';
-            toggleManual();
+    <div class="field hidden" id="manual-ssid-field">
+        <label class="label" for="ssid-manual">Network name</label>
+        <input type="text" class="input" id="ssid-manual" placeholder="Exact WiFi name"
+               autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+    </div>
+
+    <div class="field" id="password-field">
+        <label class="label" for="password">Password</label>
+        <div class="input-group">
+            <input type="password" class="input" id="password" placeholder="WiFi password"
+                   autocomplete="current-password" autocapitalize="none" spellcheck="false">
+            <button type="button" class="input-group__btn" id="toggle-pass"
+                    aria-label="Show password" aria-pressed="false">
+                <span id="pass-eye">{{ icon('eye') }}</span>
+                <span id="pass-eye-off" class="hidden">{{ icon('eye-off') }}</span>
+            </button>
+        </div>
+        <p class="hint">2.4 GHz networks only — the display has no 5 GHz radio.</p>
+    </div>
+
+    <div class="alert alert--info hidden mb-2" id="open-network-note">
+        {{ icon('info') }}
+        <span>This network is open, so no password is needed.</span>
+    </div>
+
+    <button type="button" class="btn btn--primary btn--block" id="connect-btn">
+        {{ icon('wifi') }} Connect
+    </button>
+
+    <div id="auth-status" class="alert alert--danger mt-2 hidden"></div>
+</section>
+
+<!-- ═══ 2 — connecting ════════════════════════════════════════════════════ -->
+<section id="view-connecting" class="status-view hidden">
+    <div class="status-view__orb">
+        <span class="ring"></span><span class="ring"></span><span class="ring"></span>
+        {{ icon('wifi') }}
+    </div>
+    <h2>Connecting…</h2>
+    <p id="connecting-detail">Joining your network</p>
+
+    <div class="countdown">
+        <div class="countdown__track"><div class="countdown__fill" id="countdown-fill"></div></div>
+        <p class="countdown__text">Checking back in <strong id="countdown-num">20</strong>s</p>
+    </div>
+
+    <ul class="tips">
+        <li>{{ icon('info') }}<span>The <strong>Vignette-Setup</strong> hotspot shuts down now — your phone should rejoin your home WiFi on its own.</span></li>
+        <li>{{ icon('display') }}<span>The new address also appears on the e-paper screen.</span></li>
+    </ul>
+
+    <button type="button" class="btn btn--subtle btn--block mt-2" id="check-now">
+        I'm back on my WiFi — check now
+    </button>
+</section>
+
+<!-- ═══ 3 — connected ═════════════════════════════════════════════════════ -->
+<section id="view-done" class="status-view hidden">
+    <div class="status-view__badge status-view__badge--ok">{{ icon('check') }}</div>
+    <h2 class="ok">You're connected</h2>
+    <p class="mb-2" id="done-ssid">Your display is on the network.</p>
+
+    <div class="address">
+        <span class="address__value" id="device-address">…</span>
+        <button type="button" class="address__copy" id="copy-address"
+                aria-label="Copy address">{{ icon('copy') }}</button>
+    </div>
+
+    <a id="open-dashboard" class="btn btn--success btn--block" href="#">
+        {{ icon('arrow-right') }} Open the dashboard
+    </a>
+    <p class="countdown__text mt-1">Bookmark this address to come back later.</p>
+</section>
+
+<!-- ═══ Fallback — couldn't confirm ═══════════════════════════════════════ -->
+<section id="view-fallback" class="status-view hidden">
+    <div class="status-view__badge status-view__badge--warn">{{ icon('alert') }}</div>
+    <h2 class="warn">Check the e-paper screen</h2>
+    <p class="mb-2">We couldn't reach the display from this phone — usually that just means
+       your phone hasn't rejoined your WiFi yet.</p>
+
+    <ul class="tips" style="border-top:0;padding-top:0;">
+        <li>{{ icon('check-circle') }}<span><strong>If it connected:</strong> the screen shows the new address. Join the same WiFi on your phone and open it.</span></li>
+        <li>{{ icon('wifi-off') }}<span><strong>If the password was wrong:</strong> the <strong>Vignette-Setup</strong> hotspot restarts by itself — reconnect to it and try again.</span></li>
+    </ul>
+
+    <div class="row mt-2" style="gap:8px;flex-wrap:nowrap;">
+        <button type="button" class="btn btn--subtle" style="flex:1;" id="retry-check">Check again</button>
+        <button type="button" class="btn btn--primary" style="flex:1;" id="start-over">Start over</button>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    'use strict';
+
+    var REDIRECT_DELAY = 20;   // seconds to wait for the phone to rejoin home WiFi
+    var POLL_ATTEMPTS  = 8;
+    var POLL_INTERVAL  = 3000;
+
+    var networks = [];
+    var selected = null;       // network object, or null when entered manually
+    var hostname = 'vignette';
+    var countdownTimer = null;
+
+    var el = {
+        stepper: document.getElementById('stepper'),
+        views: {
+            pick:       document.getElementById('view-pick'),
+            auth:       document.getElementById('view-auth'),
+            connecting: document.getElementById('view-connecting'),
+            done:       document.getElementById('view-done'),
+            fallback:   document.getElementById('view-fallback')
+        },
+        netlist:      document.getElementById('netlist'),
+        filterWrap:   document.getElementById('filter-wrap'),
+        filter:       document.getElementById('net-filter'),
+        selectedSsid: document.getElementById('selected-ssid'),
+        selectedLock: document.getElementById('selected-lock'),
+        manualField:  document.getElementById('manual-ssid-field'),
+        manualSsid:   document.getElementById('ssid-manual'),
+        passField:    document.getElementById('password-field'),
+        password:     document.getElementById('password'),
+        openNote:     document.getElementById('open-network-note'),
+        connectBtn:   document.getElementById('connect-btn'),
+        authStatus:   document.getElementById('auth-status'),
+        connDetail:   document.getElementById('connecting-detail'),
+        countFill:    document.getElementById('countdown-fill'),
+        countNum:     document.getElementById('countdown-num'),
+        doneSsid:     document.getElementById('done-ssid'),
+        address:      document.getElementById('device-address'),
+        openDash:     document.getElementById('open-dashboard')
+    };
+
+    /* ── Views and steps ────────────────────────────────────────────────── */
+
+    // Picking a network and typing its password are one step to the user.
+    var STEP_OF = { pick: 1, auth: 1, connecting: 2, done: 3, fallback: 2 };
+
+    function show(view) {
+        Object.keys(el.views).forEach(function (k) {
+            el.views[k].classList.toggle('hidden', k !== view);
+        });
+
+        var step = STEP_OF[view];
+        Array.prototype.forEach.call(el.stepper.children, function (li) {
+            var n = parseInt(li.getAttribute('data-step'), 10);
+            var done = view === 'done' ? n <= 3 : n < step;
+            li.classList.toggle('is-done', done);
+            li.classList.toggle('is-active', !done && n === step);
         });
     }
 
-    function setPhase(phase) {
-        // Update step indicators
-        var s1 = document.getElementById('step1');
-        var s2 = document.getElementById('step2');
-        var s3 = document.getElementById('step3');
+    /* ── Network list ───────────────────────────────────────────────────── */
 
-        s1.className = 'step ' + (phase >= 1 ? (phase > 1 ? 'done' : 'active') : '');
-        s2.className = 'step ' + (phase >= 2 ? (phase > 2 ? 'done' : 'active') : '');
-        s3.className = 'step ' + (phase >= 3 ? 'active' : '');
-
-        // Toggle views
-        document.getElementById('wifi-form').classList.toggle('hidden', phase !== 1);
-        document.getElementById('connecting-view').classList.toggle('hidden', phase !== 2);
-        document.getElementById('redirect-view').classList.toggle('hidden', phase !== 3);
-        document.getElementById('fallback-view').classList.toggle('hidden', phase !== 4);
+    function signalLevel(signal) {
+        var pct = parseInt(String(signal).replace('%', ''), 10);
+        if (isNaN(pct)) return 0;
+        return pct >= 70 ? 4 : pct >= 50 ? 3 : pct >= 30 ? 2 : 1;
     }
 
-    function startCountdown(ssid, hostname) {
-        var remaining = REDIRECT_DELAY;
-        var fill = document.getElementById('countdown-fill');
-        var num = document.getElementById('countdown-num');
-
-        fill.style.width = '0%';
-        num.textContent = remaining;
-
-        var timer = setInterval(function() {
-            remaining--;
-            num.textContent = Math.max(remaining, 0);
-            fill.style.width = ((REDIRECT_DELAY - remaining) / REDIRECT_DELAY * 100) + '%';
-
-            if (remaining <= 0) {
-                clearInterval(timer);
-                // Countdown done — phone should be back on home WiFi
-                // Try to reach the Pi on the new network
-                tryReachDevice(ssid, hostname);
-            }
-        }, 1000);
+    function isSecured(net) {
+        var sec = (net.security || '').trim();
+        return sec !== '' && sec !== '--';
     }
 
-    function tryReachDevice(ssid, hostname) {
-        // After 20s, the phone should have auto-reconnected to home WiFi.
-        // The Pi should also be on that network (if connection succeeded).
-        // Try to reach it via mDNS: http://hostname.local:5000
-        var baseUrl = 'http://' + hostname + '.local:5000';
-        var statusUrl = baseUrl + '/api/wifi/connect/status';
-        var attempts = 0;
-        var maxAttempts = 8;
-
-        document.getElementById('connecting-ssid-text').textContent = 'Looking for device on network...';
-
-        function poll() {
-            attempts++;
-            fetch(statusUrl, {mode: 'cors', cache: 'no-cache'})
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d.status === 'success' && (d.redirect_url || d.ip)) {
-                    // Pi connected to WiFi! Use the ngrok URL if available
-                    var dashUrl = d.redirect_url || ('http://' + d.ip + ':5000');
-                    var displayAddr = d.redirect_url || (d.ip + ':5000');
-                    setPhase(3);
-                    document.getElementById('new-ip').textContent = displayAddr;
-                    document.getElementById('go-link').href = dashUrl;
-                    // Auto-redirect after 3 seconds
-                    setTimeout(function() { window.location.href = dashUrl; }, 3000);
-                } else if (d.status === 'connecting' && attempts < maxAttempts) {
-                    // Still connecting, try again in 3 seconds
-                    setTimeout(poll, 3000);
-                } else {
-                    // Failed — AP should have restarted
-                    setPhase(4);
-                }
-            })
-            .catch(function() {
-                if (attempts < maxAttempts) {
-                    // mDNS might not be ready yet, retry
-                    setTimeout(poll, 3000);
-                } else {
-                    // Can't reach device — show fallback
-                    setPhase(4);
-                }
-            });
-        }
-
-        poll();
+    function iconSvg(paths) {
+        var el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        el.setAttribute('class', 'icon');
+        el.setAttribute('viewBox', '0 0 24 24');
+        el.setAttribute('fill', 'none');
+        el.setAttribute('stroke', 'currentColor');
+        el.setAttribute('stroke-width', '1.75');
+        el.setAttribute('stroke-linecap', 'round');
+        el.setAttribute('stroke-linejoin', 'round');
+        el.setAttribute('aria-hidden', 'true');
+        el.innerHTML = paths;
+        return el;
     }
 
-    function connectWifi() {
-        var ssid = getSSID();
-        var password = document.getElementById('password').value;
-        if (!ssid) {
-            showStatus('Please select or enter a WiFi network.', 'warning');
+    function renderNetworks() {
+        var term = (el.filter.value || '').trim().toLowerCase();
+        var list = networks.filter(function (n) {
+            return !term || n.ssid.toLowerCase().indexOf(term) !== -1;
+        });
+
+        el.netlist.innerHTML = '';
+
+        if (!list.length) {
+            var empty = document.createElement('p');
+            empty.className = 'netlist__empty';
+            empty.textContent = networks.length
+                ? 'No network matches that search.'
+                : 'No networks found. Move the display closer to your router and refresh, or join a network manually.';
+            el.netlist.appendChild(empty);
             return;
         }
 
-        var btn = document.getElementById('connect-btn');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span>Sending...';
+        list.forEach(function (net) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'netlist__item';
 
-        // Send credentials — server responds immediately BEFORE stopping AP
-        fetch('/api/wifi/connect', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ssid: ssid, password: password})
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-            if (d.success) {
-                // Server acknowledged — background thread will now stop AP and connect
-                // Save hostname for mDNS redirect later
-                var hostname = d.hostname || 'vignette';
-                // Transition to Phase 2: Connecting animation with countdown
-                setPhase(2);
-                document.getElementById('connecting-ssid-text').textContent = 'Connecting to ' + ssid + '...';
-                startCountdown(ssid, hostname);
-            } else {
-                // Server rejected before even trying (e.g. missing SSID)
-                btn.disabled = false;
-                btn.innerHTML = 'Connect';
-                showStatus(d.error || 'Failed to start connection.', 'danger');
+            var bars = document.createElement('span');
+            bars.className = 'signal';
+            bars.setAttribute('data-level', signalLevel(net.signal));
+            bars.innerHTML = '<i></i><i></i><i></i><i></i>';
+
+            // textContent, never innerHTML: an SSID is arbitrary text that can
+            // contain angle brackets and quotes.
+            var name = document.createElement('span');
+            name.className = 'netlist__name';
+            name.textContent = net.ssid;
+
+            btn.appendChild(bars);
+            btn.appendChild(name);
+            if (isSecured(net)) {
+                btn.appendChild(iconSvg('<rect x="4" y="10" width="16" height="11" rx="2.2"/>' +
+                                        '<path d="M8 10V7.2a4 4 0 0 1 8 0V10"/>'));
             }
-        })
-        .catch(function() {
-            // If even the initial request failed, something is very wrong
-            btn.disabled = false;
-            btn.innerHTML = 'Connect';
-            showStatus('Could not reach the device. Please refresh and try again.', 'danger');
+            btn.appendChild(iconSvg('<path d="m9 18 6-6-6-6"/>'));
+
+            btn.addEventListener('click', function () { chooseNetwork(net); });
+            el.netlist.appendChild(btn);
         });
     }
 
-    function showStatus(msg, type) {
-        var el = document.getElementById('status');
-        el.classList.remove('hidden');
-        el.className = 'alert alert-' + type;
-        el.innerHTML = msg;
+    function loadNetworks() {
+        el.netlist.innerHTML = '<p class="netlist__empty">Looking for networks…</p>';
+        fetch('/api/wifi/scan', { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                networks = (d.networks || []).filter(function (n) { return n && n.ssid; });
+                el.filterWrap.classList.toggle('hidden', networks.length < 7);
+                renderNetworks();
+            })
+            .catch(function () {
+                networks = [];
+                renderNetworks();
+            });
     }
 
-    document.getElementById('password').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') connectWifi();
+    /* ── Choosing a network ─────────────────────────────────────────────── */
+
+    function chooseNetwork(net) {
+        selected = net;
+        var manual = net === null;
+        var open = !manual && !isSecured(net);
+
+        el.manualField.classList.toggle('hidden', !manual);
+        el.selectedSsid.textContent = manual ? 'New network' : net.ssid;
+        el.selectedLock.classList.toggle('hidden', !manual && !isSecured(net));
+
+        // An open network needs no password — say so rather than showing an
+        // empty box the user has to guess about.
+        el.passField.classList.toggle('hidden', open);
+        el.openNote.classList.toggle('hidden', !open);
+
+        el.password.value = '';
+        el.authStatus.classList.add('hidden');
+        show('auth');
+
+        setTimeout(function () {
+            (manual ? el.manualSsid : (open ? el.connectBtn : el.password)).focus();
+        }, 60);
+    }
+
+    function currentSsid() {
+        return selected === null ? el.manualSsid.value.trim() : selected.ssid;
+    }
+
+    /* ── Connecting ─────────────────────────────────────────────────────── */
+
+    function authError(message) {
+        el.authStatus.textContent = message;
+        el.authStatus.classList.remove('hidden');
+    }
+
+    function connect() {
+        var ssid = currentSsid();
+        if (!ssid) {
+            authError('Enter the network name first.');
+            el.manualSsid.focus();
+            return;
+        }
+
+        var restore = V.busy(el.connectBtn, 'Sending…');
+        el.authStatus.classList.add('hidden');
+
+        function waitForDevice() {
+            el.connDetail.textContent = 'Joining "' + ssid + '"';
+            el.doneSsid.textContent = 'Your display is on "' + ssid + '".';
+            show('connecting');
+            startCountdown();
+        }
+
+        fetch('/api/wifi/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ssid: ssid, password: el.password.value })
+        })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (d) {
+            if (!d.success) {
+                restore();
+                authError(d.error || 'The display refused the request. Try again.');
+                return;
+            }
+            hostname = d.hostname || 'vignette';
+            waitForDevice();
+        })
+        .catch(function () {
+            // The hotspot goes down as part of connecting, so a dropped request
+            // here is expected rather than an error — keep going.
+            waitForDevice();
+        });
+    }
+
+    function startCountdown() {
+        stopCountdown();
+        var remaining = REDIRECT_DELAY;
+        el.countFill.style.width = '0%';
+        el.countNum.textContent = remaining;
+
+        countdownTimer = setInterval(function () {
+            remaining--;
+            el.countNum.textContent = Math.max(remaining, 0);
+            el.countFill.style.width = ((REDIRECT_DELAY - remaining) / REDIRECT_DELAY * 100) + '%';
+            if (remaining <= 0) { stopCountdown(); findDevice(); }
+        }, 1000);
+    }
+
+    function stopCountdown() {
+        if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    }
+
+    /** Look for the Pi over mDNS and ask how the connection went. */
+    function findDevice() {
+        stopCountdown();
+        el.connDetail.textContent = 'Looking for your display on the network…';
+        el.countFill.style.width = '100%';
+
+        var statusUrl = 'http://' + hostname + '.local:5000/api/wifi/connect/status';
+        var attempts = 0;
+
+        (function poll() {
+            attempts++;
+            fetch(statusUrl, { mode: 'cors', cache: 'no-store' })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d.status === 'success' && (d.redirect_url || d.ip)) succeed(d);
+                    else if (d.status === 'failed') show('fallback');
+                    else if (attempts < POLL_ATTEMPTS) setTimeout(poll, POLL_INTERVAL);
+                    else show('fallback');
+                })
+                .catch(function () {
+                    if (attempts < POLL_ATTEMPTS) setTimeout(poll, POLL_INTERVAL);
+                    else show('fallback');
+                });
+        })();
+    }
+
+    function succeed(d) {
+        var url = d.redirect_url || ('http://' + d.ip + ':5000');
+        el.address.textContent = d.redirect_url
+            ? d.redirect_url.replace(/^https?:\/\//, '')
+            : (d.ip + ':5000');
+        el.openDash.href = url;
+        show('done');
+        setTimeout(function () { window.location.href = url; }, 4000);
+    }
+
+    /* ── Wiring ─────────────────────────────────────────────────────────── */
+
+    document.getElementById('rescan-btn').addEventListener('click', loadNetworks);
+    el.filter.addEventListener('input', renderNetworks);
+    document.getElementById('manual-entry').addEventListener('click', function () { chooseNetwork(null); });
+    document.getElementById('back-to-list').addEventListener('click', function () { show('pick'); });
+
+    document.getElementById('toggle-pass').addEventListener('click', function () {
+        var shown = el.password.type === 'text';
+        el.password.type = shown ? 'password' : 'text';
+        this.setAttribute('aria-pressed', shown ? 'false' : 'true');
+        this.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
+        document.getElementById('pass-eye').classList.toggle('hidden', !shown);
+        document.getElementById('pass-eye-off').classList.toggle('hidden', shown);
     });
 
-    // Load pre-cached WiFi networks on page load
+    el.connectBtn.addEventListener('click', connect);
+    [el.password, el.manualSsid].forEach(function (input) {
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); connect(); }
+        });
+    });
+
+    document.getElementById('check-now').addEventListener('click', findDevice);
+    document.getElementById('retry-check').addEventListener('click', function () {
+        show('connecting');
+        findDevice();
+    });
+    document.getElementById('start-over').addEventListener('click', function () {
+        window.location.reload();
+    });
+
+    document.getElementById('copy-address').addEventListener('click', function () {
+        var text = el.openDash.href;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(
+                function () { V.toast('Address copied', 'success'); },
+                function () { V.toast(text, 'info', { duration: 8000 }); }
+            );
+        } else {
+            V.toast(text, 'info', { duration: 8000 });
+        }
+    });
+
     loadNetworks();
-    </script>
-</body>
-</html>
+})();
+</script>
+{% endblock %}

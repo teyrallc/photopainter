@@ -8,3 +8,7 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+
+# Runtime device configuration — holds the WiFi password, admin password hash
+# and session secret, so it must never be committed.
+config.json

@@ -1,134 +1,107 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vignette - Verify Reset</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .container { width: 100%; max-width: 420px; }
-        .brand { text-align: center; margin-bottom: 24px; }
-        .brand h1 { color: #f8fafc; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
-        .brand p { color: #94a3b8; font-size: 15px; margin-top: 4px; }
-        .brand-logo { height: 56px; filter: brightness(0) invert(1); opacity: 0.9; display: block; margin: 0 auto 12px; }
-        .card {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            padding: 32px 24px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
-        }
-        .form-group { margin-bottom: 20px; text-align: left; }
-        .form-group label { display: block; color: #cbd5e1; font-size: 14px; font-weight: 500; margin-bottom: 8px; }
-        .form-group input {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 14px 16px;
-            color: #fff;
-            font-size: 16px;
-            outline: none;
-            transition: all 0.2s;
-            text-align: center;
-            letter-spacing: 2px;
-        }
-        .form-group input[type="password"] { text-align: light; letter-spacing: normal; }
-        .form-group input:focus { border-color: #f59e0b; background: rgba(0,0,0,0.3); }
-        .btn-primary {
-            width: 100%;
-            background: #f59e0b;
-            color: white;
-            border: none;
-            border-radius: 12px;
-            padding: 16px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
-        }
-        .btn-primary:active { transform: scale(0.98); }
-        .error { color: #ef4444; font-size: 14px; margin-top: 8px; text-align: center; display: none; }
-        .info { color: #cbd5e1; font-size: 13px; text-align: center; margin-bottom: 20px; line-height: 1.5; }
-        .links { margin-top: 20px; text-align: center; }
-        .links a { color: #94a3b8; text-decoration: none; font-size: 14px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="brand">
-            <img src="/static/img/vignette-logo.svg" alt="Vignette" class="brand-logo">
-            <h1>Verify & Reset</h1>
-            <p>Enter Hardware Token</p>
-        </div>
-        <div class="card">
-            <div class="info">
-                Please look at your Vignette E-Paper Display. Enter the 6-digit authentication code shown on the screen to reset your password.
-            </div>
-            <form id="verifyForm">
-                <input type="hidden" id="email" value="{{ request.args.get('email', '') }}" />
-                <div class="form-group">
-                    <label>6-Digit Hardware Token</label>
-                    <input type="text" id="code" required placeholder="123456" maxlength="6" pattern="\d{6}" autocomplete="off" />
-                </div>
-                <div class="form-group">
-                    <label>New Password (min 6 chars)</label>
-                    <input type="password" id="new_password" required placeholder="••••••••" minlength="6" />
-                </div>
-                <div class="error" id="errorMsg"></div>
-                <button type="submit" class="btn-primary" style="margin-top: 10px;">Reset Password</button>
-            </form>
-            <div class="links">
-                <a href="/auth/login">&larr; Back to Login</a>
-            </div>
-        </div>
+{% extends "_kiosk.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — Reset password{% endblock %}
+
+{% block brand %}
+<h1>Reset your password</h1>
+<p>Enter the code from the display</p>
+{% endblock %}
+
+{% block card %}
+<div class="alert alert--info mb-2">
+    {{ icon('display') }}
+    <span>Look at the e-paper screen and type the 6-digit code it is showing.</span>
+</div>
+
+<form id="verify-form">
+    <input type="hidden" id="email" value="{{ request.args.get('email', '') }}">
+
+    <div class="field">
+        <label class="label" for="code">Verification code</label>
+        <input type="text" class="input otp-input" id="code" required placeholder="000000"
+               maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
+               autocomplete="one-time-code" autofocus>
     </div>
 
-    <script>
-        document.getElementById('verifyForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = e.target.querySelector('button');
-            const errorMsg = document.getElementById('errorMsg');
-            btn.textContent = 'Verifying...';
-            errorMsg.style.display = 'none';
+    <div class="field">
+        <label class="label" for="new-password">New password</label>
+        <div class="input-group">
+            <input type="password" class="input" id="new-password" required placeholder="••••••••"
+                   minlength="6" autocomplete="new-password">
+            <button type="button" class="input-group__btn" id="toggle-pass"
+                    aria-label="Show password" aria-pressed="false">
+                <span id="pass-eye">{{ icon('eye') }}</span>
+                <span id="pass-eye-off" class="hidden">{{ icon('eye-off') }}</span>
+            </button>
+        </div>
+        <p class="hint">At least 6 characters.</p>
+    </div>
 
-            try {
-                const res = await fetch('/auth/verify-reset', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        email: document.getElementById('email').value,
-                        code: document.getElementById('code').value,
-                        new_password: document.getElementById('new_password').value
-                    })
-                });
-                const data = await res.json();
-                if(data.success) {
-                    alert("Password reset successfully! Please login with your new password.");
-                    window.location.href = '/auth/login';
-                } else {
-                    errorMsg.textContent = data.error || 'Verification failed';
-                    errorMsg.style.display = 'block';
-                    btn.textContent = 'Reset Password';
-                }
-            } catch(err) {
-                errorMsg.textContent = 'Network error';
-                errorMsg.style.display = 'block';
-                btn.textContent = 'Reset Password';
+    <div class="alert alert--danger mb-2 hidden" id="error-msg"></div>
+
+    <button type="submit" class="btn btn--primary btn--block">
+        {{ icon('check-circle') }} Reset password
+    </button>
+</form>
+
+<p class="center mt-2 mb-0">
+    <a href="/auth/login" class="small">{{ icon('chevron-left') }} Back to sign in</a>
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    'use strict';
+
+    var form  = document.getElementById('verify-form');
+    var error = document.getElementById('error-msg');
+
+    document.getElementById('toggle-pass').addEventListener('click', function () {
+        var input = document.getElementById('new-password');
+        var shown = input.type === 'text';
+        input.type = shown ? 'password' : 'text';
+        this.setAttribute('aria-pressed', shown ? 'false' : 'true');
+        document.getElementById('pass-eye').classList.toggle('hidden', !shown);
+        document.getElementById('pass-eye-off').classList.toggle('hidden', shown);
+    });
+
+    document.getElementById('code').addEventListener('input', function () {
+        this.value = this.value.replace(/\D/g, '').slice(0, 6);
+    });
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = form.querySelector('button[type="submit"]');
+        var restore = V.busy(btn, 'Verifying…');
+        error.classList.add('hidden');
+
+        fetch('/auth/verify-reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: document.getElementById('email').value,
+                code: document.getElementById('code').value,
+                new_password: document.getElementById('new-password').value
+            })
+        })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (data) {
+            if (data.success) {
+                V.toast('Password updated — sign in with your new password', 'success');
+                setTimeout(function () { window.location.href = '/auth/login'; }, 1600);
+                return;
             }
+            restore();
+            error.textContent = data.error || 'Verification failed.';
+            error.classList.remove('hidden');
+        })
+        .catch(function () {
+            restore();
+            error.textContent = 'Could not reach the display. Check your connection and try again.';
+            error.classList.remove('hidden');
         });
-    </script>
-</body>
-</html>
+    });
+})();
+</script>
+{% endblock %}
