@@ -153,4 +153,4 @@ MIT License
 
 <img src="web/static/img/vignette-logo.svg" width="320" alt="Vignette">
 
-&copy; 2026 Teyra LLC W.Weng
+&copy; 2026 Teyra LLC
