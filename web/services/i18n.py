@@ -197,6 +197,10 @@ TRANSLATIONS = {
         # System
         "update_software": "Update Software",
         "update_ok": "Update finished",
+        "update_waiting": "Waiting for the display to come back…",
+        "update_none": "Already up to date",
+        "update_failed": "Update failed",
+        "update_reload_manual": "The display is taking a while. Reload this page when it is back.",
         "reboot": "Reboot",
         "rebooting": "Rebooting…",
         "shutdown": "Shutdown",
@@ -433,6 +437,10 @@ TRANSLATIONS = {
         # System
         "update_software": "更新程式",
         "update_ok": "更新完成",
+        "update_waiting": "等待顯示器重新啟動…",
+        "update_none": "已是最新版本",
+        "update_failed": "更新失敗",
+        "update_reload_manual": "顯示器啟動時間較久，恢復後請自行重新整理此頁。",
         "reboot": "重新啟動",
         "rebooting": "重新啟動中…",
         "shutdown": "關機",
