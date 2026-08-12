@@ -1,15 +1,30 @@
-Flask==3.0.0
-# Imported directly by web/app.py (secure_filename) and web/auth.py (password
-# hashing), so it is declared rather than relied on as a Flask transitive.
-Werkzeug>=3.0,<4
-Pillow
-spidev
-RPi.GPIO
-qrcode[pil]
-pyngrok
+# Pinned so two devices installed a month apart run the same code, and so an
+# in-the-field `scripts/update.sh` cannot pull a breaking release into
+# somebody's living room. Bump deliberately, then run tests/ before shipping.
 
-# Only needed by the standalone CLI tools in src/ (display_picture.py,
-# generate_picture.py), which the web service never imports:
+Flask==3.0.0
+# Imported directly by web/app.py (secure_filename, ProxyFix) and web/auth.py
+# (password hashing), so it is declared rather than relied on as a transitive.
+Werkzeug==3.0.6
+
+# Production WSGI server. Pure Python, so it installs on a Pi Zero without a
+# compiler; Flask's built-in server is single-threaded and explicitly not for
+# production, which matters because the tunnel exposes this to the internet.
+waitress==3.0.2
+
+Pillow==11.0.0
+qrcode[pil]==7.4.2
+
+# Remote access tunnel.
+pyngrok==7.2.1
+
+# Raspberry Pi hardware. These have no wheels off-device, so a desktop
+# checkout installs the rest and skips these two; tests/ stubs them.
+spidev==3.6; platform_machine == "armv6l" or platform_machine == "armv7l" or platform_machine == "aarch64"
+RPi.GPIO==0.7.1; platform_machine == "armv6l" or platform_machine == "armv7l" or platform_machine == "aarch64"
+
+# Only needed by the standalone CLI tools in src/, which the web service never
+# imports. Install them by hand if you use those:
 #   numpy
 #   opencv-contrib-python   # display_picture.py uses cv2.saliency
 #   gpiod                   # display_buttons.py

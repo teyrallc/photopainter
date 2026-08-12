@@ -5,6 +5,8 @@ import time
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from services import renderer
+from services import epd as epd_service
+from services import device_id
 from services.weather import fetch_weather
 from services.calendar_svc import fetch_calendar_events
 
@@ -56,9 +58,8 @@ def display_pil_image(img):
         last_error = None
         for attempt in range(3):
             try:
-                from waveshare_epd import epd7in3e
-                epd = epd7in3e.EPD()
-                
+                epd = epd_service.get_epd(config.get("epd_model") if config else None)
+
                 # Hardware init
                 epd.init()
                 
@@ -119,14 +120,22 @@ def display_qr_setup(ip=None):
     `ip` is optional because the page it renders always points at the hotspot
     gateway, never at the device's LAN address — two of the three callers had
     nothing sensible to pass and were crashing on the missing argument.
+
+    The hotspot name and password come from this device rather than from
+    constants, and this screen is the only place that password is published.
     """
-    img = renderer.render_qr_setup(ip)
+    ssid, password = device_id.ap_credentials(config)
+    img = renderer.render_qr_setup(ip, ap_ssid=ssid, ap_password=password)
     display_state["current_image"] = "[QR setup]"
     return display_pil_image(img)
 
-def display_wifi_connected(ssid, ip_address):
-    """Display 'WiFi Connected' confirmation on e-paper with new IP."""
-    img = renderer.render_wifi_connected(ssid, ip_address)
+def display_wifi_connected(ssid, ip_address, remote_url=None):
+    """Display the 'connected' screen.
+
+    `remote_url` is the tunnel address when one is up — that is the one the
+    owner actually needs, since the LAN address only works inside the house.
+    """
+    img = renderer.render_wifi_connected(ssid, ip_address, remote_url=remote_url)
     display_state["current_image"] = "[WiFi connected]"
     return display_pil_image(img)
 

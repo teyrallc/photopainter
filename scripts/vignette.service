@@ -1,17 +1,38 @@
 [Unit]
-Description=Vignette - H System Smart Display Web Interface
+Description=Vignette Smart Display
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+
+# Not root. This process is reachable from the public internet through the
+# remote-access tunnel, so a flaw in it should not hand over the whole board.
+# The groups are what it actually needs: spi and gpio for the panel, netdev
+# so NetworkManager will talk to it.
+User=vignette
+Group=vignette
+SupplementaryGroups=spi gpio netdev
+
 WorkingDirectory=/home/pi/Vignette
 ExecStart=/home/pi/Vignette/venv/bin/python /home/pi/Vignette/web/app.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
+
+# The few privileged actions it needs — bringing WiFi up, rebooting, shutting
+# down — go through sudo against the narrow allowlist in
+# /etc/sudoers.d/vignette, not through running everything as root.
+NoNewPrivileges=no
+
+# Ordinary hardening. The service only ever writes inside its own directory.
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=no
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
 
 # Environment
 Environment=PYTHONUNBUFFERED=1

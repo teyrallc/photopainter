@@ -15,9 +15,21 @@ DEFAULT_CONFIG = {
     "wifi_ssid": "",
     "wifi_password": "",
 
+    # Pairing hotspot. The password is minted per device on first use and
+    # printed on the e-paper pairing screen; it is never shipped in the source.
+    "ap_password": "",
+
     # Auth System
     "admin_email": "",
     "admin_password_hash": "",
+
+    # Remote access. Without a tunnel the console is only reachable from the
+    # same LAN, which is not how a photo frame given as a gift gets used.
+    "remote_access_enabled": True,
+    "ngrok_authtoken": "",
+
+    # Which Waveshare panel is fitted: 7in3e or 7in3f.
+    "epd_model": "7in3e",
 
     # Language
     "lang": "en",  # en, zh
@@ -68,6 +80,11 @@ SECRET_KEYS = frozenset({
     "gdrive_client_secret",
     "gdrive_access_token",
     "gdrive_refresh_token",
+    "ngrok_authtoken",
+    # Not a credential for this interface, but it is the key to the pairing
+    # network — it belongs on the panel in front of the owner, not in an API
+    # response that a tunnelled browser session can read.
+    "ap_password",
 })
 
 # Settings a signed-in user may change through POST /api/config. Everything
@@ -79,6 +96,8 @@ WRITABLE_KEYS = frozenset(set(DEFAULT_CONFIG) - {
     "wifi_password",
     "admin_email",
     "admin_password_hash",
+    # Minted by the device, not chosen by the user.
+    "ap_password",
 })
 
 # Secrets the settings form deliberately submits empty when the user did not
@@ -87,6 +106,7 @@ WRITABLE_KEYS = frozenset(set(DEFAULT_CONFIG) - {
 PRESERVE_IF_BLANK = frozenset({
     "weather_api_key",
     "gdrive_client_secret",
+    "ngrok_authtoken",
 })
 
 

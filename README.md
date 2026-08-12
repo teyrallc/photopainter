@@ -1,4 +1,4 @@
-# Vignette - H System Smart Display
+# Vignette
 
 A smart display system based on the Waveshare 7.3" 6-color e-paper display, running on Raspberry Pi Zero 2 W.
 
@@ -66,9 +66,46 @@ bash scripts/install.sh
 
 ### 3. Access Web UI
 
+The pairing screen on the e-paper panel shows the hotspot name and password
+for this specific device, plus a QR code. Join it, follow the second QR, and
+pick your WiFi network.
+
+Once it is on your network, the panel shows the address to use. If remote
+access is configured that address works from anywhere; otherwise it is the
+local one:
+
 ```
 http://<Pi-IP>:5000
 ```
+
+## Remote Access
+
+By default the console only answers on the same network as the display, which
+is not much use for a frame you gave to somebody. Turning on remote access
+opens an ngrok tunnel and publishes an address that works from anywhere.
+
+1. Get a free authtoken from
+   [dashboard.ngrok.com](https://dashboard.ngrok.com/get-started/your-authtoken).
+2. **Settings → Remote Access**, paste it, save.
+
+The tunnel is supervised: it retries with backoff if it cannot connect, notices
+if it drops, and reconnects. Free ngrok issues a new hostname each time, so
+whenever the address changes the panel is repainted with the new one. The local
+address keeps working alongside it.
+
+Set `auto_refresh_interval` to `0` in the config to stop the panel refreshing
+on a timer; **Settings → Remote Access → Enable** turns the tunnel off entirely.
+
+## When the network goes away
+
+If the saved WiFi is unreachable for one minute, the display raises its own
+pairing hotspot and shows the pairing screen again, so it can be pointed at a
+new network without a keyboard or a reset.
+
+**This is not a factory reset.** The WiFi password, the admin account and every
+photo are kept. While the fallback hotspot is up the display quietly retries the
+saved network every five minutes, so a router that was simply slow to reboot
+recovers on its own with nobody touching anything.
 
 ## Service Management
 
@@ -183,6 +220,8 @@ one exception, and only while the device is unpaired — see
 | POST | `/api/wifi/connect` | Join a network (runs in the background) |
 | GET | `/api/wifi/connect/status` | Poll the join result — open to all, by design |
 | POST | `/api/setup` | Save first-run weather / calendar settings |
+| GET | `/api/remote` | Remote-access state and the public address |
+| POST | `/api/remote/reconnect` | Force a fresh tunnel |
 
 ## Authentication
 
@@ -196,16 +235,33 @@ the password both require physical access to the device.
   the phone polls it on the device's new address before anyone can sign in.
 - State-changing requests are rejected when they arrive from another origin.
 - Secrets — the session key, password hash, WiFi password, API keys, OAuth
-  tokens — are never returned by an API or rendered into a page. The settings
-  form shows a placeholder instead and treats a blank field as "keep the
-  stored value".
+  tokens, the ngrok authtoken — are never returned by an API or rendered into a
+  page. The settings form shows a placeholder instead and treats a blank field
+  as "keep the stored value".
+- The session cookie is marked `Secure` exactly when the connection was HTTPS,
+  so it is protected over the tunnel without breaking sign-in over the LAN.
+- The pairing hotspot's name and password are derived per device and printed
+  only on the e-paper panel. No two units ship joinable with the same
+  credentials.
+
+## Service account
+
+The service runs as the unprivileged `vignette` user, not root — it is
+reachable from the internet whenever remote access is on. `scripts/install.sh`
+creates the account, adds it to `spi`, `gpio` and `netdev`, and installs a
+narrow sudo allowlist at `/etc/sudoers.d/vignette` covering only `nmcli`,
+`reboot`, `shutdown` and restarting its own unit.
+
+Upgrading an existing root install: re-run `bash scripts/install.sh`. It
+creates the account, takes ownership of the checkout, and rewrites the unit.
 
 ## Project Structure
 
 ```
 Vignette/
-├── lib/waveshare_epd/           # Waveshare e-paper driver
-│   ├── epd7in3e.py              # 7.3" 6-color display driver (E model)
+├── lib/waveshare_epd/           # Waveshare e-paper drivers
+│   ├── epd7in3e.py              # 7.3" 6-color panel (E), the default
+│   ├── epd7in3f.py              # 7.3" 7-color panel (F); set epd_model
 │   └── epdconfig.py             # SPI/GPIO hardware config
 ├── src/
 │   ├── display_picture.py       # Image processing & display (CLI)

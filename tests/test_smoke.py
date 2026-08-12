@@ -11,6 +11,7 @@ would have been caught by nothing more than asking every route for a response.
 """
 
 import io
+import json
 import os
 import sys
 import tempfile
@@ -21,22 +22,26 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── Hardware and system stubs ─────────────────────────────────────────────
 
+class _EPD:
+    def init(self): pass
+    def Clear(self): pass
+    def sleep(self): pass
+    def getbuffer(self, image): return b""
+    def display(self, buffer): pass
+
+
 def _install_stubs():
     """Replace the Pi-only pieces so the app can be imported off-device."""
     epd_pkg = types.ModuleType("waveshare_epd")
-    epd_mod = types.ModuleType("waveshare_epd.epd7in3e")
-
-    class _EPD:
-        def init(self): pass
-        def Clear(self): pass
-        def sleep(self): pass
-        def getbuffer(self, image): return b""
-        def display(self, buffer): pass
-
-    epd_mod.EPD = _EPD
-    epd_pkg.epd7in3e = epd_mod
     sys.modules.setdefault("waveshare_epd", epd_pkg)
-    sys.modules.setdefault("waveshare_epd.epd7in3e", epd_mod)
+
+    # Both panel drivers, so the model-selection path is exercised rather than
+    # only the one that happens to be the default.
+    for name in ("epd7in3e", "epd7in3f"):
+        mod = types.ModuleType(f"waveshare_epd.{name}")
+        mod.EPD = _EPD
+        setattr(epd_pkg, name, mod)
+        sys.modules.setdefault(f"waveshare_epd.{name}", mod)
 
     import subprocess
     subprocess.run = lambda *a, **k: types.SimpleNamespace(
@@ -253,6 +258,186 @@ def test_otp_burns_after_repeated_wrong_guesses():
     for _ in range(auth_mgr.MAX_OTP_ATTEMPTS + 1):
         assert auth_mgr.verify_otp("test@example.com", "000000") is False
     assert "test@example.com" not in auth_mgr._otp_cache
+
+
+def test_pairing_hotspot_credentials_are_per_device():
+    """No two units may ship with the same joinable network."""
+    from services import device_id
+    from services.config import Config
+
+    assert device_id.ap_ssid().startswith("Vignette-")
+    assert device_id.ap_ssid() == device_id.ap_ssid()          # stable
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = Config(os.path.join(tmp, "config.json"))
+        ssid, password = device_id.ap_credentials(fresh)
+        assert len(password) >= 8                              # WPA2 minimum
+        assert password != "vignette123"
+        # Minted once, then kept.
+        assert device_id.ap_credentials(fresh)[1] == password
+        assert fresh.get("ap_password") == password
+
+    assert device_id.is_own_ap(device_id.ap_ssid())
+    assert device_id.is_own_ap("Vignette-Setup")               # legacy name
+    assert not device_id.is_own_ap("SomeHomeNetwork")
+
+
+def test_pairing_password_is_never_disclosed():
+    client = _paired_client()
+    _, password = __import__("services.device_id", fromlist=["x"]).ap_credentials(config)
+
+    assert "ap_password" not in client.get("/api/config").get_json()
+    for page in ("/settings", "/", "/wifi"):
+        assert password not in client.get(page).get_data(as_text=True)
+
+
+def test_panel_model_is_selectable():
+    from services import epd
+    assert isinstance(epd.get_epd("7in3e"), _EPD)
+    assert isinstance(epd.get_epd("7in3f"), _EPD)
+    # An unknown value must fall back rather than raise on a device in a field.
+    assert isinstance(epd.get_epd("nonsense"), _EPD)
+    assert epd.normalize_model(None) == epd.DEFAULT_MODEL
+
+
+def test_remote_access_reports_state_without_leaking_the_token():
+    config.update({"ngrok_authtoken": "ZZNGROKSENTINEL04",
+                   "remote_access_enabled": True})
+    client = _paired_client()
+
+    payload = client.get("/api/remote").get_json()
+    assert payload["configured"] is True
+    assert "ZZNGROKSENTINEL04" not in json.dumps(payload)
+    assert payload["local_url"].startswith("http://")
+
+    assert "ngrok_authtoken" not in client.get("/api/config").get_json()
+    assert "ZZNGROKSENTINEL04" not in client.get("/settings").get_data(as_text=True)
+
+
+def test_tunnel_host_is_accepted_as_same_origin():
+    """A request arriving over the tunnel must not read as cross-site."""
+    from services.remote_access import service as remote
+    client = _paired_client()
+
+    with remote._lock:
+        remote._url = "https://abcd-1-2-3-4.ngrok-free.app"
+    try:
+        ok = client.post("/api/page/switch",
+                         headers={"Origin": "https://abcd-1-2-3-4.ngrok-free.app"},
+                         json={"page": "home"})
+        assert ok.status_code == 200, ok.get_data(as_text=True)
+
+        blocked = client.post("/api/page/switch",
+                              headers={"Origin": "https://evil.example"},
+                              json={"page": "home"})
+        assert blocked.status_code == 403
+    finally:
+        with remote._lock:
+            remote._url = None
+
+
+def test_session_cookie_is_secure_only_over_https():
+    from werkzeug.security import generate_password_hash
+    config.update({"admin_email": "test@example.com",
+                   "admin_password_hash": generate_password_hash("test-password"),
+                   "setup_complete": True})
+
+    def cookie_for(scheme):
+        c = app.test_client()
+        r = c.post("/auth/login", base_url=f"{scheme}://localhost",
+                   headers={"Origin": f"{scheme}://localhost"},
+                   json={"email": "test@example.com", "password": "test-password"})
+        return next((s for s in r.headers.getlist("Set-Cookie")
+                     if s.startswith("session=")), "")
+
+    plain, secure = cookie_for("http"), cookie_for("https")
+    assert "Secure" not in plain, plain          # LAN sign-in must keep working
+    assert "Secure" in secure, secure            # tunnelled sign-in is marked
+    assert "SameSite=Lax" in plain and "HttpOnly" in plain
+
+
+def test_factory_reset_can_take_the_photos_with_it():
+    from PIL import Image
+    client = _paired_client()
+    victim = os.path.join(vapp.OUTPUT_DIR, "previous-owner.png")
+    Image.new("RGB", (8, 8)).save(victim)
+    try:
+        r = client.post("/api/reset", headers=SAME_ORIGIN,
+                        json={"delete_photos": True})
+        assert r.status_code == 200
+        assert r.get_json()["photos_deleted"] >= 1
+        assert not os.path.exists(victim)
+    finally:
+        if os.path.exists(victim):
+            os.remove(victim)
+        config.set("setup_complete", True)
+
+
+def test_watchdog_falls_back_without_discarding_credentials():
+    """One minute offline reaches the pairing screen — but keeps the secrets."""
+    from services.net_watchdog import NetWatchdog
+
+    config.update({"wifi_ssid": "HomeNet", "wifi_password": "keep-me",
+                   "admin_email": "test@example.com", "setup_complete": True})
+
+    calls = []
+    watchdog = NetWatchdog()
+    watchdog.init(
+        config,
+        active_ssid=lambda: None,                       # link is down
+        start_ap=lambda: calls.append("start_ap"),
+        stop_ap=lambda: calls.append("stop_ap"),
+        scan_wifi=lambda: calls.append("scan"),
+        show_pairing_screen=lambda: calls.append("pairing_screen"),
+        connect_saved=lambda: False,
+        is_pairing_in_progress=lambda: False,
+    )
+    watchdog._enter_fallback()
+
+    assert "start_ap" in calls and "pairing_screen" in calls
+    assert config.get("setup_complete") is False        # portal is reachable
+    assert config.get("wifi_ssid") == "HomeNet"         # NOT a reset
+    assert config.get("wifi_password") == "keep-me"
+    assert config.get("admin_email") == "test@example.com"
+
+    # And it stands down again once a network comes back.
+    watchdog._leave_fallback("HomeNet")
+    assert config.get("setup_complete") is True
+    assert watchdog.fallback_active is False
+
+
+def test_watchdog_ignores_our_own_hotspot():
+    """Seeing our own pairing SSID must not read as 'the network is fine'."""
+    from services.net_watchdog import NetWatchdog
+    from services import device_id
+
+    watchdog = NetWatchdog()
+    watchdog.init(config, active_ssid=lambda: device_id.ap_ssid(),
+                  start_ap=lambda: None, stop_ap=lambda: None,
+                  scan_wifi=lambda: None, show_pairing_screen=lambda: None,
+                  connect_saved=lambda: False, is_pairing_in_progress=lambda: False)
+    assert watchdog._joined_ssid() is None
+
+    watchdog.init(config, active_ssid=lambda: "HomeNet",
+                  start_ap=lambda: None, stop_ap=lambda: None,
+                  scan_wifi=lambda: None, show_pairing_screen=lambda: None,
+                  connect_saved=lambda: False, is_pairing_in_progress=lambda: False)
+    assert watchdog._joined_ssid() == "HomeNet"
+
+
+def test_no_page_names_the_old_shared_hotspot():
+    """Every unit used to advertise Vignette-Setup / vignette123."""
+    from services import device_id
+    client = _paired_client()
+    ssid = device_id.ap_ssid()
+
+    for page in ("/wifi", "/manual", "/settings"):
+        html = client.get(page).get_data(as_text=True)
+        assert "vignette123" not in html, page
+        assert "Vignette-Setup" not in html, page
+
+    # …and the page that talks about pairing names *this* device's hotspot.
+    assert ssid in client.get("/wifi").get_data(as_text=True)
 
 
 def test_config_survives_a_reload():
