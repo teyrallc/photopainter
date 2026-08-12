@@ -109,6 +109,19 @@ PRESERVE_IF_BLANK = frozenset({
     "ngrok_authtoken",
 })
 
+# Substrings that mark a config key as a credential regardless of whether this
+# version still declares it. The backstop for keys left behind by an older
+# build, and for the next setting somebody adds without updating SECRET_KEYS.
+_SECRET_NAME_PARTS = ("password", "secret", "token", "passwd", "_hash", "authtoken")
+
+
+def is_secret_name(key):
+    lowered = key.lower()
+    # `..._configured` markers are booleans this module generates, never values.
+    if lowered.endswith("_configured"):
+        return False
+    return any(part in lowered for part in _SECRET_NAME_PARTS)
+
 
 class Config:
     def __init__(self, config_path):
@@ -201,8 +214,19 @@ class Config:
         Secrets are dropped rather than masked, and each one is replaced by a
         `<key>_configured` boolean so the interface can still show whether a
         value is set without ever transmitting it.
+
+        Filtering on SECRET_KEYS alone was not enough. A config.json written by
+        an older build keeps keys this version no longer declares — `smtp_password`
+        is the live example — and those sailed straight through the allowlist
+        because they are not in it. Anything *named* like a credential is
+        dropped too, so retiring a setting can never quietly start publishing
+        whatever a device still has stored under it.
         """
-        safe = {k: v for k, v in self._data.items() if k not in SECRET_KEYS}
+        safe = {}
+        for key, value in self._data.items():
+            if key in SECRET_KEYS or is_secret_name(key):
+                continue
+            safe[key] = value
         for key in SECRET_KEYS:
             safe[f"{key}_configured"] = bool(self._data.get(key))
         return safe

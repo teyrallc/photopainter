@@ -440,6 +440,62 @@ def test_no_page_names_the_old_shared_hotspot():
     assert ssid in client.get("/wifi").get_data(as_text=True)
 
 
+def test_legacy_secrets_left_by_an_older_build_are_still_redacted():
+    """A device updating in the field keeps keys this version dropped.
+
+    public_dict() filtered on SECRET_KEYS alone, so `smtp_password` — retired
+    from the defaults but still sitting in every existing config.json — went
+    straight out to the browser.
+    """
+    from services.config import Config, is_secret_name
+    import json as _json
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "config.json")
+        with open(path, "w") as f:
+            _json.dump({
+                "weather_city": "Taipei",
+                "smtp_password": "ZZLEGACYSMTP05",          # retired key
+                "some_future_api_token": "ZZFUTURE06",      # not declared yet
+                "wifi_password": "ZZWIFI07",                # declared secret
+            }, f)
+
+        payload = _json.dumps(Config(path).public_dict())
+
+    for sentinel in ("ZZLEGACYSMTP05", "ZZFUTURE06", "ZZWIFI07"):
+        assert sentinel not in payload, sentinel
+    assert "Taipei" in payload            # ordinary settings still come through
+
+    assert is_secret_name("smtp_password")
+    assert is_secret_name("some_future_api_token")
+    assert not is_secret_name("weather_city")
+    # The generated markers are booleans, not values, and must survive.
+    assert not is_secret_name("weather_api_key_configured")
+
+
+def test_remote_access_falls_back_to_the_prototype_token():
+    """A field update has no token stored and must not go LAN-only."""
+    from services.remote_access import RemoteAccess
+    from services.config import Config
+    import json as _json
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = Config(os.path.join(tmp, "config.json"))
+        service = RemoteAccess()
+        service.init(fresh)
+
+        state = service.state()
+        assert state["configured"] is True
+        assert state["shared_token"] is True, "should report the shared account"
+
+        fresh.set("ngrok_authtoken", "ZZOWNTOKEN08")
+        assert service._authtoken() == "ZZOWNTOKEN08"      # own token wins
+        assert service.state()["shared_token"] is False
+        # And it is still never transmitted.
+        assert "ZZOWNTOKEN08" not in _json.dumps(service.state())
+        assert "ZZOWNTOKEN08" not in _json.dumps(fresh.public_dict())
+
+
 def test_config_survives_a_reload():
     """Round-trip through the atomic save path."""
     from services.config import Config

@@ -30,6 +30,16 @@ _HEALTH_INTERVAL = 30
 
 _LOCAL_PORT = 5000
 
+# Prototype fallback. The token used to be hard-coded at two call sites; it now
+# lives in the config so each unit can carry its own, but a device that updates
+# in the field has no value stored yet and would silently come back LAN-only.
+# This keeps the internal fleet working across that update.
+#
+# BEFORE SHIPPING EXTERNALLY: revoke this token, delete this constant, and let
+# `ngrok_authtoken` be the only source. Every unit sharing one ngrok account is
+# a single point of failure and a single account to get banned.
+_PROTOTYPE_AUTHTOKEN = "3By64a7MxTOJAWF3eD8TGoLcaIl_5tprPKw4ftjjRSTWU1eVM"
+
 
 class RemoteAccess:
     def __init__(self):
@@ -80,14 +90,23 @@ class RemoteAccess:
                 "url": self._url,
                 "error": self._error,
                 "configured": bool(self._authtoken()),
+                # Surfaced so the interface can say "using the shared
+                # prototype account" rather than implying this device has
+                # its own.
+                "shared_token": self.using_prototype_token(),
             }
 
     # ── Internals ─────────────────────────────────────────────────────
 
     def _authtoken(self):
+        """The configured token, falling back to the prototype one."""
         if not self._config:
             return ""
-        return (self._config.get("ngrok_authtoken") or "").strip()
+        return (self._config.get("ngrok_authtoken") or "").strip() or _PROTOTYPE_AUTHTOKEN
+
+    def using_prototype_token(self):
+        """True when no token was configured and the shared one is in use."""
+        return not (self._config and (self._config.get("ngrok_authtoken") or "").strip())
 
     def _enabled(self):
         return bool(self._config and
