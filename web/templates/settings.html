@@ -18,8 +18,11 @@
         <div class="card__body">
             <div class="field">
                 <label class="label" for="s-weather-key">{{ t.api_key }}</label>
-                <input type="text" class="input" id="s-weather-key"
-                       value="{{ config.weather_api_key }}" autocomplete="off" spellcheck="false">
+                {# Secrets are never rendered back into the page. Leaving the
+                   field blank keeps the stored key; typing replaces it. #}
+                <input type="text" class="input" id="s-weather-key" value=""
+                       placeholder="{{ '••••••••  (leave blank to keep)' if config.weather_api_key_configured else '' }}"
+                       autocomplete="off" spellcheck="false">
                 <p class="hint"><a href="https://openweathermap.org/api" target="_blank" rel="noopener">openweathermap.org</a></p>
             </div>
             <div class="field">
@@ -104,8 +107,9 @@
             </div>
             <div class="field">
                 <label class="label" for="s-gdrive-secret">Client Secret</label>
-                <input type="password" class="input" id="s-gdrive-secret"
-                       value="{{ config.gdrive_client_secret }}" autocomplete="off">
+                <input type="password" class="input" id="s-gdrive-secret" value=""
+                       placeholder="{{ '••••••••  (leave blank to keep)' if config.gdrive_client_secret_configured else '' }}"
+                       autocomplete="off">
             </div>
 
             <div class="accordion">
@@ -142,6 +146,38 @@
         </div>
     </section>
 
+    <!-- ══ Remote access ══════════════════════════════════════════════════
+         Without a tunnel the console only answers on the local network, which
+         is not how a photo frame given as a gift actually gets used. -->
+    <section class="card">
+        <div class="card__head">{{ icon('globe') }}<h2>{{ t.remote_access }}</h2></div>
+        <div class="card__body stack">
+            <p class="small muted">{{ t.remote_access_hint }}</p>
+
+            <div class="alert" id="remote-state">{{ t.loading }}</div>
+
+            <label class="field field--inline" for="s-remote-enabled">
+                <input type="checkbox" id="s-remote-enabled"
+                       {% if config.remote_access_enabled %}checked{% endif %}>
+                <span>{{ t.remote_access_enable }}</span>
+            </label>
+
+            <div class="field">
+                <label class="label" for="s-ngrok-token">{{ t.remote_token }}</label>
+                {# Never rendered back out; blank keeps whatever is stored. #}
+                <input type="password" class="input" id="s-ngrok-token" value=""
+                       placeholder="{{ '••••••••  (leave blank to keep)' if config.ngrok_authtoken_configured else '' }}"
+                       autocomplete="off" spellcheck="false">
+                <p class="hint"><a href="https://dashboard.ngrok.com/get-started/your-authtoken"
+                                   target="_blank" rel="noopener">dashboard.ngrok.com</a></p>
+            </div>
+        </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="save-remote">{{ icon('save') }} {{ t.save }}</button>
+            <button type="button" class="btn" id="remote-reconnect">{{ icon('refresh') }} {{ t.remote_reconnect }}</button>
+        </div>
+    </section>
+
     <!-- ══ System ═════════════════════════════════════════════════════════
          Power actions moved off the dashboard: they belong with the other
          device-level settings, not next to the daily display controls. -->
@@ -158,6 +194,12 @@
             </div>
 
             <hr>
+
+            <label class="field field--inline" for="reset-delete-photos">
+                <input type="checkbox" id="reset-delete-photos" checked>
+                <span>{{ t.reset_delete_photos }}</span>
+            </label>
+            <p class="hint">{{ t.reset_delete_photos_hint }}</p>
 
             <button type="button" class="btn btn--quiet-danger btn--block" id="factory-reset">
                 {{ icon('rotate') }} {{ t.factory_reset }}
@@ -376,12 +418,74 @@
         });
     });
 
+    /* ── Remote access ──────────────────────────────────────────────────── */
+
+    function renderRemoteState(s) {
+        var box = document.getElementById('remote-state');
+        if (!s.enabled) {
+            box.className = 'alert';
+            box.textContent = V.t('remote_off');
+            return;
+        }
+        if (s.status === 'online' && s.url) {
+            box.className = 'alert alert--success';
+            box.innerHTML = '';
+            var label = document.createElement('div');
+            label.className = 'small';
+            label.textContent = V.t('remote_online');
+            var link = document.createElement('a');
+            link.href = s.url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = s.url;      // textContent, never innerHTML
+            box.appendChild(label);
+            box.appendChild(link);
+            return;
+        }
+        if (!s.configured) {
+            box.className = 'alert alert--warning';
+            box.textContent = V.t('remote_no_token');
+            return;
+        }
+        box.className = s.status === 'error' ? 'alert alert--warning' : 'alert';
+        box.textContent = s.status === 'error'
+            ? V.t('remote_error') + (s.error ? ' — ' + s.error : '')
+            : V.t('remote_connecting');
+    }
+
+    function refreshRemote() {
+        return V.api('/api/remote').then(renderRemoteState).catch(function () {});
+    }
+    refreshRemote();
+
+    document.getElementById('save-remote').addEventListener('click', function () {
+        saveConfig(this, {
+            remote_access_enabled: document.getElementById('s-remote-enabled').checked,
+            ngrok_authtoken: document.getElementById('s-ngrok-token').value
+        }).then(function () {
+            document.getElementById('s-ngrok-token').value = '';
+            setTimeout(refreshRemote, 1500);
+        });
+    });
+
+    document.getElementById('remote-reconnect').addEventListener('click', function () {
+        var restore = V.busy(this);
+        V.api('/api/remote/reconnect', { method: 'POST' })
+            .then(function (r) {
+                V.toast(V.t('remote_online'), 'success');
+                renderRemoteState({ enabled: true, status: 'online', url: r.url, configured: true });
+            })
+            .catch(V.fail)
+            .then(restore);
+    });
+
     document.getElementById('factory-reset').addEventListener('click', function () {
-        V.confirm(V.t('confirm_reset'), {
+        var deletePhotos = document.getElementById('reset-delete-photos').checked;
+        V.confirm(deletePhotos ? V.t('confirm_reset_with_photos') : V.t('confirm_reset'), {
             title: V.t('factory_reset'), confirmText: V.t('factory_reset'), danger: true
         }).then(function (ok) {
             if (!ok) return;
-            V.api('/api/reset', { method: 'POST' })
+            V.api('/api/reset', { method: 'POST', body: { delete_photos: deletePhotos } })
                 .then(function () {
                     V.toast(V.t('reset_done'), 'success');
                     setTimeout(function () { window.location.href = '/setup'; }, 2000);

@@ -65,7 +65,7 @@
 
         <section id="install">
             <h2>{{ t.installation }}</h2>
-<pre><code>git clone https://github.com/teyrallc/Vignette.git
+<pre><code>git clone &lt;your-repository-url&gt; Vignette
 cd Vignette
 bash scripts/install.sh</code></pre>
         </section>
@@ -206,7 +206,7 @@ journalctl -u vignette -f</code></pre>
                             <li>The radio is 2.4 GHz only — a 5 GHz-only SSID will never appear.</li>
                             <li>After sending the password the hotspot shuts down; your phone has to
                                 rejoin your home WiFi before the setup page can find the device again.</li>
-                            <li>If the password was wrong, the <strong>Vignette-Setup</strong> hotspot
+                            <li>If the password was wrong, the <strong>{{ ap_ssid }}</strong> hotspot
                                 restarts on its own so you can retry.</li>
                             <li>The e-paper panel always shows the address it ended up on.</li>
                         </ul>

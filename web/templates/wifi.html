@@ -16,8 +16,8 @@
 <div class="alert alert--info mb-2 hidden" id="ap-banner">
     {{ icon('wifi') }}
     <div>
-        <strong>{{ t.hotspot_active }}</strong><br>
-        <span class="small">{{ t.hotspot_hint }}</span>
+        <strong>{{ t.hotspot_active.format(ssid=ap_ssid) }}</strong><br>
+        <span class="small">{{ t.hotspot_hint.format(ssid=ap_ssid) }}</span>
     </div>
 </div>
 

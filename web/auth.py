@@ -3,6 +3,7 @@ Authentication Blueprint for Vignette Smart Display.
 Handles registration (1st user only), login, and hardware OTP verification.
 """
 import logging
+import time
 from flask import Blueprint, request, jsonify, session, render_template, redirect, url_for
 from services import auth_mgr
 from services import display_mgr
@@ -11,6 +12,46 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 logger = logging.getLogger("vignette.auth")
 bp = Blueprint('auth', __name__, url_prefix='/auth')
+
+# ── Sign-in throttle ──────────────────────────────────────────────────────
+# There is exactly one account on this device and it is reachable from the
+# public internet through the tunnel, so an unthrottled login form is an
+# offline password crack with extra steps. Track failures per source address
+# and make each one progressively more expensive.
+_FAIL_WINDOW = 900          # forget a failure after 15 minutes
+_FREE_ATTEMPTS = 5          # no delay for the first few genuine typos
+_MAX_DELAY = 30.0           # cap so a wrong guess never hangs the request
+_login_failures = {}        # ip -> [timestamps]
+
+
+def _client_ip():
+    return request.remote_addr or "unknown"
+
+
+def _recent_failures(ip):
+    cutoff = time.time() - _FAIL_WINDOW
+    hits = [t for t in _login_failures.get(ip, []) if t > cutoff]
+    if hits:
+        _login_failures[ip] = hits
+    else:
+        _login_failures.pop(ip, None)
+    return len(hits)
+
+
+def _throttle_delay(ip):
+    """Seconds to stall before answering, given this address's recent misses."""
+    over = _recent_failures(ip) - _FREE_ATTEMPTS
+    if over < 0:
+        return 0.0
+    return min(_MAX_DELAY, 2.0 ** min(over, 6))
+
+
+def _record_failure(ip):
+    _login_failures.setdefault(ip, []).append(time.time())
+
+
+def _clear_failures(ip):
+    _login_failures.pop(ip, None)
 
 @bp.route('/setup', methods=['GET', 'POST'])
 def setup_admin():
@@ -92,6 +133,13 @@ def login():
         return render_template('auth/login.html')
 
     # POST
+    ip = _client_ip()
+    delay = _throttle_delay(ip)
+    if delay:
+        logger.warning(f"Throttling sign-in from {ip} by {delay:.0f}s "
+                       f"after {_recent_failures(ip)} recent failures")
+        time.sleep(delay)
+
     data = request.json or request.form
     email = data.get('email', '').strip()
     password = data.get('password', '')
@@ -100,8 +148,10 @@ def login():
     saved_hash = auth_mgr.config.get("admin_password_hash")
 
     if email != saved_email or not check_password_hash(saved_hash, password):
+        _record_failure(ip)
         return jsonify({"error": "Invalid credentials."}), 401
 
+    _clear_failures(ip)
     session['logged_in'] = True
     session['email'] = email
 

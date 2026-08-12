@@ -53,15 +53,52 @@ def display_image(image_path):
     subprocess.run([python, DISPLAY_SCRIPT, image_path])
 
 
+def find_gpio_chip(gpiod):
+    """Locate the SoC's GPIO chip.
+
+    The chip number is not stable across Raspberry Pi models — it is
+    gpiochip0 on a Pi Zero 2 W and gpiochip4 on a Pi 5 — so hard-coding one
+    means the buttons silently do nothing on every other board. Match on the
+    driver label instead, which is what actually identifies the SoC banks.
+    """
+    labels = ("pinctrl-bcm2835", "pinctrl-bcm2711", "pinctrl-rp1", "gpio-brcmstb")
+    for number in range(6):
+        path = f"/dev/gpiochip{number}"
+        if not os.path.exists(path):
+            continue
+        try:
+            chip = gpiod.Chip(path)
+        except (OSError, PermissionError):
+            continue
+        label = getattr(chip, "label", "") or ""
+        if any(known in label for known in labels) and chip.num_lines() >= 32:
+            print(f"Using {path} ({label})")
+            return chip
+        chip.close()
+
+    raise RuntimeError(
+        "No Raspberry Pi GPIO chip found. Checked /dev/gpiochip0-5. "
+        "If this is a Pi, check that the user is in the 'gpio' group.")
+
+
 def main():
     try:
         import gpiod
     except ImportError:
-        print("Error: gpiod library not available. Install with: pip install gpiod")
-        print("This script requires GPIO hardware (Raspberry Pi).")
+        print("Error: the libgpiod Python bindings are not available.")
+        print("Install them with:  sudo apt-get install -y python3-libgpiod")
+        print("NOTE: the PyPI package called 'gpiod' is the incompatible v2 API;")
+        print("      this script uses the v1 API that Debian ships.")
         sys.exit(1)
 
-    chip = gpiod.Chip('gpiochip4')
+    if not hasattr(gpiod, "LINE_REQ_EV_FALLING_EDGE"):
+        print("Error: this is libgpiod v2, whose API differs from the v1 one")
+        print("       this script uses. Install Debian's python3-libgpiod and")
+        print("       run with the system interpreter, or a venv created with")
+        print("       --system-site-packages.")
+        sys.exit(1)
+
+    chip = find_gpio_chip(gpiod)
     lines = {}
     for pin in BUTTONS:
         line = chip.get_line(pin)

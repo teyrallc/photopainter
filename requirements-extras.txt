@@ -1,0 +1,26 @@
+# Dependencies for the standalone CLI tools in src/. The web service never
+# imports any of these, so scripts/install.sh does not install them — see
+# scripts/install-extras.sh.
+#
+#   src/display_picture.py    saliency-aware cropping        -> opencv, numpy
+#   src/generate_picture.py   Stable Diffusion XL Turbo      -> no Python deps,
+#                                                               needs the
+#                                                               OnnxStream
+#                                                               binary + weights
+#   src/display_buttons.py    GPIO buttons                   -> python3-libgpiod
+#                                                               from apt, NOT pip
+#
+# The PyPI package named `gpiod` is the libgpiod v2 API, which is not the API
+# display_buttons.py uses. Debian's python3-libgpiod ships v1. Install it with
+# apt and create the venv with --system-site-packages, or run that one script
+# with the system interpreter.
+
+# Headless build: the frame has no display server, and the GUI variant pulls in
+# a long tail of X11 packages for nothing. `contrib` is required — the plain
+# package has no cv2.saliency.
+opencv-contrib-python-headless==4.10.0.84
+
+# Pinned below 2.0: the ARM wheels for the OpenCV release above are built
+# against the 1.x ABI, and mixing them fails at import with a numpy version
+# error rather than anything that points at the cause.
+numpy==1.26.4

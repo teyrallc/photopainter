@@ -153,9 +153,13 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
     return img
 
 
-def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password="vignette123"):
+def render_qr_setup(ip_address=None, port=5000, ap_ssid="Vignette", ap_password=""):
     """Render QR code WiFi setup page on e-paper (800x480).
     Modern two-column layout: WiFi QR | URL QR.
+
+    `ip_address` is accepted for call-site symmetry but deliberately unused:
+    this page is only ever shown while the device is serving its own hotspot,
+    where the only address that works is the fixed gateway below.
     """
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
@@ -231,21 +235,31 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
               fill=BLACK, font=font_tiny, anchor="mt")
     _draw_logo(draw, EPD_W // 2, FT + 38, 18, BLACK)
     draw.text((EPD_W // 2, FT + 60),
-              "\u00a9 2026 Teyra LLC", fill=BLACK, font=font_tiny, anchor="mt")
+              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 
 
-def render_wifi_connected(ssid, ip_address, port=5000):
+def render_wifi_connected(ssid, ip_address, port=5000, remote_url=None):
     """Render 'WiFi Connected' confirmation page on e-paper (800x480).
     Clean centered layout: header · network · URL · QR · footer.
+
+    When a tunnel is up, `remote_url` is what goes on the panel and into the
+    QR: the LAN address only works from inside the house, and this screen is
+    the one moment the owner is standing there ready to scan it. The LAN
+    address is still printed underneath as the local fallback.
     """
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    url = (f"https://{ip_address}"
-           if ("ngrok" in ip_address or "ngrok-free.app" in ip_address)
-           else f"http://{ip_address}:{port}")
+    local_url = f"http://{ip_address}:{port}"
+    if remote_url:
+        url = remote_url
+    elif "ngrok" in str(ip_address):
+        # Older callers passed a bare tunnel hostname in place of the IP.
+        url = f"https://{ip_address}"
+    else:
+        url = local_url
 
     font_title = _get_font(34)
     font_label = _get_font(18)
@@ -283,16 +297,25 @@ def render_wifi_connected(ssid, ip_address, port=5000):
         pass
 
     # ── Instructions ──
+    instructions = ("Scan the QR code or type the URL in your browser"
+                    if not remote_url else
+                    "Scan the QR code — this address works from anywhere")
     draw.text((EPD_W // 2, QR_TOP + QR_SIZE + 10),
-              "Scan the QR code or type the URL in your browser",
-              fill=BLACK, font=font_tiny, anchor="mt")
+              instructions, fill=BLACK, font=font_tiny, anchor="mt")
+
+    # When the tunnel is what the QR points at, the LAN address is still worth
+    # printing: it keeps working if the internet drops.
+    if remote_url:
+        draw.text((EPD_W // 2, QR_TOP + QR_SIZE + 26),
+                  f"On this network: {local_url}",
+                  fill=BLACK, font=font_tiny, anchor="mt")
 
     # ── Footer ──
     FT = EPD_H - 74   # 406
     draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
     _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
     draw.text((EPD_W // 2, FT + 52),
-              "\u00a9 2026 Teyra LLC", fill=BLACK, font=font_tiny, anchor="mt")
+              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 
@@ -332,7 +355,7 @@ def render_otp_page(code):
     draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
     _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
     draw.text((EPD_W // 2, FT + 52),
-              "\u00a9 2026 Teyra LLC", fill=BLACK, font=font_tiny, anchor="mt")
+              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 

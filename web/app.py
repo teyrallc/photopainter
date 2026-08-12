@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Vignette - H System Smart Display Web Control Interface
+Vignette - Smart Display Web Control Interface
 Flask web application for controlling the Waveshare 7.3" e-paper display.
 
 Phase 2: Three page views (Home/Widget/Photo), Weather, Calendar,
@@ -12,6 +12,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -19,7 +20,8 @@ from pathlib import Path
 
 from flask import (Flask, jsonify, make_response, redirect, render_template,
                    request, send_file, send_from_directory, session, url_for)
-from PIL import Image, ImageDraw, ImageFont
+from flask.sessions import SecureCookieSessionInterface
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 # Pillow compatibility
 LANCZOS = getattr(Image, 'Resampling', Image).LANCZOS
@@ -50,10 +52,22 @@ from services.i18n import get_translations
 from services import renderer
 from services import gdrive
 from services import display_mgr
+from services import device_id
+from services import epd as epd_service
+from services.remote_access import service as remote_access
+from services.net_watchdog import service as net_watchdog
 
 config = Config(CONFIG_PATH)
 
 app = Flask(__name__)
+
+# The tunnel is a reverse proxy: without this, `request.host` is the local
+# socket rather than the public hostname the browser actually used, and
+# `request.is_secure` is False even though the connection was HTTPS. Both are
+# load-bearing below — the same-origin check compares against the host, and
+# the session cookie's Secure flag follows the scheme.
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 # `config.get` only falls back when the key is absent, so a stored empty string
 # used to hand Flask an empty secret key and break every session. Treat blank
 # as missing, and persist the generated secret so sign-ins survive a restart.
@@ -62,6 +76,33 @@ app.secret_key = _session_secret
 if config.get("session_secret") != _session_secret:
     config.set("session_secret", _session_secret)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+# Without SameSite the session cookie rides along on cross-site requests, which
+# is what turns any page the owner happens to visit into a remote control for
+# this device.
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+
+
+class SchemeAwareSessionInterface(SecureCookieSessionInterface):
+    """Mark the session cookie Secure exactly when the connection was HTTPS.
+
+    The same server answers on two very different paths: plain HTTP on the
+    LAN, and HTTPS through the tunnel. A global SESSION_COOKIE_SECURE would
+    have to pick one — set it and LAN sign-in breaks, leave it and the cookie
+    that travels over the internet is not marked. Deciding per request is the
+    only answer that is correct on both.
+    """
+
+    def get_cookie_secure(self, app):
+        return bool(request and request.is_secure)
+
+
+app.session_interface = SchemeAwareSessionInterface()
+
+# A Pi Zero has well under a gigabyte of RAM, so an image that decompresses to
+# a few hundred megapixels is a denial of service rather than a photo. Pillow's
+# default only warns; cap it at something a 7.3" panel could ever need.
+Image.MAX_IMAGE_PIXELS = 64 * 1024 * 1024
 
 # ── Auth System ────────────────────────────────────────────────────────
 from services import auth_mgr
@@ -70,37 +111,117 @@ auth_mgr.set_config_ref(config)
 from auth import bp as auth_bp
 app.register_blueprint(auth_bp)
 
+# Reachable with no session in any state: assets and the sign-in/registration
+# flow itself.
+_ALWAYS_OPEN_PREFIXES = ('/static', '/auth')
+
+# Reachable with no session *only while the device is unpaired*. This is the
+# pairing portal and nothing else — the previous version opened the entire API
+# during pairing, and left /api/wifi/* open forever afterwards, so anyone who
+# reached the device could re-point it at their own access point or enumerate
+# the owner's neighbouring networks long after setup finished.
+_PAIRING_OPEN_EXACT = ('/', '/setup')
+_PAIRING_OPEN_PREFIXES = ('/api/wifi/',)
+
+# The one endpoint that must answer unauthenticated in both states: after the
+# hotspot drops, the phone polls it on the device's new address to learn
+# whether the join worked, and nobody can have signed in yet. It only reports
+# the progress of a connection attempt the caller just made.
+_CONNECT_STATUS_PATH = '/api/wifi/connect/status'
+
+
 @app.before_request
 def enforce_auth():
-    """Globally protect routes. Exceptions are static files, wifi setup forms, and the auth blueprint itself."""
-    # Allow unauthenticated access to setup, static, auth pages, and wifi connection/status
-    if request.path.startswith('/static') or request.path.startswith('/auth'):
-        return
-    if request.path.startswith('/api/wifi/'):
-        return
-    if request.path.startswith('/output/'):
+    """Globally protect routes.
+
+    Two states, deliberately different: while unpaired the pairing portal is
+    open because there is no account to authenticate against yet; once paired,
+    everything except the assets and the auth flow needs a session.
+    """
+    path = request.path
+
+    if path.startswith(_ALWAYS_OPEN_PREFIXES) or path == _CONNECT_STATUS_PATH:
         return
 
-    # If AP mode is active (setup_complete is False), we let people use the local network setup portal
     if not config.is_setup_complete:
-        return
+        if path in _PAIRING_OPEN_EXACT or path.startswith(_PAIRING_OPEN_PREFIXES):
+            return
+        # Anything else during pairing still falls through to the checks below,
+        # so /api/config and friends are not an open door on a fresh device.
 
     if not config.get("admin_email"):
-        if request.path.startswith('/api/'):
+        if path.startswith('/api/'):
             return jsonify({"error": "Setup required."}), 401
         return redirect(url_for('auth.setup_admin'))
-        
+
     if not session.get('logged_in'):
-        if request.path.startswith('/api/'):
+        if path.startswith('/api/'):
             return jsonify({"error": "Unauthorized.", "redirect": "/auth/login"}), 401
         return redirect(url_for('auth.login', next=request.url))
 
 
+def _acceptable_hosts():
+    """Hostnames a request may legitimately claim to come from.
+
+    Normally just the host it arrived on. The tunnel host is included as well
+    so that a browser which followed a redirect, or reached the device on the
+    LAN while the tunnel is also up, is not mistaken for an attacker.
+    """
+    hosts = {request.host}
+    forwarded = request.headers.get('X-Forwarded-Host')
+    if forwarded:
+        hosts.add(forwarded.split(',')[0].strip())
+    tunnel = remote_access.host
+    if tunnel:
+        hosts.add(tunnel)
+    return hosts
+
+
+@app.before_request
+def enforce_same_origin():
+    """Reject cross-site state changes.
+
+    Every mutating endpoint here is a plain JSON POST with no token, so a page
+    on any other origin could drive this device — reboot it, factory-reset it,
+    rewrite its config — using the owner's own session cookie. Comparing the
+    request's declared origin against the host it actually arrived on costs
+    nothing and closes that off; browsers set one of these headers on exactly
+    the cross-origin requests we care about.
+    """
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return
+    if request.path == _CONNECT_STATUS_PATH:
+        return
+
+    origin = request.headers.get('Origin')
+    source = origin or request.headers.get('Referer')
+    if not source:
+        # Non-browser clients (curl, the update script) send neither. They are
+        # not the CSRF threat — that requires a browser carrying the cookie.
+        return
+
+    from urllib.parse import urlsplit
+    if urlsplit(source).netloc not in _acceptable_hosts():
+        logger.warning(f"Blocked cross-origin {request.method} {request.path} "
+                       f"from {source!r} (host is {request.host!r})")
+        return jsonify({"error": "Cross-origin request blocked."}), 403
+
+
 @app.context_processor
 def inject_globals():
-    """Inject translation strings and language into all templates."""
+    """Inject translation strings, language and device identity into templates.
+
+    `ap_ssid` is here because the pairing hotspot's name is per device now, so
+    no template or string table may hard-code it. The password deliberately is
+    not: it belongs on the e-paper panel in front of whoever owns the device,
+    not in a page a tunnelled browser session can read.
+    """
     lang = request.cookies.get("lang", config.get("lang", "en"))
-    return {"t": get_translations(lang), "current_lang": lang}
+    return {
+        "t": get_translations(lang),
+        "current_lang": lang,
+        "ap_ssid": AP_SSID,
+    }
 
 
 @app.errorhandler(Exception)
@@ -108,20 +229,59 @@ def handle_exception(e):
     logger.error(f"Unhandled error on {request.path}: {e}", exc_info=True)
     if request.path.startswith('/api/') or request.path.startswith('/auth/'):
         code = getattr(e, 'code', 500)
-        return jsonify({"error": str(e)}), code
+        # HTTPExceptions carry a description written for the caller; anything
+        # else is an internal fault whose str() is a Python traceback message
+        # and describes our internals, not the caller's mistake.
+        if code == 500:
+            return jsonify({"error": "Internal error. See the device log for details."}), 500
+        return jsonify({"error": getattr(e, 'description', None) or "Request failed."}), code
     raise e
+
+
+def safe_output_path(filename):
+    """Resolve `filename` inside OUTPUT_DIR, or return None if it escapes.
+
+    Endpoints that take the name from a JSON body rather than a route segment
+    get no protection from the URL router, so '../../etc/passwd' arrived here
+    intact and was happily opened.
+    """
+    if not filename:
+        return None
+    root = os.path.realpath(OUTPUT_DIR)
+    candidate = os.path.realpath(os.path.join(root, filename))
+    if candidate != root and not candidate.startswith(root + os.sep):
+        logger.warning(f"Rejected path outside output dir: {filename!r}")
+        return None
+    return candidate
 
 
 display_lock = threading.RLock()
 
 # ── WiFi AP Hotspot Management ────────────────────────────────────────────
 
-AP_SSID = "Vignette-Setup"
-AP_PASSWORD = "vignette123"
+# Derived per device rather than fixed in the source: every unit used to
+# advertise the same name with the same published password, so any two frames
+# in one house were indistinguishable and either was joinable by anyone who
+# had read this file.
+AP_SSID, AP_PASSWORD = device_id.ap_credentials(config)
 AP_CONN_NAME = "Vignette-Hotspot"
 
 # Cached WiFi scan results (scanned before AP starts)
 _cached_wifi_networks = []
+
+
+# The service no longer runs as root, and NetworkManager will not let an
+# unprivileged account create or activate connection profiles. `sudo nmcli` is
+# on the narrow allowlist installed by scripts/install.sh; when we *are* root
+# (a dev checkout, an older install) the prefix is skipped so nothing changes.
+_NEEDS_SUDO = os.geteuid() != 0
+
+
+def nmcli(*args, timeout=15, check=False):
+    """Run one nmcli command, elevating only if we have to."""
+    cmd = (["sudo", "-n", "nmcli"] if _NEEDS_SUDO else ["nmcli"]) + list(args)
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          timeout=timeout, check=check)
 
 
 def _nmcli_fields(line):
@@ -187,9 +347,7 @@ def scan_and_cache_wifi():
     global _cached_wifi_networks
     try:
         logger.info("Scanning WiFi networks before starting AP...")
-        result = subprocess.run(
-            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
-            capture_output=True, text=True, timeout=30)
+        result = nmcli("-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes", timeout=30)
         _cached_wifi_networks = _parse_wifi_scan(result.stdout)
         logger.info(f"Cached {len(_cached_wifi_networks)} WiFi networks")
     except Exception as e:
@@ -204,13 +362,10 @@ def start_ap_hotspot():
     logger.info(f"Starting AP hotspot: {AP_SSID}")
     try:
         # Remove old hotspot connection if exists
-        subprocess.run(
-            ["nmcli", "connection", "delete", AP_CONN_NAME],
-            capture_output=True, text=True, timeout=10)
+        nmcli("connection", "delete", AP_CONN_NAME, timeout=10)
 
         # Create connection profile with explicit settings
-        result = subprocess.run([
-            "nmcli", "connection", "add",
+        result = nmcli("connection", "add",
             "type", "wifi",
             "ifname", "wlan0",
             "con-name", AP_CONN_NAME,
@@ -220,20 +375,19 @@ def start_ap_hotspot():
             "ipv4.method", "shared",
             "ipv4.addresses", "192.168.4.1/24",
             "wifi-sec.key-mgmt", "wpa-psk",
-            "wifi-sec.psk", AP_PASSWORD,
-        ], capture_output=True, text=True, timeout=15)
+            "wifi-sec.psk", AP_PASSWORD, timeout=15)
 
         if result.returncode != 0:
             logger.error(f"Failed to create hotspot profile: {result.stderr}")
             return False
 
         # Activate the connection
-        result = subprocess.run(
-            ["nmcli", "connection", "up", AP_CONN_NAME],
-            capture_output=True, text=True, timeout=15)
+        result = nmcli("connection", "up", AP_CONN_NAME, timeout=15)
 
         if result.returncode == 0:
-            logger.info(f"AP hotspot started: SSID={AP_SSID}, Pass={AP_PASSWORD}")
+            # The password is deliberately not logged — the journal is
+            # readable by anyone who can reach the device's shell.
+            logger.info(f"AP hotspot started: SSID={AP_SSID}")
             return True
         else:
             logger.error(f"Failed to activate hotspot: {result.stderr}")
@@ -247,12 +401,8 @@ def stop_ap_hotspot():
     """Stop the WiFi AP hotspot."""
     logger.info("Stopping AP hotspot")
     try:
-        subprocess.run(
-            ["nmcli", "connection", "down", AP_CONN_NAME],
-            capture_output=True, text=True, timeout=10)
-        subprocess.run(
-            ["nmcli", "connection", "delete", AP_CONN_NAME],
-            capture_output=True, text=True, timeout=10)
+        nmcli("connection", "down", AP_CONN_NAME, timeout=10)
+        nmcli("connection", "delete", AP_CONN_NAME, timeout=10)
         logger.info("AP hotspot stopped")
     except Exception as e:
         logger.error(f"Hotspot stop error: {e}")
@@ -261,9 +411,7 @@ def stop_ap_hotspot():
 def is_ap_active():
     """Check if the AP hotspot is currently running."""
     try:
-        result = subprocess.run(
-            ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"],
-            capture_output=True, text=True, timeout=5)
+        result = nmcli("-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active", timeout=5)
         for line in result.stdout.strip().split('\n'):
             if AP_CONN_NAME in line:
                 return True
@@ -359,27 +507,52 @@ def process_upload(file_storage, rotation=0, fit_mode="fit"):
         filepath = os.path.join(OUTPUT_DIR, filename)
         counter += 1
 
-    file_storage.save(filepath)
+    # Land the upload in a temp file first. Writing straight into the gallery
+    # meant a file that only *looked* like a PNG — the extension is all that
+    # was ever checked — stayed behind in output/ after the decode blew up, and
+    # every later listing counted it as a photo.
+    fd, staging = tempfile.mkstemp(dir=OUTPUT_DIR, prefix=".incoming-", suffix=ext)
+    os.close(fd)
+    try:
+        file_storage.save(staging)
 
-    # Apply rotation if requested
-    img = Image.open(filepath).convert("RGB")
-    if rotation:
-        img = img.rotate(-rotation, expand=True)
+        # verify() settles what the bytes actually are; it also invalidates the
+        # instance, so the real load happens on a second open.
+        with Image.open(staging) as probe:
+            probe.verify()
 
-    # Apply fit mode
-    if fit_mode == "stretch":
-        img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-    else:
-        # Fit: maintain aspect ratio, save at original (rotated) size
-        img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-        # Create white canvas and center
-        canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
-        px = (EPD_WIDTH - img.width) // 2
-        py = (EPD_HEIGHT - img.height) // 2
-        canvas.paste(img, (px, py))
-        img = canvas
+        img = Image.open(staging).convert("RGB")
+        if rotation:
+            img = img.rotate(-rotation, expand=True)
+    except Exception:
+        if os.path.exists(staging):
+            os.remove(staging)
+        raise
 
-    img.save(filepath)
+    try:
+        # Apply fit mode
+        if fit_mode == "stretch":
+            img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+        else:
+            # Fit: maintain aspect ratio, save at original (rotated) size
+            img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+            # Create white canvas and center
+            canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+            px = (EPD_WIDTH - img.width) // 2
+            py = (EPD_HEIGHT - img.height) // 2
+            canvas.paste(img, (px, py))
+            img = canvas
+
+        img.save(filepath)
+    except Exception:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise
+    finally:
+        img.close()
+        if os.path.exists(staging):
+            os.remove(staging)
+
     return filename
 
 
@@ -431,7 +604,7 @@ def index():
                            display_state=display_state,
                            photo_state=photo_state,
                            total_images=len(images),
-                           config=config.to_dict(),
+                           config=config.public_dict(),
                            now=int(time.time()))
 
 
@@ -439,13 +612,13 @@ def index():
 def setup_page():
     if not config.is_setup_complete:
         return render_template('wifi_setup.html')
-    return render_template('setup.html', config=config.to_dict())
+    return render_template('setup.html', config=config.public_dict())
 
 
 
 @app.route('/upload')
 def upload_page():
-    return render_template('upload.html', config=config.to_dict())
+    return render_template('upload.html', config=config.public_dict())
 
 
 @app.route('/gallery')
@@ -453,14 +626,14 @@ def gallery_page():
     images = get_image_list()
     gdrive_connected = config.get("gdrive_connected", False)
     gdrive_configured = bool(config.get("gdrive_client_id", ""))
-    return render_template('gallery.html', images=images, config=config.to_dict(),
+    return render_template('gallery.html', images=images, config=config.public_dict(),
                            gdrive_connected=gdrive_connected,
                            gdrive_configured=gdrive_configured)
 
 
 @app.route('/settings')
 def settings_page():
-    return render_template('settings.html', config=config.to_dict())
+    return render_template('settings.html', config=config.public_dict())
 
 
 @app.route('/manual')
@@ -470,7 +643,7 @@ def manual_page():
 
 @app.route('/wifi')
 def wifi_page():
-    return render_template('wifi.html', config=config.to_dict())
+    return render_template('wifi.html', config=config.public_dict())
 
 
 @app.errorhandler(404)
@@ -484,40 +657,61 @@ def handle_404(e):
 def api_setup():
     """Save initial setup configuration."""
     data = request.get_json() or {}
-    config.update({
+    saved = {
         "setup_complete": True,
-        "weather_api_key": data.get("weather_api_key", ""),
         "weather_city": data.get("weather_city", ""),
         "weather_units": data.get("weather_units", "metric"),
         "calendar_ical_url": data.get("calendar_ical_url", ""),
         "current_page": data.get("current_page", "photo"),
-    })
+    }
+    # The form no longer echoes the stored key back, so an empty field means
+    # "unchanged" rather than "clear it".
+    if data.get("weather_api_key"):
+        saved["weather_api_key"] = data["weather_api_key"]
+    config.update(saved)
     logger.info("Setup complete!")
     return jsonify({"success": True, "message": "Setup saved"})
 
 
 @app.route('/api/config', methods=['GET'])
 def api_config_get():
-    return jsonify(config.to_dict())
+    return jsonify(config.public_dict())
 
 
 @app.route('/api/config', methods=['POST'])
 def api_config_set():
     data = request.get_json() or {}
-    config.update(data)
-    return jsonify({"success": True, "config": config.to_dict()})
+    applied = config.apply_user_settings(data)
+    return jsonify({"success": True, "applied": sorted(applied),
+                    "config": config.public_dict()})
 
 
 @app.route('/api/reset', methods=['POST'])
 def api_reset():
     """Reset all settings to factory defaults (simulates first-time QR setup)."""
+    data = request.get_json(silent=True) or {}
+
+    # A device that changes hands keeps the previous owner's photos unless the
+    # caller asks for them too — config.reset() only ever cleared settings.
+    removed = 0
+    if data.get("delete_photos"):
+        for image in get_image_list():
+            try:
+                os.remove(os.path.join(OUTPUT_DIR, image["filename"]))
+                removed += 1
+            except OSError as e:
+                logger.error(f"Factory reset: could not delete {image['filename']}: {e}")
+        photo_state.update({"current_index": -1, "current_image": None, "total": 0})
+        logger.info(f"Factory reset: deleted {removed} photos")
+
     config.reset()
     logger.info("System reset to factory defaults")
     # Start AP hotspot for WiFi configuration
     start_ap_hotspot()
     # Display QR setup on e-paper
     display_mgr.display_qr_setup()
-    return jsonify({"success": True, "message": "Reset complete. QR setup displayed."})
+    return jsonify({"success": True, "photos_deleted": removed,
+                    "message": "Reset complete. QR setup displayed."})
 
 
 # ── API: Page Control (virtual buttons) ──────────────────────────────────
@@ -624,9 +818,14 @@ def api_upload():
         filename = process_upload(file, rotation, fit_mode)
         return jsonify({"success": True, "filename": filename,
                         "message": f"Image uploaded: {filename}"})
+    except UnidentifiedImageError:
+        # The extension said PNG but the bytes disagree. That is the caller's
+        # mistake, not a server fault.
+        logger.warning(f"Rejected non-image upload: {file.filename!r}")
+        return jsonify({"error": "That file is not a readable image."}), 400
     except Exception as e:
         logger.error(f"Upload failed: {e}", exc_info=True)
-        return jsonify({"error": f"Upload failed: {e}"}), 500
+        return jsonify({"error": "Upload failed. See the device log for details."}), 500
 
 
 @app.route('/api/display', methods=['POST'])
@@ -635,9 +834,12 @@ def api_display():
     filename = data.get('filename') or request.form.get('filename')
     if not filename:
         return jsonify({"error": "No filename provided"}), 400
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.isfile(filepath):
         return jsonify({"error": "Image not found"}), 404
+    # Name is re-derived from the resolved path so photo_state can never record
+    # something the caller typed.
+    filename = os.path.basename(filepath)
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
     try:
@@ -658,8 +860,8 @@ def api_display():
 
 @app.route('/api/preview/<filename>')
 def api_preview(filename):
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.isfile(filepath):
         return jsonify({"error": "Image not found"}), 404
     buf = quantize_to_epaper(filepath)
     return send_file(buf, mimetype='image/png', download_name=f"preview_{filename}")
@@ -672,11 +874,11 @@ def api_images():
 
 @app.route('/api/images/<filename>', methods=['DELETE'])
 def api_delete_image(filename):
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.isfile(filepath):
         return jsonify({"error": "Image not found"}), 404
     os.remove(filepath)
-    return jsonify({"success": True, "message": f"Deleted {filename}"})
+    return jsonify({"success": True, "message": f"Deleted {os.path.basename(filepath)}"})
 
 
 @app.route('/api/upload/batch', methods=['POST'])
@@ -698,9 +900,13 @@ def api_upload_batch():
         try:
             filename = process_upload(file, rotation, fit_mode)
             results.append({"filename": filename, "success": True})
-        except Exception as e:
+        except UnidentifiedImageError:
             results.append({"filename": file.filename, "success": False,
-                            "error": str(e)})
+                            "error": "Not a readable image"})
+        except Exception as e:
+            logger.error(f"Batch upload failed for {file.filename!r}: {e}", exc_info=True)
+            results.append({"filename": file.filename, "success": False,
+                            "error": "Upload failed"})
 
     ok = sum(1 for r in results if r["success"])
     return jsonify({"success": True, "uploaded": ok,
@@ -946,8 +1152,7 @@ def api_clear():
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
     try:
-        from waveshare_epd import epd7in3e
-        epd = epd7in3e.EPD()
+        epd = epd_service.get_epd(config.get("epd_model"))
         epd.init()
         epd.Clear()
         epd.sleep()
@@ -963,8 +1168,7 @@ def api_clear():
 @app.route('/api/sleep', methods=['POST'])
 def api_sleep():
     try:
-        from waveshare_epd import epd7in3e
-        epd = epd7in3e.EPD()
+        epd = epd_service.get_epd(config.get("epd_model"))
         epd.init()
         epd.sleep()
         display_state["status"] = "sleeping"
@@ -1072,10 +1276,21 @@ def _slideshow_loop():
     logger.info("Slideshow stopped")
 
 
+def start_slideshow_thread():
+    """(Re)start the slideshow worker. Safe to call when one is already running."""
+    global slideshow_thread
+    if slideshow_thread and slideshow_thread.is_alive():
+        _slideshow_stop.set()
+        slideshow_thread.join(timeout=5)
+
+    _slideshow_stop.clear()
+    slideshow_thread = threading.Thread(target=_slideshow_loop, daemon=True)
+    slideshow_thread.start()
+
+
 @app.route('/api/slideshow/start', methods=['POST'])
 def api_slideshow_start():
     """Start photo slideshow."""
-    global slideshow_thread
     data = request.get_json() or {}
 
     # Save slideshow config
@@ -1087,15 +1302,7 @@ def api_slideshow_start():
         config.set("slideshow_order", data["order"])  # "sequential" or "random"
 
     config.set("slideshow_active", True)
-
-    # Stop existing if running
-    if slideshow_thread and slideshow_thread.is_alive():
-        _slideshow_stop.set()
-        slideshow_thread.join(timeout=5)
-
-    _slideshow_stop.clear()
-    slideshow_thread = threading.Thread(target=_slideshow_loop, daemon=True)
-    slideshow_thread.start()
+    start_slideshow_thread()
 
     return jsonify({"success": True, "message": "Slideshow started"})
 
@@ -1110,6 +1317,63 @@ def api_slideshow_stop():
         slideshow_thread.join(timeout=5)
     slideshow_thread = None
     return jsonify({"success": True, "message": "Slideshow stopped"})
+
+
+# ── Periodic panel refresh ──────────────────────────────────────────────
+#
+# The weather and calendar caches were written against an "hourly e-paper
+# refresh" that was never actually built, so a wall-mounted panel showed
+# whatever the data looked like the last time somebody pressed a button. This
+# is that missing loop. Only the data-driven pages are redrawn — repainting a
+# photo that has not changed would burn panel refresh cycles for nothing.
+
+_refresh_stop = threading.Event()
+refresh_thread = None
+
+# Pages whose content goes stale on its own.
+_DATA_PAGES = ("home", "widget")
+
+
+def _auto_refresh_loop():
+    logger.info("Auto-refresh loop started")
+    while not _refresh_stop.is_set():
+        interval = int(config.get("auto_refresh_interval", 3600) or 0)
+        if interval <= 0:
+            # Disabled — idle cheaply and pick the change up if it is re-enabled.
+            _refresh_stop.wait(60)
+            continue
+
+        _refresh_stop.wait(interval)
+        if _refresh_stop.is_set():
+            break
+
+        if config.get("current_page") not in _DATA_PAGES:
+            continue
+        if config.get("slideshow_active"):
+            # The slideshow is already driving the panel; two writers would
+            # just fight over the lock.
+            continue
+
+        if display_lock.acquire(blocking=False):
+            try:
+                logger.info("Auto-refresh: redrawing the current page")
+                display_mgr.display_current_page()
+            except Exception as e:
+                logger.error(f"Auto-refresh failed: {e}")
+            finally:
+                display_lock.release()
+        else:
+            logger.info("Auto-refresh skipped: display busy")
+    logger.info("Auto-refresh loop stopped")
+
+
+def start_auto_refresh():
+    global refresh_thread
+    if refresh_thread and refresh_thread.is_alive():
+        return
+    _refresh_stop.clear()
+    refresh_thread = threading.Thread(target=_auto_refresh_loop, daemon=True)
+    refresh_thread.start()
 
 
 @app.route('/api/slideshow/status')
@@ -1157,9 +1421,7 @@ def api_wifi_status():
     """Get current WiFi connection status."""
     ap_active = is_ap_active()
     try:
-        result = subprocess.run(
-            ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"],
-            capture_output=True, text=True, timeout=10)
+        result = nmcli("-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi", timeout=10)
         for line in result.stdout.strip().split('\n'):
             parts = _nmcli_fields(line)
             if len(parts) >= 3 and parts[0] == 'yes':
@@ -1181,9 +1443,7 @@ def api_wifi_scan():
     if is_ap_active():
         return jsonify({"networks": _cached_wifi_networks, "cached": True})
     try:
-        result = subprocess.run(
-            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
-            capture_output=True, text=True, timeout=30)
+        result = nmcli("-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes", timeout=30)
         return jsonify({"networks": _parse_wifi_scan(result.stdout)})
     except Exception as e:
         return jsonify({"networks": [], "error": str(e)})
@@ -1196,6 +1456,37 @@ _wifi_connect_state = {
     "ip": None,
     "error": None,
 }
+
+
+def _await_remote_url(timeout=20):
+    """Wait briefly for the tunnel to come up, then give up gracefully.
+
+    Used only where a URL is about to be shown to somebody who is standing in
+    front of the device. Never blocks the supervisor, which keeps retrying
+    regardless of what happens here.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        url = remote_access.url
+        if url:
+            return url
+        time.sleep(1)
+    return remote_access.url
+
+
+def _on_remote_url_change(url):
+    """Repaint the panel when the public address changes.
+
+    Free ngrok hands out a different hostname on every reconnect, so without
+    this the address printed on the panel silently stops working.
+    """
+    if not config.is_setup_complete:
+        return
+    try:
+        ssid = get_active_ssid() or config.get("wifi_ssid", "WiFi")
+        display_mgr.display_wifi_connected(ssid, _get_ip(), remote_url=url)
+    except Exception as e:
+        logger.error(f"Could not repaint the panel for the new remote URL: {e}")
 
 
 def _background_wifi_connect(ssid, password):
@@ -1220,31 +1511,32 @@ def _background_wifi_connect(ssid, password):
         logger.info(f"Background WiFi: Connecting to {ssid}")
         
         # Remove any existing connection for this SSID (prevents bad saved password issues)
-        subprocess.run(["nmcli", "connection", "delete", ssid],
-                       capture_output=True, text=True, timeout=5)
+        nmcli("connection", "delete", ssid, timeout=5)
 
         # Build the connection profile non-interactively
-        add_cmd = [
-            "nmcli", "connection", "add",
+        add_args = [
+            "connection", "add",
             "type", "wifi",
             "ifname", "wlan0",
             "con-name", ssid,
             "ssid", ssid,
         ]
         if password:
-            add_cmd += [
+            add_args += [
                 "wifi-sec.key-mgmt", "wpa-psk",
                 "wifi-sec.psk", password,
             ]
-        
-        add_result = subprocess.run(add_cmd, capture_output=True, text=True, timeout=10)
-        logger.info(f"Background WiFi: nmcli add result: {add_result.stdout.strip()} {add_result.stderr.strip()}")
+
+        add_result = nmcli(*add_args, timeout=10)
+        # stderr can echo the profile back, password included, so only the
+        # outcome goes in the journal.
+        logger.info(f"Background WiFi: nmcli add returned {add_result.returncode}")
+        if add_result.returncode != 0:
+            logger.warning("Background WiFi: could not create the connection profile")
 
         # Activate the connection (non-interactive, no agent needed)
         try:
-            result = subprocess.run(
-                ["nmcli", "connection", "up", ssid],
-                capture_output=True, text=True, timeout=30)
+            result = nmcli("connection", "up", ssid, timeout=30)
             logger.info(f"Background WiFi: nmcli up result: {result.stdout.strip()} {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
             logger.warning("Background WiFi: nmcli timed out, checking connection status")
@@ -1253,8 +1545,7 @@ def _background_wifi_connect(ssid, password):
         # Step 4: Verify connection (nmcli can return failure/timeout but still connect)
         is_connected = False
         for _ in range(5):  # Poll up to 10 seconds
-            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
-                                   capture_output=True, text=True, timeout=5)
+            check = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi", timeout=5)
             for line in check.stdout.strip().split('\n'):
                 parts = _nmcli_fields(line)
                 if len(parts) >= 2 and parts[0] == "yes" and parts[1] == ssid:
@@ -1268,16 +1559,12 @@ def _background_wifi_connect(ssid, password):
             logger.info(f"Background WiFi: Successfully connected to {ssid}")
 
             # Ensure NM saves this connection with autoconnect and high priority
-            subprocess.run(
-                ["nmcli", "connection", "modify", ssid,
+            nmcli("connection", "modify", ssid,
                  "connection.autoconnect", "yes",
-                 "connection.autoconnect-priority", "100"],
-                capture_output=True, text=True, timeout=5)
+                 "connection.autoconnect-priority", "100", timeout=5)
 
             # Double-check AP profile is gone
-            subprocess.run(
-                ["nmcli", "connection", "delete", AP_CONN_NAME],
-                capture_output=True, text=True, timeout=5)
+            nmcli("connection", "delete", AP_CONN_NAME, timeout=5)
 
             new_ip = _get_ip()
             logger.info(f"Background WiFi: New IP = {new_ip}")
@@ -1285,27 +1572,24 @@ def _background_wifi_connect(ssid, password):
             # Mark setup complete upon ACTUAL success
             config.set("setup_complete", True)
 
-            # Start ngrok tunnel and get the public URL
-            redirect_url = f"http://{new_ip}:5000"
+            # Bring remote access up. The supervisor retries on its own, so
+            # this only waits long enough to put a usable address on the panel
+            # and in the redirect; if the tunnel is slower than that, the
+            # supervisor's callback repaints the screen when it lands.
+            remote_access.start()
+            public_url = _await_remote_url(timeout=20)
+
+            redirect_url = public_url or f"http://{new_ip}:5000"
+            real_ssid = get_active_ssid() or ssid
             try:
-                from pyngrok import ngrok
-                logger.info("Initializing ngrok tunnel after setup...")
-                ngrok.set_auth_token("3By64a7MxTOJAWF3eD8TGoLcaIl_5tprPKw4ftjjRSTWU1eVM")
-                public_url = ngrok.connect(5000).public_url
-                logger.info(f"Ngrok Tunnel Active: {public_url}")
-                redirect_url = public_url
-                real_ssid = get_active_ssid() or ssid
-                display_mgr.display_wifi_connected(real_ssid, public_url.replace("https://", ""))
+                display_mgr.display_wifi_connected(real_ssid, new_ip,
+                                                   remote_url=public_url)
             except Exception as e:
-                logger.error(f"Failed to start ngrok in background: {e}")
-                try:
-                    real_ssid = get_active_ssid() or ssid
-                    display_mgr.display_wifi_connected(real_ssid, new_ip)
-                except Exception:
-                    pass
+                logger.error(f"Could not draw the connected screen: {e}")
 
             _wifi_connect_state.update({
-                "status": "success", "ip": new_ip, "redirect_url": redirect_url})
+                "status": "success", "ip": new_ip, "redirect_url": redirect_url,
+                "remote_url": public_url})
         else:
             err = "Timeout" if result is None else (result.stderr.strip() or "Connection failed")
             logger.error(f"Background WiFi: Connect failed: {err}")
@@ -1377,6 +1661,29 @@ def api_wifi_connect_status():
     return resp
 
 
+# ── API: Remote access ───────────────────────────────────────────────────
+
+@app.route('/api/remote')
+def api_remote_status():
+    """Where this device can be reached from outside the house."""
+    state = remote_access.state()
+    state["local_url"] = f"http://{_get_ip()}:5000"
+    return jsonify(state)
+
+
+@app.route('/api/remote/reconnect', methods=['POST'])
+def api_remote_reconnect():
+    """Force a fresh tunnel — the manual escape hatch when one is wedged."""
+    remote_access.stop()
+    remote_access.start()
+    url = _await_remote_url(timeout=25)
+    if url:
+        return jsonify({"success": True, "url": url})
+    state = remote_access.state()
+    return jsonify({"error": state.get("error") or "Tunnel did not come up",
+                    "status": state.get("status")}), 503
+
+
 # ── API: System ──────────────────────────────────────────────────────────
 
 @app.route('/api/status')
@@ -1384,7 +1691,7 @@ def api_status():
     return jsonify({
         "display": display_state,
         "photo": photo_state,
-        "config": config.to_dict(),
+        "config": config.public_dict(),
         "total_images": len(get_image_list()),
         "system": get_system_info(),
     })
@@ -1429,8 +1736,7 @@ def _get_ip():
 def get_active_ssid():
     """Dynamically get the currently active WiFi from NetworkManager."""
     try:
-        check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
-                               capture_output=True, text=True, timeout=5)
+        check = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi", timeout=5)
         return _nmcli_active_ssid(check.stdout)
     except Exception:
         pass
@@ -1559,8 +1865,7 @@ def verify_or_connect_wifi_on_boot():
     # 1. Wait up to 15 seconds for NM auto-connect
     for _ in range(15):
         try:
-            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
-                                   capture_output=True, text=True, timeout=5)
+            check = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi", timeout=5)
             if _nmcli_active_ssid(check.stdout) == ssid:
                 logger.info(f"Boot check: Auto-connected to {ssid} successfully.")
                 return True
@@ -1570,19 +1875,18 @@ def verify_or_connect_wifi_on_boot():
         
     # 2. Try a manual connection using the document record
     logger.warning(f"Boot check: Auto-connect timed out for {ssid}. Trying manual connection.")
-    cmd = ["nmcli", "dev", "wifi", "connect", ssid]
+    args = ["dev", "wifi", "connect", ssid]
     if password:
-        cmd += ["password", password]
+        args += ["password", password]
     try:
-        subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        nmcli(*args, timeout=20)
     except subprocess.TimeoutExpired:
         pass
         
     # 3. Check again for 10 seconds
     for _ in range(10):
         try:
-            check = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
-                                   capture_output=True, text=True, timeout=5)
+            check = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi", timeout=5)
             if _nmcli_active_ssid(check.stdout) == ssid:
                 logger.info(f"Boot check: Manually connected to {ssid} successfully.")
                 return True
@@ -1629,19 +1933,76 @@ def resolve_boot_state():
     return False
 
 
+# Wire the services to their dependencies at import, not at start-up: the
+# state they report (is remote access configured? which network are we
+# watching?) has to be right the moment the first request arrives, including
+# when this module is imported by a WSGI server rather than run directly.
+# Only the threads below wait for an explicit start.
+remote_access.init(config, on_url_change=_on_remote_url_change)
+net_watchdog.init(
+    config,
+    active_ssid=get_active_ssid,
+    start_ap=start_ap_hotspot,
+    stop_ap=stop_ap_hotspot,
+    scan_wifi=scan_and_cache_wifi,
+    show_pairing_screen=display_mgr.display_qr_setup,
+    connect_saved=verify_or_connect_wifi_on_boot,
+    is_pairing_in_progress=lambda: _wifi_connect_state["status"] == "connecting",
+)
+
+
+def start_background_services():
+    """Bring up the long-running workers. Safe to call once, at boot."""
+    net_watchdog.start()
+
+    # The slideshow flag is persisted, but nothing ever read it back, so a
+    # power cut left the interface reporting a slideshow that was not running.
+    if config.get("slideshow_active"):
+        logger.info("Resuming slideshow from saved state")
+        start_slideshow_thread()
+
+    start_auto_refresh()
+
+
+def serve():
+    """Run the HTTP server.
+
+    Werkzeug's development server is single-threaded and explicitly not for
+    production, which matters more here than usual: this process is reachable
+    from the public internet through the tunnel. waitress is pure Python, so
+    it installs on a Pi Zero without a compiler, and it is the default. The
+    fallback exists so a checkout with missing dependencies still starts and
+    can be fixed from the interface.
+    """
+    try:
+        from waitress import serve as waitress_serve
+    except ImportError:
+        logger.warning("waitress is not installed — falling back to the Flask "
+                       "development server. Run: pip install -r requirements.txt")
+        app.run(host='0.0.0.0', port=5000, debug=False)
+        return
+
+    # A Pi Zero 2 W has four slow cores; a handful of threads is enough to keep
+    # the interface responsive while a panel refresh holds one for ~20 seconds.
+    waitress_serve(app, host='0.0.0.0', port=5000, threads=8,
+                   ident='Vignette', clear_untrusted_proxy_headers=False)
+
+
 if __name__ == '__main__':
     resolve_boot_state()
 
     ip = _get_ip()
     print("=" * 60)
-    print("  Vignette - H System Smart Display")
+    print("  Vignette")
     print(f"  Output directory: {OUTPUT_DIR}")
     print(f"  Setup complete: {config.is_setup_complete}")
     print(f"  Local:   http://localhost:5000")
     print(f"  Network: http://{ip}:5000")
     if not config.is_setup_complete:
-        print(f"  AP Mode: Connect to '{AP_SSID}' then open http://192.168.4.1:5000")
+        print(f"  Pairing: join '{AP_SSID}' then open http://192.168.4.1:5000")
     print("=" * 60)
+
+    start_background_services()
 
     # On first boot or failed reconnect: scan WiFi, then start AP
     if not config.is_setup_complete:
@@ -1653,24 +2014,17 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"Could not display QR setup: {e}")
     else:
-        # Start ngrok tunnel since network is available
+        remote_access.start()
+        public_url = _await_remote_url(timeout=25)
+        if public_url:
+            logger.info(f"Remote access ready: {public_url}")
+        else:
+            logger.warning("Remote access not up yet — the supervisor keeps "
+                           "retrying; the panel updates when it lands.")
         try:
-            from pyngrok import ngrok
-            logger.info("Initializing ngrok tunnel...")
-            ngrok.set_auth_token("3By64a7MxTOJAWF3eD8TGoLcaIl_5tprPKw4ftjjRSTWU1eVM")
-            public_url = ngrok.connect(5000).public_url
-            logger.info(f"Ngrok Tunnel Active: {public_url}")
-            
-            # Display ngrok URL on e-paper
             ssid = get_active_ssid() or config.get("wifi_ssid", "WiFi")
-            # We can override the IP display to show the ngrok tunnel so the user knows remote access is ready
-            display_mgr.display_wifi_connected(ssid, ip_address=public_url.replace("https://", ""))
+            display_mgr.display_wifi_connected(ssid, ip, remote_url=public_url)
         except Exception as e:
-            logger.error(f"Failed to start ngrok: {e}")
-            try:
-                ssid = get_active_ssid() or config.get("wifi_ssid", "WiFi")
-                display_mgr.display_wifi_connected(ssid, ip)
-            except Exception as e2:
-                pass
+            logger.error(f"Could not draw the connected screen: {e}")
 
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    serve()
