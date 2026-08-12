@@ -134,18 +134,61 @@ bash scripts/update.sh
 
 You can also trigger a remote update from the Web UI under **Settings → System → Update**.
 
-## Tests
+## Optional extras
 
-The e-paper panel and NetworkManager are stubbed, so the suite runs on any
-machine — no Pi and no display needed:
+The three tools in `src/` are independent of the frame — nothing in `web/`
+imports them — and they need dependencies `scripts/install.sh` deliberately
+does not install. `scripts/install-extras.sh` fills those gaps, one part at a
+time:
 
 ```bash
-python3 -m pytest tests/      # or: python3 tests/test_smoke.py
+bash scripts/install-extras.sh --vision    # saliency-aware cropping
+bash scripts/install-extras.sh --buttons   # GPIO buttons
+bash scripts/install-extras.sh --ai        # Stable Diffusion XL Turbo
+bash scripts/install-extras.sh --all
 ```
 
-It asks every route for a response and checks the security boundaries
-(secret redaction, the config write allowlist, same-origin enforcement,
-path containment on filenames). Run it before pushing.
+| Tool | What it does | What it needs |
+|---|---|---|
+| `src/display_picture.py` | Crops to the panel using saliency detection, so a portrait photo keeps its subject instead of being centred blindly | `opencv-contrib-python-headless`, `numpy` |
+| `src/display_buttons.py` | The four GPIO buttons on the carrier board: newest / previous / next / shutdown | `python3-libgpiod` **from apt** |
+| `src/generate_picture.py` | Generates artwork from the prompt sets in `prompts/` | An OnnxStream build and ~2.5 GB of SDXL Turbo weights |
+
+Three things worth knowing before running `--ai`:
+
+- It needs about **6 GB of free disk**.
+- Building XNNPACK on a Pi Zero 2 W takes **hours** and is killed by the OOM
+  killer without a 2 GB swap file. The script checks and tells you how to
+  raise it. Run it inside `tmux` so an SSH drop does not take it with you.
+- Generating one 800×480 image then takes **20–40 minutes** on that board.
+  Treat it as a background curiosity, not an interactive feature.
+
+The buttons are **not** started automatically and there is no systemd unit for
+them; run `python3 src/display_buttons.py` yourself, or add a unit if you want
+them always on.
+
+> The PyPI package named `gpiod` is the libgpiod **v2** API, which is not the
+> API `display_buttons.py` uses. The v1 bindings come from Debian as
+> `python3-libgpiod`, so either run that script with the system interpreter or
+> create the venv with `--system-site-packages`. The script says so if you get
+> it wrong rather than failing at the first attribute access.
+
+## Tests
+
+The e-paper panel, NetworkManager, OpenCV and libgpiod are all stubbed, so the
+suite runs on any machine — no Pi, no display, no extras installed:
+
+```bash
+python3 -m pytest tests/
+# or, without pytest:
+python3 tests/test_smoke.py && python3 tests/test_extras.py
+```
+
+`test_smoke.py` asks every route for a response and checks the security
+boundaries (secret redaction, the config write allowlist, same-origin
+enforcement, path containment, cookie flags, the network watchdog).
+`test_extras.py` covers the `src/` tools: panel palettes, GPIO chip discovery,
+path resolution and the missing-dependency guards. Run both before pushing.
 
 ## API Reference
 
@@ -274,21 +317,21 @@ Vignette/
 │   └── static/                  # CSS/JS static files
 ├── scripts/
 │   ├── install.sh               # Installation script
+│   ├── install-extras.sh        # Optional deps for the src/ tools
 │   ├── update.sh                # Remote update script
 │   └── vignette.service         # systemd service file
 ├── tests/
-│   └── test_smoke.py            # Runs off-device; hardware is stubbed
+│   ├── test_smoke.py            # Web service; hardware is stubbed
+│   └── test_extras.py           # The src/ tools; their deps are stubbed
 ├── output/                      # Image output directory
 ├── requirements.txt             # Python dependencies
+├── requirements-extras.txt      # Dependencies for the src/ tools only
 ├── LICENSE
 └── README.md
 ```
 
-> `src/` holds standalone CLI tools (saliency-aware display, Stable Diffusion
-> generation) that the web service never imports. They need extra dependencies
-> — `opencv-contrib-python`, `numpy`, `gpiod` — and, for generation, an
-> OnnxStream build plus model weights. None of that is installed by
-> `scripts/install.sh`.
+> `src/` holds standalone CLI tools that the web service never imports. They
+> need dependencies the frame itself does not — see **Optional extras** below.
 
 ## Credits
 

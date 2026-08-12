@@ -1,8 +1,11 @@
 output/*.png
 output/*.jpg
 output/*.jpeg
+# Built by scripts/install-extras.sh --ai. Several gigabytes between them,
+# and all of it reproducible from that script.
 models/
 OnnxStream/
+XNNPACK/
 venv/
 __pycache__/
 *.pyc

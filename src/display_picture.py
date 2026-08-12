@@ -9,12 +9,33 @@ import argparse
 import os
 import sys
 
-# Add lib directory to path for waveshare_epd
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# waveshare_epd lives in lib/; the panel-selection helper lives with the web
+# service, so this tool honours the same epd_model setting as the frame does.
+sys.path.insert(0, os.path.join(PROJECT_DIR, "lib"))
+sys.path.insert(0, os.path.join(PROJECT_DIR, "web"))
 
 import cv2
 import numpy as np
 from PIL import Image
+
+
+def configured_panel():
+    """The panel model from config.json, or the default if unreadable."""
+    try:
+        from services.config import Config
+        return Config(os.path.join(PROJECT_DIR, "config.json")).get("epd_model")
+    except Exception:
+        return None
+
+
+# The 7.3" E panel renders six inks; the F panel adds orange. Dithering an
+# image toward a colour the fitted panel cannot produce just muddies it, so
+# the preview palette follows the panel rather than assuming one.
+PALETTE_6 = (0, 0, 0,  255, 255, 255,  0, 255, 0,  0, 0, 255,
+             255, 0, 0,  255, 255, 0)
+PALETTE_7 = PALETTE_6 + (255, 128, 0)
 
 
 def load_image(image_path):
@@ -90,7 +111,7 @@ def crop(image, disp_w, disp_h, intelligent=True):
 
 def display_on_epaper(image):
     """Display a CV2 image on the Waveshare 7.3" e-paper display."""
-    from waveshare_epd import epd7in3e
+    from services import epd as epd_service
 
     # Rotate if portrait
     if image.shape[0] > image.shape[1]:
@@ -103,7 +124,7 @@ def display_on_epaper(image):
     pil_image = Image.fromarray(image)
 
     # Initialize display
-    epd = epd7in3e.EPD()
+    epd = epd_service.get_epd(configured_panel())
     print("Initializing e-paper display...")
     epd.init()
 
@@ -116,26 +137,27 @@ def display_on_epaper(image):
     print("Display updated successfully!")
 
 
-def quantize_preview(image):
-    """
-    Quantize image to 7-color palette (simulates e-paper appearance).
-    Returns a PIL Image for preview purposes.
+def quantize_preview(image, model=None):
+    """Quantize to the fitted panel's inks, to simulate how it will look.
+
+    This used to always include orange, which only the F panel can produce —
+    on an E panel the preview promised a colour the hardware would never
+    render, and the dithering was tuned for the wrong gamut.
     """
     if len(image.shape) == 3 and image.shape[2] == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     pil_image = Image.fromarray(image)
 
-    # Create palette matching e-paper display
-    pal_image = Image.new("P", (1, 1))
-    pal_image.putpalette(
-        (0, 0, 0,  255, 255, 255,  0, 255, 0,  0, 0, 255,
-         255, 0, 0,  255, 255, 0,  255, 128, 0) + (0, 0, 0) * 249
-    )
+    palette = PALETTE_7 if (model or configured_panel()) == "7in3f" else PALETTE_6
+    used = len(palette) // 3
 
-    # Quantize to 7 colors with dithering
-    image_7color = pil_image.convert("RGB").quantize(palette=pal_image)
-    return image_7color.convert("RGB")
+    pal_image = Image.new("P", (1, 1))
+    # putpalette wants all 256 entries; pad the unused ones with black.
+    pal_image.putpalette(palette + (0, 0, 0) * (256 - used))
+
+    quantized = pil_image.convert("RGB").quantize(palette=pal_image)
+    return quantized.convert("RGB")
 
 
 def main():
