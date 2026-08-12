@@ -153,9 +153,13 @@ def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
     return img
 
 
-def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password="vignette123"):
+def render_qr_setup(ip_address=None, port=5000, ap_ssid="Vignette-Setup", ap_password="vignette123"):
     """Render QR code WiFi setup page on e-paper (800x480).
     Modern two-column layout: WiFi QR | URL QR.
+
+    `ip_address` is accepted for call-site symmetry but deliberately unused:
+    this page is only ever shown while the device is serving its own hotspot,
+    where the only address that works is the fixed gateway below.
     """
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)

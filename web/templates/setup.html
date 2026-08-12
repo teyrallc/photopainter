@@ -17,8 +17,10 @@
             <div class="card__body">
                 <div class="field">
                     <label class="label" for="weather_api_key">{{ t.api_key }}</label>
-                    <input type="text" class="input" id="weather_api_key"
-                           value="{{ config.weather_api_key }}" autocomplete="off" spellcheck="false">
+                    {# Never render the stored key back out; blank means "keep". #}
+                    <input type="text" class="input" id="weather_api_key" value=""
+                           placeholder="{{ '••••••••  (leave blank to keep)' if config.weather_api_key_configured else '' }}"
+                           autocomplete="off" spellcheck="false">
                     <p class="hint">
                         <a href="https://openweathermap.org/api" target="_blank" rel="noopener">{{ t.weather_hint }}</a>
                     </p>

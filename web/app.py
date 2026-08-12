@@ -12,6 +12,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -19,7 +20,7 @@ from pathlib import Path
 
 from flask import (Flask, jsonify, make_response, redirect, render_template,
                    request, send_file, send_from_directory, session, url_for)
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 # Pillow compatibility
 LANCZOS = getattr(Image, 'Resampling', Image).LANCZOS
@@ -62,6 +63,17 @@ app.secret_key = _session_secret
 if config.get("session_secret") != _session_secret:
     config.set("session_secret", _session_secret)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+# Without SameSite the session cookie rides along on cross-site requests, which
+# is what turns any page the owner happens to visit into a remote control for
+# this device. Secure is not forced: the same server answers on plain HTTP over
+# the LAN, and marking the cookie Secure there would lock the owner out.
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+
+# A Pi Zero has well under a gigabyte of RAM, so an image that decompresses to
+# a few hundred megapixels is a denial of service rather than a photo. Pillow's
+# default only warns; cap it at something a 7.3" panel could ever need.
+Image.MAX_IMAGE_PIXELS = 64 * 1024 * 1024
 
 # ── Auth System ────────────────────────────────────────────────────────
 from services import auth_mgr
@@ -70,30 +82,83 @@ auth_mgr.set_config_ref(config)
 from auth import bp as auth_bp
 app.register_blueprint(auth_bp)
 
+# Reachable with no session in any state: assets and the sign-in/registration
+# flow itself.
+_ALWAYS_OPEN_PREFIXES = ('/static', '/auth')
+
+# Reachable with no session *only while the device is unpaired*. This is the
+# pairing portal and nothing else — the previous version opened the entire API
+# during pairing, and left /api/wifi/* open forever afterwards, so anyone who
+# reached the device could re-point it at their own access point or enumerate
+# the owner's neighbouring networks long after setup finished.
+_PAIRING_OPEN_EXACT = ('/', '/setup')
+_PAIRING_OPEN_PREFIXES = ('/api/wifi/',)
+
+# The one endpoint that must answer unauthenticated in both states: after the
+# hotspot drops, the phone polls it on the device's new address to learn
+# whether the join worked, and nobody can have signed in yet. It only reports
+# the progress of a connection attempt the caller just made.
+_CONNECT_STATUS_PATH = '/api/wifi/connect/status'
+
+
 @app.before_request
 def enforce_auth():
-    """Globally protect routes. Exceptions are static files, wifi setup forms, and the auth blueprint itself."""
-    # Allow unauthenticated access to setup, static, auth pages, and wifi connection/status
-    if request.path.startswith('/static') or request.path.startswith('/auth'):
-        return
-    if request.path.startswith('/api/wifi/'):
-        return
-    if request.path.startswith('/output/'):
+    """Globally protect routes.
+
+    Two states, deliberately different: while unpaired the pairing portal is
+    open because there is no account to authenticate against yet; once paired,
+    everything except the assets and the auth flow needs a session.
+    """
+    path = request.path
+
+    if path.startswith(_ALWAYS_OPEN_PREFIXES) or path == _CONNECT_STATUS_PATH:
         return
 
-    # If AP mode is active (setup_complete is False), we let people use the local network setup portal
     if not config.is_setup_complete:
-        return
+        if path in _PAIRING_OPEN_EXACT or path.startswith(_PAIRING_OPEN_PREFIXES):
+            return
+        # Anything else during pairing still falls through to the checks below,
+        # so /api/config and friends are not an open door on a fresh device.
 
     if not config.get("admin_email"):
-        if request.path.startswith('/api/'):
+        if path.startswith('/api/'):
             return jsonify({"error": "Setup required."}), 401
         return redirect(url_for('auth.setup_admin'))
-        
+
     if not session.get('logged_in'):
-        if request.path.startswith('/api/'):
+        if path.startswith('/api/'):
             return jsonify({"error": "Unauthorized.", "redirect": "/auth/login"}), 401
         return redirect(url_for('auth.login', next=request.url))
+
+
+@app.before_request
+def enforce_same_origin():
+    """Reject cross-site state changes.
+
+    Every mutating endpoint here is a plain JSON POST with no token, so a page
+    on any other origin could drive this device — reboot it, factory-reset it,
+    rewrite its config — using the owner's own session cookie. Comparing the
+    request's declared origin against the host it actually arrived on costs
+    nothing and closes that off; browsers set one of these headers on exactly
+    the cross-origin requests we care about.
+    """
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return
+    if request.path == _CONNECT_STATUS_PATH:
+        return
+
+    origin = request.headers.get('Origin')
+    source = origin or request.headers.get('Referer')
+    if not source:
+        # Non-browser clients (curl, the update script) send neither. They are
+        # not the CSRF threat — that requires a browser carrying the cookie.
+        return
+
+    from urllib.parse import urlsplit
+    if urlsplit(source).netloc != request.host:
+        logger.warning(f"Blocked cross-origin {request.method} {request.path} "
+                       f"from {source!r} (host is {request.host!r})")
+        return jsonify({"error": "Cross-origin request blocked."}), 403
 
 
 @app.context_processor
@@ -108,8 +173,30 @@ def handle_exception(e):
     logger.error(f"Unhandled error on {request.path}: {e}", exc_info=True)
     if request.path.startswith('/api/') or request.path.startswith('/auth/'):
         code = getattr(e, 'code', 500)
-        return jsonify({"error": str(e)}), code
+        # HTTPExceptions carry a description written for the caller; anything
+        # else is an internal fault whose str() is a Python traceback message
+        # and describes our internals, not the caller's mistake.
+        if code == 500:
+            return jsonify({"error": "Internal error. See the device log for details."}), 500
+        return jsonify({"error": getattr(e, 'description', None) or "Request failed."}), code
     raise e
+
+
+def safe_output_path(filename):
+    """Resolve `filename` inside OUTPUT_DIR, or return None if it escapes.
+
+    Endpoints that take the name from a JSON body rather than a route segment
+    get no protection from the URL router, so '../../etc/passwd' arrived here
+    intact and was happily opened.
+    """
+    if not filename:
+        return None
+    root = os.path.realpath(OUTPUT_DIR)
+    candidate = os.path.realpath(os.path.join(root, filename))
+    if candidate != root and not candidate.startswith(root + os.sep):
+        logger.warning(f"Rejected path outside output dir: {filename!r}")
+        return None
+    return candidate
 
 
 display_lock = threading.RLock()
@@ -359,27 +446,52 @@ def process_upload(file_storage, rotation=0, fit_mode="fit"):
         filepath = os.path.join(OUTPUT_DIR, filename)
         counter += 1
 
-    file_storage.save(filepath)
+    # Land the upload in a temp file first. Writing straight into the gallery
+    # meant a file that only *looked* like a PNG — the extension is all that
+    # was ever checked — stayed behind in output/ after the decode blew up, and
+    # every later listing counted it as a photo.
+    fd, staging = tempfile.mkstemp(dir=OUTPUT_DIR, prefix=".incoming-", suffix=ext)
+    os.close(fd)
+    try:
+        file_storage.save(staging)
 
-    # Apply rotation if requested
-    img = Image.open(filepath).convert("RGB")
-    if rotation:
-        img = img.rotate(-rotation, expand=True)
+        # verify() settles what the bytes actually are; it also invalidates the
+        # instance, so the real load happens on a second open.
+        with Image.open(staging) as probe:
+            probe.verify()
 
-    # Apply fit mode
-    if fit_mode == "stretch":
-        img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-    else:
-        # Fit: maintain aspect ratio, save at original (rotated) size
-        img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-        # Create white canvas and center
-        canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
-        px = (EPD_WIDTH - img.width) // 2
-        py = (EPD_HEIGHT - img.height) // 2
-        canvas.paste(img, (px, py))
-        img = canvas
+        img = Image.open(staging).convert("RGB")
+        if rotation:
+            img = img.rotate(-rotation, expand=True)
+    except Exception:
+        if os.path.exists(staging):
+            os.remove(staging)
+        raise
 
-    img.save(filepath)
+    try:
+        # Apply fit mode
+        if fit_mode == "stretch":
+            img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+        else:
+            # Fit: maintain aspect ratio, save at original (rotated) size
+            img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+            # Create white canvas and center
+            canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+            px = (EPD_WIDTH - img.width) // 2
+            py = (EPD_HEIGHT - img.height) // 2
+            canvas.paste(img, (px, py))
+            img = canvas
+
+        img.save(filepath)
+    except Exception:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise
+    finally:
+        img.close()
+        if os.path.exists(staging):
+            os.remove(staging)
+
     return filename
 
 
@@ -431,7 +543,7 @@ def index():
                            display_state=display_state,
                            photo_state=photo_state,
                            total_images=len(images),
-                           config=config.to_dict(),
+                           config=config.public_dict(),
                            now=int(time.time()))
 
 
@@ -439,13 +551,13 @@ def index():
 def setup_page():
     if not config.is_setup_complete:
         return render_template('wifi_setup.html')
-    return render_template('setup.html', config=config.to_dict())
+    return render_template('setup.html', config=config.public_dict())
 
 
 
 @app.route('/upload')
 def upload_page():
-    return render_template('upload.html', config=config.to_dict())
+    return render_template('upload.html', config=config.public_dict())
 
 
 @app.route('/gallery')
@@ -453,14 +565,14 @@ def gallery_page():
     images = get_image_list()
     gdrive_connected = config.get("gdrive_connected", False)
     gdrive_configured = bool(config.get("gdrive_client_id", ""))
-    return render_template('gallery.html', images=images, config=config.to_dict(),
+    return render_template('gallery.html', images=images, config=config.public_dict(),
                            gdrive_connected=gdrive_connected,
                            gdrive_configured=gdrive_configured)
 
 
 @app.route('/settings')
 def settings_page():
-    return render_template('settings.html', config=config.to_dict())
+    return render_template('settings.html', config=config.public_dict())
 
 
 @app.route('/manual')
@@ -470,7 +582,7 @@ def manual_page():
 
 @app.route('/wifi')
 def wifi_page():
-    return render_template('wifi.html', config=config.to_dict())
+    return render_template('wifi.html', config=config.public_dict())
 
 
 @app.errorhandler(404)
@@ -484,40 +596,61 @@ def handle_404(e):
 def api_setup():
     """Save initial setup configuration."""
     data = request.get_json() or {}
-    config.update({
+    saved = {
         "setup_complete": True,
-        "weather_api_key": data.get("weather_api_key", ""),
         "weather_city": data.get("weather_city", ""),
         "weather_units": data.get("weather_units", "metric"),
         "calendar_ical_url": data.get("calendar_ical_url", ""),
         "current_page": data.get("current_page", "photo"),
-    })
+    }
+    # The form no longer echoes the stored key back, so an empty field means
+    # "unchanged" rather than "clear it".
+    if data.get("weather_api_key"):
+        saved["weather_api_key"] = data["weather_api_key"]
+    config.update(saved)
     logger.info("Setup complete!")
     return jsonify({"success": True, "message": "Setup saved"})
 
 
 @app.route('/api/config', methods=['GET'])
 def api_config_get():
-    return jsonify(config.to_dict())
+    return jsonify(config.public_dict())
 
 
 @app.route('/api/config', methods=['POST'])
 def api_config_set():
     data = request.get_json() or {}
-    config.update(data)
-    return jsonify({"success": True, "config": config.to_dict()})
+    applied = config.apply_user_settings(data)
+    return jsonify({"success": True, "applied": sorted(applied),
+                    "config": config.public_dict()})
 
 
 @app.route('/api/reset', methods=['POST'])
 def api_reset():
     """Reset all settings to factory defaults (simulates first-time QR setup)."""
+    data = request.get_json(silent=True) or {}
+
+    # A device that changes hands keeps the previous owner's photos unless the
+    # caller asks for them too — config.reset() only ever cleared settings.
+    removed = 0
+    if data.get("delete_photos"):
+        for image in get_image_list():
+            try:
+                os.remove(os.path.join(OUTPUT_DIR, image["filename"]))
+                removed += 1
+            except OSError as e:
+                logger.error(f"Factory reset: could not delete {image['filename']}: {e}")
+        photo_state.update({"current_index": -1, "current_image": None, "total": 0})
+        logger.info(f"Factory reset: deleted {removed} photos")
+
     config.reset()
     logger.info("System reset to factory defaults")
     # Start AP hotspot for WiFi configuration
     start_ap_hotspot()
     # Display QR setup on e-paper
     display_mgr.display_qr_setup()
-    return jsonify({"success": True, "message": "Reset complete. QR setup displayed."})
+    return jsonify({"success": True, "photos_deleted": removed,
+                    "message": "Reset complete. QR setup displayed."})
 
 
 # ── API: Page Control (virtual buttons) ──────────────────────────────────
@@ -624,9 +757,14 @@ def api_upload():
         filename = process_upload(file, rotation, fit_mode)
         return jsonify({"success": True, "filename": filename,
                         "message": f"Image uploaded: {filename}"})
+    except UnidentifiedImageError:
+        # The extension said PNG but the bytes disagree. That is the caller's
+        # mistake, not a server fault.
+        logger.warning(f"Rejected non-image upload: {file.filename!r}")
+        return jsonify({"error": "That file is not a readable image."}), 400
     except Exception as e:
         logger.error(f"Upload failed: {e}", exc_info=True)
-        return jsonify({"error": f"Upload failed: {e}"}), 500
+        return jsonify({"error": "Upload failed. See the device log for details."}), 500
 
 
 @app.route('/api/display', methods=['POST'])
@@ -635,9 +773,12 @@ def api_display():
     filename = data.get('filename') or request.form.get('filename')
     if not filename:
         return jsonify({"error": "No filename provided"}), 400
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.isfile(filepath):
         return jsonify({"error": "Image not found"}), 404
+    # Name is re-derived from the resolved path so photo_state can never record
+    # something the caller typed.
+    filename = os.path.basename(filepath)
     if not display_lock.acquire(blocking=False):
         return jsonify({"error": "Display is busy"}), 503
     try:
@@ -658,8 +799,8 @@ def api_display():
 
 @app.route('/api/preview/<filename>')
 def api_preview(filename):
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.isfile(filepath):
         return jsonify({"error": "Image not found"}), 404
     buf = quantize_to_epaper(filepath)
     return send_file(buf, mimetype='image/png', download_name=f"preview_{filename}")
@@ -672,11 +813,11 @@ def api_images():
 
 @app.route('/api/images/<filename>', methods=['DELETE'])
 def api_delete_image(filename):
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = safe_output_path(filename)
+    if not filepath or not os.path.isfile(filepath):
         return jsonify({"error": "Image not found"}), 404
     os.remove(filepath)
-    return jsonify({"success": True, "message": f"Deleted {filename}"})
+    return jsonify({"success": True, "message": f"Deleted {os.path.basename(filepath)}"})
 
 
 @app.route('/api/upload/batch', methods=['POST'])
@@ -698,9 +839,13 @@ def api_upload_batch():
         try:
             filename = process_upload(file, rotation, fit_mode)
             results.append({"filename": filename, "success": True})
-        except Exception as e:
+        except UnidentifiedImageError:
             results.append({"filename": file.filename, "success": False,
-                            "error": str(e)})
+                            "error": "Not a readable image"})
+        except Exception as e:
+            logger.error(f"Batch upload failed for {file.filename!r}: {e}", exc_info=True)
+            results.append({"filename": file.filename, "success": False,
+                            "error": "Upload failed"})
 
     ok = sum(1 for r in results if r["success"])
     return jsonify({"success": True, "uploaded": ok,
@@ -1072,10 +1217,21 @@ def _slideshow_loop():
     logger.info("Slideshow stopped")
 
 
+def start_slideshow_thread():
+    """(Re)start the slideshow worker. Safe to call when one is already running."""
+    global slideshow_thread
+    if slideshow_thread and slideshow_thread.is_alive():
+        _slideshow_stop.set()
+        slideshow_thread.join(timeout=5)
+
+    _slideshow_stop.clear()
+    slideshow_thread = threading.Thread(target=_slideshow_loop, daemon=True)
+    slideshow_thread.start()
+
+
 @app.route('/api/slideshow/start', methods=['POST'])
 def api_slideshow_start():
     """Start photo slideshow."""
-    global slideshow_thread
     data = request.get_json() or {}
 
     # Save slideshow config
@@ -1087,15 +1243,7 @@ def api_slideshow_start():
         config.set("slideshow_order", data["order"])  # "sequential" or "random"
 
     config.set("slideshow_active", True)
-
-    # Stop existing if running
-    if slideshow_thread and slideshow_thread.is_alive():
-        _slideshow_stop.set()
-        slideshow_thread.join(timeout=5)
-
-    _slideshow_stop.clear()
-    slideshow_thread = threading.Thread(target=_slideshow_loop, daemon=True)
-    slideshow_thread.start()
+    start_slideshow_thread()
 
     return jsonify({"success": True, "message": "Slideshow started"})
 
@@ -1110,6 +1258,63 @@ def api_slideshow_stop():
         slideshow_thread.join(timeout=5)
     slideshow_thread = None
     return jsonify({"success": True, "message": "Slideshow stopped"})
+
+
+# ── Periodic panel refresh ──────────────────────────────────────────────
+#
+# The weather and calendar caches were written against an "hourly e-paper
+# refresh" that was never actually built, so a wall-mounted panel showed
+# whatever the data looked like the last time somebody pressed a button. This
+# is that missing loop. Only the data-driven pages are redrawn — repainting a
+# photo that has not changed would burn panel refresh cycles for nothing.
+
+_refresh_stop = threading.Event()
+refresh_thread = None
+
+# Pages whose content goes stale on its own.
+_DATA_PAGES = ("home", "widget")
+
+
+def _auto_refresh_loop():
+    logger.info("Auto-refresh loop started")
+    while not _refresh_stop.is_set():
+        interval = int(config.get("auto_refresh_interval", 3600) or 0)
+        if interval <= 0:
+            # Disabled — idle cheaply and pick the change up if it is re-enabled.
+            _refresh_stop.wait(60)
+            continue
+
+        _refresh_stop.wait(interval)
+        if _refresh_stop.is_set():
+            break
+
+        if config.get("current_page") not in _DATA_PAGES:
+            continue
+        if config.get("slideshow_active"):
+            # The slideshow is already driving the panel; two writers would
+            # just fight over the lock.
+            continue
+
+        if display_lock.acquire(blocking=False):
+            try:
+                logger.info("Auto-refresh: redrawing the current page")
+                display_mgr.display_current_page()
+            except Exception as e:
+                logger.error(f"Auto-refresh failed: {e}")
+            finally:
+                display_lock.release()
+        else:
+            logger.info("Auto-refresh skipped: display busy")
+    logger.info("Auto-refresh loop stopped")
+
+
+def start_auto_refresh():
+    global refresh_thread
+    if refresh_thread and refresh_thread.is_alive():
+        return
+    _refresh_stop.clear()
+    refresh_thread = threading.Thread(target=_auto_refresh_loop, daemon=True)
+    refresh_thread.start()
 
 
 @app.route('/api/slideshow/status')
@@ -1384,7 +1589,7 @@ def api_status():
     return jsonify({
         "display": display_state,
         "photo": photo_state,
-        "config": config.to_dict(),
+        "config": config.public_dict(),
         "total_images": len(get_image_list()),
         "system": get_system_info(),
     })
@@ -1672,5 +1877,13 @@ if __name__ == '__main__':
                 display_mgr.display_wifi_connected(ssid, ip)
             except Exception as e2:
                 pass
+
+    # The slideshow flag is persisted, but nothing ever read it back, so a
+    # power cut left the interface reporting a slideshow that was not running.
+    if config.get("slideshow_active"):
+        logger.info("Resuming slideshow from saved state")
+        start_slideshow_thread()
+
+    start_auto_refresh()
 
     app.run(host='0.0.0.0', port=5000, debug=False)

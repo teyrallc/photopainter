@@ -113,8 +113,13 @@ def display_current_page():
     display_state["current_image"] = f"[{page} page]"
     return display_pil_image(img)
 
-def display_qr_setup(ip):
-    """Display QR code setup page on e-paper."""
+def display_qr_setup(ip=None):
+    """Display QR code setup page on e-paper.
+
+    `ip` is optional because the page it renders always points at the hotspot
+    gateway, never at the device's LAN address — two of the three callers had
+    nothing sensible to pass and were crashing on the missing argument.
+    """
     img = renderer.render_qr_setup(ip)
     display_state["current_image"] = "[QR setup]"
     return display_pil_image(img)

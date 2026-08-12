@@ -18,8 +18,11 @@
         <div class="card__body">
             <div class="field">
                 <label class="label" for="s-weather-key">{{ t.api_key }}</label>
-                <input type="text" class="input" id="s-weather-key"
-                       value="{{ config.weather_api_key }}" autocomplete="off" spellcheck="false">
+                {# Secrets are never rendered back into the page. Leaving the
+                   field blank keeps the stored key; typing replaces it. #}
+                <input type="text" class="input" id="s-weather-key" value=""
+                       placeholder="{{ '••••••••  (leave blank to keep)' if config.weather_api_key_configured else '' }}"
+                       autocomplete="off" spellcheck="false">
                 <p class="hint"><a href="https://openweathermap.org/api" target="_blank" rel="noopener">openweathermap.org</a></p>
             </div>
             <div class="field">
@@ -104,8 +107,9 @@
             </div>
             <div class="field">
                 <label class="label" for="s-gdrive-secret">Client Secret</label>
-                <input type="password" class="input" id="s-gdrive-secret"
-                       value="{{ config.gdrive_client_secret }}" autocomplete="off">
+                <input type="password" class="input" id="s-gdrive-secret" value=""
+                       placeholder="{{ '••••••••  (leave blank to keep)' if config.gdrive_client_secret_configured else '' }}"
+                       autocomplete="off">
             </div>
 
             <div class="accordion">

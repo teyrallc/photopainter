@@ -97,25 +97,108 @@ bash scripts/update.sh
 
 You can also trigger a remote update from the Web UI under **Settings → System → Update**.
 
+## Tests
+
+The e-paper panel and NetworkManager are stubbed, so the suite runs on any
+machine — no Pi and no display needed:
+
+```bash
+python3 -m pytest tests/      # or: python3 tests/test_smoke.py
+```
+
+It asks every route for a response and checks the security boundaries
+(secret redaction, the config write allowlist, same-origin enforcement,
+path containment on filenames). Run it before pushing.
+
 ## API Reference
+
+All endpoints require a signed-in session unless noted. `/api/wifi/*` is the
+one exception, and only while the device is unpaired — see
+**Authentication** below.
+
+### Photos
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/upload` | Upload image |
-| POST | `/api/display` | Display image on e-paper |
-| GET | `/api/preview/<filename>` | 7-color preview |
+| POST | `/api/upload` | Upload one image |
+| POST | `/api/upload/batch` | Upload several images |
 | GET | `/api/images` | List images |
 | DELETE | `/api/images/<filename>` | Delete image |
-| POST | `/api/photo/next` | Next photo |
-| POST | `/api/photo/prev` | Previous photo |
-| POST | `/api/photo/latest` | Latest photo |
-| POST | `/api/display/test` | Test pattern |
-| POST | `/api/clear` | Clear display |
-| POST | `/api/sleep` | Display sleep |
-| GET | `/api/system/info` | System info |
-| POST | `/api/system/update` | Remote update |
-| POST | `/api/system/reboot` | Reboot |
-| POST | `/api/system/shutdown` | Shutdown |
+| GET | `/api/preview/<filename>` | 7-color preview of a file |
+| GET | `/api/preview/current` | Preview of the current page as rendered |
+| POST | `/api/display` | Display image on e-paper |
+| POST | `/api/photo/next` · `/prev` · `/latest` | Move through the library |
+| GET | `/api/photo/current` | Current photo and index |
+| POST | `/api/photo/goto/<idx>` | Jump to an index |
+| POST | `/api/photo/rotation` | Set rotation (0/90/180/270) |
+| POST | `/api/photo/fit_mode` | Set `fit` or `stretch` |
+
+### Pages and widgets
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/page/switch` | Switch home / widget / photo |
+| POST | `/api/page/refresh` | Re-render and push the current page |
+| POST | `/api/page/qr` | Show the pairing QR page |
+| POST | `/api/widget/set` · `/api/widget/toggle` | Weather / calendar / split |
+| GET | `/api/weather` · `/api/calendar` | Fetch the underlying data |
+
+### Slideshow
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/slideshow/start` · `/stop` | Control the slideshow |
+| GET | `/api/slideshow/status` | Current slideshow settings |
+
+### Google Drive
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/gdrive/config` | Client ID and connection state |
+| POST | `/api/gdrive/auth` | Exchange an auth code for tokens |
+| GET | `/api/gdrive/callback` | OAuth redirect target |
+| POST | `/api/gdrive/disconnect` | Forget the stored tokens |
+| GET | `/api/gdrive/files` | List images in Drive |
+| POST | `/api/gdrive/download` | Import selected files |
+
+### Display and system
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/display/test` | 7-color test pattern |
+| POST | `/api/clear` · `/api/sleep` | Clear / sleep the panel |
+| GET | `/api/status` · `/api/system/info` | Device state |
+| POST | `/api/system/update` | Pull and restart |
+| POST | `/api/system/reboot` · `/api/system/shutdown` | Power control |
+| POST | `/api/reset` | Factory reset. `{"delete_photos": true}` also wipes the library |
+| GET | `/api/config` | Settings, with every secret redacted |
+| POST | `/api/config` | Change settings. Credentials and WiFi are not writable here |
+| POST | `/api/lang` | Switch `en` / `zh` |
+
+### WiFi and setup
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/wifi/status` · `/api/wifi/scan` | Network state and nearby SSIDs |
+| POST | `/api/wifi/connect` | Join a network (runs in the background) |
+| GET | `/api/wifi/connect/status` | Poll the join result — open to all, by design |
+| POST | `/api/setup` | Save first-run weather / calendar settings |
+
+## Authentication
+
+One admin account per device, registered on first use and confirmed by a
+six-digit code shown **on the e-paper panel** — so registering and resetting
+the password both require physical access to the device.
+
+- While unpaired, only the pairing portal (`/`, `/setup`, `/api/wifi/*`) answers
+  without a session. Everything else already requires sign-in.
+- Once paired, `/api/wifi/connect/status` is the only endpoint that stays open;
+  the phone polls it on the device's new address before anyone can sign in.
+- State-changing requests are rejected when they arrive from another origin.
+- Secrets — the session key, password hash, WiFi password, API keys, OAuth
+  tokens — are never returned by an API or rendered into a page. The settings
+  form shows a placeholder instead and treats a blank field as "keep the
+  stored value".
 
 ## Project Structure
 
@@ -137,10 +220,19 @@ Vignette/
 │   ├── install.sh               # Installation script
 │   ├── update.sh                # Remote update script
 │   └── vignette.service         # systemd service file
+├── tests/
+│   └── test_smoke.py            # Runs off-device; hardware is stubbed
 ├── output/                      # Image output directory
 ├── requirements.txt             # Python dependencies
+├── LICENSE
 └── README.md
 ```
+
+> `src/` holds standalone CLI tools (saliency-aware display, Stable Diffusion
+> generation) that the web service never imports. They need extra dependencies
+> — `opencv-contrib-python`, `numpy`, `gpiod` — and, for generation, an
+> OnnxStream build plus model weights. None of that is installed by
+> `scripts/install.sh`.
 
 ## Credits
 

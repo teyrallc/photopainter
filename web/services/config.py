@@ -6,6 +6,7 @@ Stores settings in a JSON file.
 import json
 import logging
 import os
+import tempfile
 
 logger = logging.getLogger("vignette.config")
 
@@ -13,14 +14,10 @@ DEFAULT_CONFIG = {
     "setup_complete": False,
     "wifi_ssid": "",
     "wifi_password": "",
-    
+
     # Auth System
     "admin_email": "",
     "admin_password_hash": "",
-    "smtp_server": "smtp.gmail.com",
-    "smtp_port": 587,
-    "smtp_email": "",
-    "smtp_password": "",
 
     # Language
     "lang": "en",  # en, zh
@@ -29,8 +26,8 @@ DEFAULT_CONFIG = {
     "current_page": "photo",  # home, widget, photo
     "widget_mode": "weather",  # weather, calendar
 
-    # Weather settings (One Call API 3.0)
-    "weather_api_key": "db94ae04db1b19661eada39d37f1ee77",
+    # Weather settings
+    "weather_api_key": "",
     "weather_city": "",
     "weather_units": "metric",  # metric, imperial
     "weather_lang": "en",
@@ -54,7 +51,43 @@ DEFAULT_CONFIG = {
     "slideshow_photos": [],  # empty = all photos
     "slideshow_interval": 300,  # seconds
     "slideshow_order": "sequential",  # sequential or random
+
+    # How often the data-driven pages (home, widget) are redrawn on the panel,
+    # in seconds. 0 disables the refresh loop entirely.
+    "auto_refresh_interval": 3600,
 }
+
+# Values that must never leave the device in an API response or a template.
+# `session_secret` is the worst of them: with it anyone can mint a valid signed
+# session cookie and the sign-in wall stops meaning anything.
+SECRET_KEYS = frozenset({
+    "session_secret",
+    "admin_password_hash",
+    "wifi_password",
+    "weather_api_key",
+    "gdrive_client_secret",
+    "gdrive_access_token",
+    "gdrive_refresh_token",
+})
+
+# Settings a signed-in user may change through POST /api/config. Everything
+# else — the admin credential, the session secret, the WiFi pair, the
+# setup flag — has its own guarded flow and must not be writable from here.
+WRITABLE_KEYS = frozenset(set(DEFAULT_CONFIG) - {
+    "setup_complete",
+    "wifi_ssid",
+    "wifi_password",
+    "admin_email",
+    "admin_password_hash",
+})
+
+# Secrets the settings form deliberately submits empty when the user did not
+# retype them. Treat "" as "leave it alone" so saving the form does not silently
+# wipe a key that is never rendered back into the input.
+PRESERVE_IF_BLANK = frozenset({
+    "weather_api_key",
+    "gdrive_client_secret",
+})
 
 
 class Config:
@@ -74,10 +107,30 @@ class Config:
                 logger.error(f"Failed to load config: {e}")
 
     def save(self):
+        """Persist the config atomically.
+
+        This runs on a device people unplug at the wall. Opening the real file
+        with 'w' truncates it first, so a power cut mid-write left a zero-byte
+        or half-written config.json — and on the next boot that read as "no
+        WiFi, no admin", dropping the owner back into pairing with their
+        credentials gone. Write a sibling temp file, flush it to disk, then
+        rename: on POSIX the rename is atomic, so a reader sees either the old
+        config or the new one and never a partial one.
+        """
+        directory = os.path.dirname(self.config_path) or "."
         try:
-            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-            with open(self.config_path, 'w') as f:
-                json.dump(self._data, f, indent=2, ensure_ascii=False)
+            os.makedirs(directory, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".config-", suffix=".tmp")
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(self._data, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, self.config_path)
+            except Exception:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
             logger.info("Config saved")
         except Exception as e:
             logger.error(f"Failed to save config: {e}")
@@ -93,13 +146,46 @@ class Config:
         self._data.update(data)
         self.save()
 
+    def apply_user_settings(self, data):
+        """Apply a POST /api/config payload, ignoring anything not writable.
+
+        Returns the keys that were actually applied so the caller can log or
+        report them.
+        """
+        applied = {}
+        for key, value in (data or {}).items():
+            if key not in WRITABLE_KEYS:
+                continue
+            if key in PRESERVE_IF_BLANK and value == "":
+                continue
+            applied[key] = value
+        if applied:
+            self.update(applied)
+        rejected = sorted(set(data or {}) - set(applied))
+        if rejected:
+            logger.warning(f"Ignored non-writable config keys: {rejected}")
+        return applied
+
     def reset(self):
         self._data = dict(DEFAULT_CONFIG)
         self.save()
         logger.info("Config reset to defaults")
 
     def to_dict(self):
+        """Every stored value, secrets included. Internal callers only."""
         return dict(self._data)
+
+    def public_dict(self):
+        """The config as it is safe to hand to a browser.
+
+        Secrets are dropped rather than masked, and each one is replaced by a
+        `<key>_configured` boolean so the interface can still show whether a
+        value is set without ever transmitting it.
+        """
+        safe = {k: v for k, v in self._data.items() if k not in SECRET_KEYS}
+        for key in SECRET_KEYS:
+            safe[f"{key}_configured"] = bool(self._data.get(key))
+        return safe
 
     @property
     def is_setup_complete(self):

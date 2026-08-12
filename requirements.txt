@@ -1,7 +1,15 @@
 Flask==3.0.0
+# Imported directly by web/app.py (secure_filename) and web/auth.py (password
+# hashing), so it is declared rather than relied on as a Flask transitive.
+Werkzeug>=3.0,<4
 Pillow
-numpy
 spidev
 RPi.GPIO
 qrcode[pil]
 pyngrok
+
+# Only needed by the standalone CLI tools in src/ (display_picture.py,
+# generate_picture.py), which the web service never imports:
+#   numpy
+#   opencv-contrib-python   # display_picture.py uses cv2.saliency
+#   gpiod                   # display_buttons.py
