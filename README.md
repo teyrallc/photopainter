@@ -59,7 +59,7 @@ sudo raspi-config
 ### 2. Install
 
 ```bash
-git clone https://github.com/teyrallc/Vignette.git
+git clone <your-repository-url> Vignette
 cd Vignette
 bash scripts/install.sh
 ```
@@ -153,4 +153,4 @@ MIT License
 
 <img src="web/static/img/vignette-logo.svg" width="320" alt="Vignette">
 
-&copy; 2026 Teyra LLC
+&copy; 2026 Vignette

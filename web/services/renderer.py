@@ -231,7 +231,7 @@ def render_qr_setup(ip_address, port=5000, ap_ssid="Vignette-Setup", ap_password
               fill=BLACK, font=font_tiny, anchor="mt")
     _draw_logo(draw, EPD_W // 2, FT + 38, 18, BLACK)
     draw.text((EPD_W // 2, FT + 60),
-              "\u00a9 2026 Teyra LLC", fill=BLACK, font=font_tiny, anchor="mt")
+              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 
@@ -292,7 +292,7 @@ def render_wifi_connected(ssid, ip_address, port=5000):
     draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
     _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
     draw.text((EPD_W // 2, FT + 52),
-              "\u00a9 2026 Teyra LLC", fill=BLACK, font=font_tiny, anchor="mt")
+              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 
@@ -332,7 +332,7 @@ def render_otp_page(code):
     draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
     _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
     draw.text((EPD_W // 2, FT + 52),
-              "\u00a9 2026 Teyra LLC", fill=BLACK, font=font_tiny, anchor="mt")
+              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
 
     return img
 

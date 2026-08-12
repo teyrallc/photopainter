@@ -1,6 +1,5 @@
 [Unit]
 Description=Vignette - H System Smart Display Web Interface
-Documentation=https://github.com/teyrallc/Vignette
 After=network-online.target
 Wants=network-online.target
 
