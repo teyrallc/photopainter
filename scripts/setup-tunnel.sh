@@ -66,21 +66,80 @@ echo "============================================"
 echo ""
 echo "[1/6] Installing cloudflared..."
 
-if command -v cloudflared >/dev/null 2>&1; then
-    echo "Already installed: $(cloudflared --version 2>&1 | head -1)"
-else
-    # The Cloudflare apt repo covers arm64 and armhf, which is what a Pi runs.
+install_from_apt() {
     sudo mkdir -p --mode=0755 /usr/share/keyrings
-    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
-        | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+    curl -fsSL --max-time 60 https://pkg.cloudflare.com/cloudflare-main.gpg \
+        | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null || return 1
 
+    # Cloudflare's repo lags new Debian releases, so a codename it has never
+    # heard of has to fall back rather than fail. bookworm packages run fine
+    # on trixie — it is a static Go binary.
     CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")"
+    case "$CODENAME" in
+        bullseye|bookworm|buster|focal|jammy|noble) ;;
+        *) echo "  ($CODENAME is not published by Cloudflare; using bookworm)"
+           CODENAME=bookworm ;;
+    esac
+
     echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared ${CODENAME} main" \
         | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
 
-    sudo apt-get update
-    sudo apt-get -y install cloudflared
+    # Only refresh this one list. A full `apt-get update` on a flaky link can
+    # take many minutes and fail on unrelated repositories.
+    sudo apt-get update \
+        -o Dir::Etc::sourcelist=sources.list.d/cloudflared.list \
+        -o Dir::Etc::sourceparts=- \
+        -o APT::Get::List-Cleanup=0 || return 1
+    sudo apt-get -y install cloudflared || return 1
+}
+
+install_from_deb() {
+    # Direct download, skipping the apt index entirely.
+    local arch deb url
+    arch="$(dpkg --print-architecture)"
+    case "$arch" in
+        arm64|armhf|amd64) ;;
+        *) echo "  Unsupported architecture: $arch"; return 1 ;;
+    esac
+    deb="/tmp/cloudflared-${arch}.deb"
+    url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}.deb"
+    echo "  Trying a direct download for $arch..."
+    curl -fL --max-time 300 -o "$deb" "$url" || return 1
+    sudo dpkg -i "$deb" || return 1
+    rm -f "$deb"
+}
+
+if command -v cloudflared >/dev/null 2>&1; then
+    echo "Already installed: $(cloudflared --version 2>&1 | head -1)"
+elif install_from_apt || install_from_deb; then
     echo "Installed: $(cloudflared --version 2>&1 | head -1)"
+else
+    ARCH="$(dpkg --print-architecture)"
+    cat <<MANUALEOF
+
+ERROR: could not install cloudflared over the network.
+
+  On a link too slow or lossy for apt, fetch the package on another machine
+  and copy it across on a USB stick:
+
+    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARCH}.deb
+
+  Then, on this device:
+
+    sudo dpkg -i /path/to/cloudflared-linux-${ARCH}.deb
+    bash scripts/setup-tunnel.sh ${HOSTNAME_ARG}
+
+  This script skips the install step once cloudflared is on PATH.
+
+  Worth knowing first: a tunnel needs a steady outbound connection. If this
+  device's link is dropping large packets, the tunnel will be just as
+  unreliable as whatever it replaces. Check the MTU before blaming the tunnel:
+
+    ping -M do -s 1472 -c 2 1.1.1.1     # fails => MTU below 1500
+    ping -M do -s 1400 -c 2 1.1.1.1     # works => try: sudo ip link set wlan0 mtu 1400
+
+MANUALEOF
+    exit 1
 fi
 
 # ── Step 2: authenticate ──────────────────────────────────────────────
