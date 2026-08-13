@@ -81,20 +81,45 @@ http://<Pi-IP>:5000
 ## Remote Access
 
 By default the console only answers on the same network as the display, which
-is not much use for a frame you gave to somebody. Turning on remote access
-opens an ngrok tunnel and publishes an address that works from anywhere.
+is not much use for a frame you gave to somebody. Two ways to reach it from
+anywhere:
+
+### Your own domain, via Cloudflare Tunnel (recommended)
+
+A fixed address that never changes — `https://yilin.example.com`. No port
+forwarding, no static IP, no certificate management; the tunnel dials out, so
+nothing is exposed inbound. Requires the domain's DNS to be on Cloudflare (the
+free plan is enough).
+
+```bash
+bash scripts/setup-tunnel.sh yilin.example.com
+```
+
+That installs `cloudflared`, walks you through the Cloudflare login, creates a
+named tunnel and its DNS record, installs it as a systemd service so it starts
+at boot, and points Vignette's own settings at the new address. Use a
+**subdomain** — a subpath like `example.com/yilin` would need every front-end
+path rewritten.
+
+### ngrok (quick, but the address moves)
+
+Free ngrok issues a **new hostname on every reconnect**, so any address you
+wrote down goes stale and the panel has to be repainted each time. Fine for a
+prototype, wrong for something on a wall.
 
 1. Get a free authtoken from
    [dashboard.ngrok.com](https://dashboard.ngrok.com/get-started/your-authtoken).
-2. **Settings → Remote Access**, paste it, save.
+2. **Settings → Remote Access** → method `ngrok`, paste it, save.
 
-The tunnel is supervised: it retries with backoff if it cannot connect, notices
-if it drops, and reconnects. Free ngrok issues a new hostname each time, so
-whenever the address changes the panel is repainted with the new one. The local
-address keeps working alongside it.
+### Either way
+
+The supervisor retries with backoff, notices a dead tunnel and reconnects, and
+never lets a dead tunnel look like a working one. The local address keeps
+working alongside the public one. **Settings → Remote Access → Connection
+method → Off** disables it entirely.
 
 Set `auto_refresh_interval` to `0` in the config to stop the panel refreshing
-on a timer; **Settings → Remote Access → Enable** turns the tunnel off entirely.
+on a timer.
 
 ## When the network goes away
 
@@ -263,7 +288,7 @@ one exception, and only while the device is unpaired — see
 | POST | `/api/wifi/connect` | Join a network (runs in the background) |
 | GET | `/api/wifi/connect/status` | Poll the join result — open to all, by design |
 | POST | `/api/setup` | Save first-run weather / calendar settings |
-| GET | `/api/remote` | Remote-access state and the public address |
+| GET | `/api/remote` | Remote-access state, provider and public address |
 | POST | `/api/remote/reconnect` | Force a fresh tunnel |
 
 ## Authentication
@@ -318,6 +343,7 @@ Vignette/
 ├── scripts/
 │   ├── install.sh               # Installation script
 │   ├── install-extras.sh        # Optional deps for the src/ tools
+│   ├── setup-tunnel.sh          # Point your own domain at the display
 │   ├── update.sh                # Remote update script
 │   └── vignette.service         # systemd service file
 ├── tests/

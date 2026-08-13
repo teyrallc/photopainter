@@ -13,6 +13,7 @@ would have been caught by nothing more than asking every route for a response.
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -63,6 +64,25 @@ def _load_app():
     sys.modules["vignette_app"] = module
     spec.loader.exec_module(module)
     return module
+
+
+# _install_stubs() replaces subprocess.run and Popen process-wide so the app
+# never shells out to nmcli during a test. Keep handles on the real ones: a
+# test that needs to execute something would otherwise assert against the
+# stub's canned success and pass for the wrong reason. Both are needed —
+# subprocess.run() calls Popen() internally, so restoring only run() fails.
+_real_run = subprocess.run
+_real_popen = subprocess.Popen
+
+
+def run_real(command, **kwargs):
+    """Actually execute `command`, stepping around the app-wide stubs."""
+    stubbed_run, stubbed_popen = subprocess.run, subprocess.Popen
+    subprocess.run, subprocess.Popen = _real_run, _real_popen
+    try:
+        return _real_run(command, **kwargs)
+    finally:
+        subprocess.run, subprocess.Popen = stubbed_run, stubbed_popen
 
 
 vapp = _load_app()
@@ -494,6 +514,109 @@ def test_remote_access_falls_back_to_the_prototype_token():
         # And it is still never transmitted.
         assert "ZZOWNTOKEN08" not in _json.dumps(service.state())
         assert "ZZOWNTOKEN08" not in _json.dumps(fresh.public_dict())
+
+
+def test_cloudflare_provider_uses_the_fixed_address():
+    """A named tunnel's hostname never changes — that is the point of it."""
+    from services.remote_access import RemoteAccess, normalize_url
+    from services.config import Config
+
+    # Whatever the owner types has to resolve to one canonical origin.
+    assert normalize_url("yilin.example.com") == "https://yilin.example.com"
+    assert normalize_url("https://yilin.example.com/") == "https://yilin.example.com"
+    assert normalize_url("  http://yilin.example.com  ") == "http://yilin.example.com"
+    assert normalize_url("") == ""
+    assert normalize_url(None) == ""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Config(os.path.join(tmp, "config.json"))
+        cfg.update({"remote_access_provider": "cloudflare",
+                    "remote_public_url": "yilin.example.com"})
+
+        service = RemoteAccess()
+        service.init(cfg)
+        assert service.provider == "cloudflare"
+        assert service.configured_host == "yilin.example.com"
+        assert service.state()["configured"] is True
+        assert service.state()["stable_url"] is True
+        # The ngrok fallback must not apply to a Cloudflare device.
+        assert service.using_prototype_token() is False
+
+        # No address configured is a reportable problem, not a silent no-op.
+        cfg.set("remote_public_url", "")
+        assert service.state()["configured"] is False
+
+
+def test_provider_none_disables_remote_access():
+    from services.remote_access import RemoteAccess
+    from services.config import Config
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Config(os.path.join(tmp, "config.json"))
+        cfg.set("remote_access_provider", "none")
+        service = RemoteAccess()
+        service.init(cfg)
+        assert service.provider == "none"
+        assert service.state()["configured"] is False
+        assert service.using_prototype_token() is False
+
+        # An unrecognised value must fall back, not crash a device in a field.
+        cfg.set("remote_access_provider", "nonsense")
+        assert service.provider == "ngrok"
+
+
+def test_configured_domain_counts_as_same_origin():
+    """Requests through the tunnel must survive a reconnect window.
+
+    The host check consulted only the *live* tunnel URL, so while the tunnel
+    was down every request arriving through it read as cross-site and was
+    rejected with 403 — exactly when the owner is trying to see what is wrong.
+    """
+    config.update({"remote_access_provider": "cloudflare",
+                   "remote_public_url": "https://yilin.example.com",
+                   "setup_complete": True})
+    client = _paired_client()
+
+    from services.remote_access import service as remote
+    with remote._lock:
+        remote._url = None              # tunnel currently reports itself down
+
+    try:
+        ok = client.post("/api/page/switch",
+                         headers={"Origin": "https://yilin.example.com"},
+                         json={"page": "home"})
+        assert ok.status_code == 200, ok.get_data(as_text=True)
+
+        blocked = client.post("/api/page/switch",
+                              headers={"Origin": "https://evil.example"},
+                              json={"page": "home"})
+        assert blocked.status_code == 403
+    finally:
+        config.update({"remote_access_provider": "ngrok",
+                       "remote_public_url": ""})
+
+
+def test_tunnel_setup_script_is_sane():
+    script = os.path.join(REPO, "scripts", "setup-tunnel.sh")
+    assert os.access(script, os.X_OK), "setup-tunnel.sh is not executable"
+
+    body = open(script).read()
+    # It must configure the app, not just the tunnel, or the panel keeps
+    # showing the old ngrok address.
+    assert "remote_access_provider" in body and "remote_public_url" in body
+    # And it must write config.json atomically — it holds the WiFi password.
+    assert "os.replace" in body
+
+    result = run_real(["bash", script, "--help"],
+                      capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0
+    assert "set -euo" not in result.stdout, "help is leaking script body"
+
+    # A bad hostname must be refused before anything is installed.
+    bad = run_real(["bash", script, "not a hostname"],
+                   capture_output=True, text=True, timeout=30)
+    assert bad.returncode != 0
+    assert "does not look like a hostname" in bad.stdout + bad.stderr
 
 
 def test_config_survives_a_reload():

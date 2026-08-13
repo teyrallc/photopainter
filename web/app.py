@@ -174,6 +174,12 @@ def _acceptable_hosts():
     tunnel = remote_access.host
     if tunnel:
         hosts.add(tunnel)
+    # The configured address counts even while the tunnel reports itself down,
+    # or a request that genuinely arrived through it would be rejected during
+    # a reconnect.
+    configured = remote_access.configured_host
+    if configured:
+        hosts.add(configured)
     return hosts
 
 
@@ -1478,7 +1484,9 @@ def _on_remote_url_change(url):
     """Repaint the panel when the public address changes.
 
     Free ngrok hands out a different hostname on every reconnect, so without
-    this the address printed on the panel silently stops working.
+    this the address printed on the panel silently stops working. A Cloudflare
+    tunnel has a fixed address, so this fires once and then never again —
+    which is the point of preferring it.
     """
     if not config.is_setup_complete:
         return

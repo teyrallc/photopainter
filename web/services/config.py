@@ -26,6 +26,13 @@ DEFAULT_CONFIG = {
     # Remote access. Without a tunnel the console is only reachable from the
     # same LAN, which is not how a photo frame given as a gift gets used.
     "remote_access_enabled": True,
+    # "cloudflare" (fixed address, recommended) | "ngrok" | "none".
+    # Defaults to ngrok so a device updating in the field keeps whatever it
+    # had; switch it in Settings after running scripts/setup-tunnel.sh.
+    "remote_access_provider": "ngrok",
+    # The address the owner's DNS points at, e.g. https://yilin.example.com.
+    # Used by the Cloudflare provider, and shown on the panel.
+    "remote_public_url": "",
     "ngrok_authtoken": "",
 
     # Which Waveshare panel is fitted: 7in3e or 7in3f.

@@ -163,6 +163,28 @@
             </label>
 
             <div class="field">
+                <label class="label" for="s-remote-provider">{{ t.remote_provider }}</label>
+                <select class="input" id="s-remote-provider">
+                    <option value="cloudflare" {% if config.remote_access_provider == 'cloudflare' %}selected{% endif %}>
+                        {{ t.remote_provider_cf }}</option>
+                    <option value="ngrok" {% if config.remote_access_provider == 'ngrok' %}selected{% endif %}>
+                        {{ t.remote_provider_ngrok }}</option>
+                    <option value="none" {% if config.remote_access_provider == 'none' %}selected{% endif %}>
+                        {{ t.remote_provider_none }}</option>
+                </select>
+            </div>
+
+            {# Cloudflare: a fixed address the owner already owns. #}
+            <div class="field" id="field-remote-url">
+                <label class="label" for="s-remote-url">{{ t.remote_public_url }}</label>
+                <input type="url" class="input" id="s-remote-url"
+                       value="{{ config.remote_public_url }}"
+                       placeholder="https://yilin.example.com" spellcheck="false" autocomplete="off">
+                <p class="hint">{{ t.remote_public_url_hint }}</p>
+            </div>
+
+            {# ngrok: a token, and an address that changes on every reconnect. #}
+            <div class="field" id="field-ngrok-token">
                 <label class="label" for="s-ngrok-token">{{ t.remote_token }}</label>
                 {# Never rendered back out; blank keeps whatever is stored. #}
                 <input type="password" class="input" id="s-ngrok-token" value=""
@@ -420,9 +442,19 @@
 
     /* ── Remote access ──────────────────────────────────────────────────── */
 
+    /* Only show the fields the selected provider actually uses. */
+    function syncProviderFields() {
+        var p = document.getElementById('s-remote-provider').value;
+        document.getElementById('field-remote-url').hidden = (p !== 'cloudflare');
+        document.getElementById('field-ngrok-token').hidden = (p !== 'ngrok');
+    }
+    document.getElementById('s-remote-provider')
+            .addEventListener('change', syncProviderFields);
+    syncProviderFields();
+
     function renderRemoteState(s) {
         var box = document.getElementById('remote-state');
-        if (!s.enabled) {
+        if (!s.enabled || s.provider === 'none') {
             box.className = 'alert';
             box.textContent = V.t('remote_off');
             return;
@@ -440,11 +472,20 @@
             link.textContent = s.url;      // textContent, never innerHTML
             box.appendChild(label);
             box.appendChild(link);
+            if (!s.stable_url) {
+                // Free ngrok reissues the hostname on every reconnect, so this
+                // link is good until the next drop and no longer.
+                var warn = document.createElement('div');
+                warn.className = 'small';
+                warn.textContent = V.t('remote_url_changes');
+                box.appendChild(warn);
+            }
             return;
         }
         if (!s.configured) {
             box.className = 'alert alert--warning';
-            box.textContent = V.t('remote_no_token');
+            box.textContent = s.provider === 'cloudflare'
+                ? V.t('remote_no_url') : V.t('remote_no_token');
             return;
         }
         box.className = s.status === 'error' ? 'alert alert--warning' : 'alert';
@@ -461,6 +502,8 @@
     document.getElementById('save-remote').addEventListener('click', function () {
         saveConfig(this, {
             remote_access_enabled: document.getElementById('s-remote-enabled').checked,
+            remote_access_provider: document.getElementById('s-remote-provider').value,
+            remote_public_url: document.getElementById('s-remote-url').value,
             ngrok_authtoken: document.getElementById('s-ngrok-token').value
         }).then(function () {
             document.getElementById('s-ngrok-token').value = '';
