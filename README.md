@@ -348,8 +348,34 @@ creates the account, adds it to `spi`, `gpio` and `netdev`, and installs a
 narrow sudo allowlist at `/etc/sudoers.d/vignette` covering only `nmcli`,
 `reboot`, `shutdown` and restarting its own unit.
 
-Upgrading an existing root install: re-run `bash scripts/install.sh`. It
-creates the account, takes ownership of the checkout, and rewrites the unit.
+Upgrading an existing root install on a device that is already working, use
+the targeted migration rather than the full installer — `install.sh` also runs
+`apt-get upgrade` and rebuilds the virtualenv, which are the risky parts and
+none of them are the point:
+
+```bash
+bash scripts/harden-service.sh --check     # verify, change nothing
+bash scripts/harden-service.sh             # migrate
+bash scripts/harden-service.sh --rollback  # undo
+```
+
+It tests the panel's SPI and GPIO access **as the new account before switching
+anything**, backs up the current unit, and restores it automatically if the
+service does not come back — a frame that cannot start is a frame you have to
+walk over to.
+
+How much can be locked down is capped by one thing: the four privileged actions
+(joining a network, rebooting, shutting down, restarting itself) go through
+`sudo`, which is setuid, so `NoNewPrivileges` has to stay off. That rules out a
+sealed capability set and a `SystemCallFilter` without `@privileged`.
+Everything compatible with it is set — read-only `/usr`, `/etc` and `/home`
+outside the checkout, a closed device policy admitting only the panel's SPI and
+GPIO nodes, and the kernel, clock, hostname and namespace protections.
+
+Even then it is a smaller blast radius, not none: `config.json` holds the WiFi
+password and the session key, and the service account can read it. What changes
+is that a flaw in image decoding or file serving no longer hands over the whole
+board and the LAN behind it.
 
 ## Project Structure
 

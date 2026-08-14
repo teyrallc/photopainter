@@ -29,8 +29,10 @@ GRACE_SECONDS = 60
 POLL_SECONDS = 15
 
 # While the fallback hotspot is up, how often to drop it and retry the saved
-# network. Long enough not to interrupt somebody halfway through re-pairing.
-RETRY_SECONDS = 300
+# network. Long enough not to interrupt somebody halfway through re-pairing —
+# and a join already under way is skipped outright, so the window that matters
+# is only the seconds between reading the pairing screen and typing a password.
+RETRY_SECONDS = 180
 
 
 class NetWatchdog:
