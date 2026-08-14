@@ -270,7 +270,7 @@ display_lock = threading.RLock()
 # in one house were indistinguishable and either was joinable by anyone who
 # had read this file.
 AP_SSID, AP_PASSWORD = device_id.ap_credentials(config)
-AP_CONN_NAME = "Vignette-Hotspot"
+AP_CONN_NAME = device_id.AP_CONN_NAME
 
 # Cached WiFi scan results (scanned before AP starts)
 _cached_wifi_networks = []
@@ -316,12 +316,68 @@ def _nmcli_fields(line):
 
 
 def _nmcli_active_ssid(stdout):
-    """Pull the connected SSID out of `nmcli -t -f ACTIVE,SSID dev wifi`."""
+    """Pull the connected SSID out of `nmcli -t -f ACTIVE,SSID dev wifi`.
+
+    Kept only as the last resort in `get_active_ssid`. `dev wifi` reports
+    *scan results*, and a scan that has not run yet lists nothing at all — so
+    this says "not connected" for a link that is up and holding a lease. See
+    `_wifi_device_status` for why that mattered.
+    """
     for line in stdout.strip().split('\n'):
         parts = _nmcli_fields(line)
         if len(parts) >= 2 and parts[0] == "yes":
             return parts[1].strip()
     return None
+
+
+def _wifi_device_status():
+    """(device, state, profile) for the WiFi interface, from the link itself.
+
+    `nmcli dev wifi` answers "which access points has a scan seen", which is a
+    different question from "what am I connected to". After a cold boot the
+    scan list can be empty for minutes while the interface is already
+    associated — and the boot check read that emptiness as the saved network
+    being unreachable, tore the working link down, and raised the pairing
+    hotspot on a device that was online the whole time. `device status` reads
+    the link, needs no scan, and answers immediately.
+
+    Returns (None, None, None) when NetworkManager does not answer, which the
+    caller must tell apart from a genuine "not connected".
+    """
+    try:
+        result = nmcli("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION",
+                       "device", "status", timeout=8)
+    except Exception as e:
+        logger.debug(f"nmcli device status failed: {e}")
+        return None, None, None
+
+    for line in result.stdout.strip().split('\n'):
+        parts = _nmcli_fields(line)
+        if len(parts) >= 4 and parts[1] == "wifi":
+            return parts[0], parts[2], parts[3]
+    return None, None, None
+
+
+def _profile_ssid(profile):
+    """The SSID a connection profile actually joins.
+
+    Usually the profile name is the SSID, but not always: our own hotspot
+    profile is called `Vignette-Hotspot` while it advertises `Vignette-XXXX`,
+    and a profile the owner renamed would never match the saved SSID. Falls
+    back to the profile name, which is right in the common case.
+    """
+    if not profile or profile == "--":
+        return None
+    try:
+        result = nmcli("-t", "-f", "802-11-wireless.ssid",
+                       "connection", "show", profile, timeout=8)
+        for line in result.stdout.strip().split('\n'):
+            parts = _nmcli_fields(line)
+            if len(parts) >= 2 and parts[0] == "802-11-wireless.ssid":
+                return parts[1].strip() or profile
+    except Exception as e:
+        logger.debug(f"Could not read the SSID of profile {profile!r}: {e}")
+    return profile
 
 
 def _parse_wifi_scan(stdout):
@@ -1742,13 +1798,25 @@ def _get_ip():
 
 
 def get_active_ssid():
-    """Dynamically get the currently active WiFi from NetworkManager."""
-    try:
-        check = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi", timeout=5)
-        return _nmcli_active_ssid(check.stdout)
-    except Exception:
-        pass
-    return None
+    """The SSID this device is associated with right now, or None.
+
+    Reads the link state rather than the scan list, so it is correct during
+    the first minutes after a boot when no scan has completed yet.
+    """
+    device, state, profile = _wifi_device_status()
+    if device is None:
+        # NetworkManager did not answer at all — a transient D-Bus hiccup, or
+        # a host that is not running it. Reporting "disconnected" here would
+        # start the grace period on a link that is probably fine, so ask the
+        # scan instead and accept its blind spot.
+        try:
+            check = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi", timeout=5)
+            return _nmcli_active_ssid(check.stdout)
+        except Exception:
+            return None
+    if state != "connected":
+        return None
+    return _profile_ssid(profile)
 
 def get_system_info():
     info = {
@@ -1861,48 +1929,58 @@ def serve_image(filename):
     return send_from_directory(OUTPUT_DIR, filename)
 
 
+# How long NetworkManager gets to bring the saved network up on its own before
+# we intervene, and how long the manual attempt then gets. Deadlines, not
+# iteration counts: the old code counted 15 passes of a call that can block for
+# seconds each, so a "15 second" wait was measured at four and a half minutes
+# on real hardware — with the pairing hotspot raised at the end of it.
+_BOOT_AUTOCONNECT_SECONDS = 45
+_BOOT_MANUAL_SECONDS = 30
+
+
+def _wait_for_ssid(ssid, seconds):
+    """Poll until the device is on `ssid`, or the deadline passes."""
+    deadline = time.time() + seconds
+    while True:
+        if get_active_ssid() == ssid:
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(2)
+
+
 def verify_or_connect_wifi_on_boot():
     ssid = config.get("wifi_ssid", "")
     password = config.get("wifi_password", "")
-    
+
     if not ssid:
         return False
 
-    logger.info(f"Boot check: Verifying connection to {ssid}...")
-    
-    # 1. Wait up to 15 seconds for NM auto-connect
-    for _ in range(15):
-        try:
-            check = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi", timeout=5)
-            if _nmcli_active_ssid(check.stdout) == ssid:
-                logger.info(f"Boot check: Auto-connected to {ssid} successfully.")
-                return True
-        except Exception as e:
-            pass
-        time.sleep(1)
-        
-    # 2. Try a manual connection using the document record
-    logger.warning(f"Boot check: Auto-connect timed out for {ssid}. Trying manual connection.")
+    logger.info(f"Boot check: verifying the connection to {ssid}...")
+
+    # 1. NetworkManager has the profile and autoconnects on its own; usually
+    #    this returns on the first pass.
+    if _wait_for_ssid(ssid, _BOOT_AUTOCONNECT_SECONDS):
+        logger.info(f"Boot check: on {ssid}.")
+        return True
+
+    # 2. Ask for it explicitly. Only worth doing once the link has demonstrably
+    #    not come up by itself — it drops whatever wlan0 is doing.
+    logger.warning(f"Boot check: not on {ssid} after "
+                   f"{_BOOT_AUTOCONNECT_SECONDS}s — connecting explicitly.")
     args = ["dev", "wifi", "connect", ssid]
     if password:
         args += ["password", password]
     try:
-        nmcli(*args, timeout=20)
+        nmcli(*args, timeout=30)
     except subprocess.TimeoutExpired:
         pass
-        
-    # 3. Check again for 10 seconds
-    for _ in range(10):
-        try:
-            check = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi", timeout=5)
-            if _nmcli_active_ssid(check.stdout) == ssid:
-                logger.info(f"Boot check: Manually connected to {ssid} successfully.")
-                return True
-        except Exception:
-            pass
-        time.sleep(1)
-        
-    logger.error(f"Boot check: Failed to connect to saved WiFi {ssid} after reboot.")
+
+    if _wait_for_ssid(ssid, _BOOT_MANUAL_SECONDS):
+        logger.info(f"Boot check: connected to {ssid}.")
+        return True
+
+    logger.error(f"Boot check: could not reach {ssid}.")
     return False
 
 
@@ -1916,19 +1994,44 @@ def resolve_boot_state():
 
     Returns True when the device is on a network and can serve normally.
     """
+    # Our own hotspot left up by a crash is not a network we joined.
+    def _joined_network():
+        ssid = get_active_ssid()
+        return None if device_id.is_own_ap(ssid) else ssid
+
     if config.get("wifi_ssid"):
         if verify_or_connect_wifi_on_boot():
             logger.info("Boot check: reached the saved network.")
             config.set("setup_complete", True)
             return True
+
+        # Not on the saved SSID — but possibly on another perfectly good one,
+        # because the router's name changed or somebody re-pointed the device
+        # with raspi-config. Raising the pairing hotspot means taking wlan0
+        # into AP mode, so doing it here would knock a reachable device off
+        # the air to advertise that it cannot be reached.
+        live = _joined_network()
+        if live:
+            logger.warning(f"Boot check: {config.get('wifi_ssid')!r} not found, "
+                           f"but the device is on {live!r} — adopting it.")
+            config.update({"wifi_ssid": live, "setup_complete": True})
+            return True
+
         # Keep the credentials. The router may simply be slower to come back
         # than we are; the hotspot lets the owner re-pair if the network really
         # did change, and a retry still has the password to try.
+        if not config.get("setup_hotspot_fallback", True):
+            logger.error("Boot check: saved WiFi unreachable. The pairing "
+                         "hotspot is disabled on this device, so the watchdog "
+                         "will keep retrying quietly.")
+            config.set("setup_complete", True)
+            return True
+
         logger.error("Boot check: saved WiFi unreachable — starting the setup hotspot.")
         config.set("setup_complete", False)
         return False
 
-    adopted = get_active_ssid()
+    adopted = _joined_network()
     if adopted:
         # Joined some other way (raspi-config, a pre-seeded wpa_supplicant), so
         # there is nothing to pair — adopt the network and carry on.
@@ -1936,6 +2039,8 @@ def resolve_boot_state():
         config.update({"wifi_ssid": adopted, "setup_complete": True})
         return True
 
+    # A device with no credentials at all has to pair, whatever the setting:
+    # there is no saved network to retry and no other way in.
     logger.info("Boot check: no network configured — starting the setup hotspot.")
     config.set("setup_complete", False)
     return False

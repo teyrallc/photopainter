@@ -21,6 +21,13 @@ logger = logging.getLogger("vignette.device")
 
 SSID_PREFIX = "Vignette"
 
+# The NetworkManager profile name for the pairing hotspot — distinct from the
+# SSID that profile advertises. It belongs here because `is_own_ap` has to
+# recognise it: when NetworkManager will not give up a profile's SSID the
+# caller falls back to the profile name, and this one must never read as "a
+# network the owner asked us to join".
+AP_CONN_NAME = "Vignette-Hotspot"
+
 # Ambiguous glyphs are omitted: this password is read off an e-paper panel and
 # typed into a phone, so 0/O and 1/l/I cost more in support than they add in
 # entropy. 8 characters from a 31-symbol alphabet is ~39 bits, far beyond what
@@ -91,5 +98,6 @@ def is_own_ap(ssid):
     """
     if not ssid:
         return False
-    return ssid == f"{SSID_PREFIX}-Setup" or bool(
-        re.fullmatch(rf"{SSID_PREFIX}-[0-9A-F]{{4}}", ssid))
+    if ssid in (f"{SSID_PREFIX}-Setup", AP_CONN_NAME):
+        return True
+    return bool(re.fullmatch(rf"{SSID_PREFIX}-[0-9A-F]{{4}}", ssid))

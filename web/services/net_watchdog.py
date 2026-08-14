@@ -29,8 +29,10 @@ GRACE_SECONDS = 60
 POLL_SECONDS = 15
 
 # While the fallback hotspot is up, how often to drop it and retry the saved
-# network. Long enough not to interrupt somebody halfway through re-pairing.
-RETRY_SECONDS = 300
+# network. Long enough not to interrupt somebody halfway through re-pairing —
+# and a join already under way is skipped outright, so the window that matters
+# is only the seconds between reading the pairing screen and typing a password.
+RETRY_SECONDS = 180
 
 
 class NetWatchdog:
@@ -131,6 +133,10 @@ class NetWatchdog:
     def _run(self):
         logger.info(f"Network watchdog started (grace {GRACE_SECONDS}s)")
         last_retry = time.time()
+        # Separate from `last_retry`, and starting at "never": when the hotspot
+        # is disabled the first reconnect attempt should happen the moment the
+        # grace period lapses, not five minutes into an outage nobody can see.
+        last_quiet_retry = 0.0
 
         while not self._stop.is_set():
             self._stop.wait(POLL_SECONDS)
@@ -159,6 +165,7 @@ class NetWatchdog:
                     if self._down_since is not None:
                         logger.info(f"Network back on {ssid!r}")
                     self._down_since = None
+                    last_quiet_retry = 0.0
                     continue
 
                 # A device that has never been paired is already showing the
@@ -171,9 +178,27 @@ class NetWatchdog:
                     logger.warning("Network link lost — starting the grace period")
                     continue
 
-                if time.time() - self._down_since >= GRACE_SECONDS:
-                    self._enter_fallback()
-                    last_retry = time.time()
+                if time.time() - self._down_since < GRACE_SECONDS:
+                    continue
+
+                # A finished unit is told not to drop into pairing on its own:
+                # raising the hotspot puts wlan0 into AP mode, which severs the
+                # link rather than restoring it, and a router that is merely
+                # rebooting comes back on its own. Keep retrying instead.
+                if not self._config.get("setup_hotspot_fallback", True):
+                    if time.time() - last_quiet_retry >= RETRY_SECONDS:
+                        last_quiet_retry = time.time()
+                        logger.warning("Network still down; the pairing hotspot "
+                                       "is disabled on this device — retrying "
+                                       "the saved network.")
+                        try:
+                            self._hooks["connect_saved"]()
+                        except Exception as e:
+                            logger.error(f"Quiet retry failed: {e}")
+                    continue
+
+                self._enter_fallback()
+                last_retry = time.time()
 
             except Exception as e:
                 logger.error(f"Network watchdog error: {e}", exc_info=True)
