@@ -145,15 +145,19 @@ fi
 say ""
 say "[2/6] Service account"
 
+if [ "$CHECK_ONLY" = 1 ]; then
+    say ""
+    ok "Everything checkable without changing anything passed."
+    note "The panel probe cannot run yet: it executes the interpreter inside"
+    note "the checkout, and reaching that needs the account created and the"
+    note "checkout handed over first. Run without --check — the migration"
+    note "still stops before the unit is touched if the panel is unreachable,"
+    note "and prints how to undo the ownership change."
+    exit 0
+fi
+
 if id -u "$SERVICE_USER" >/dev/null 2>&1; then
     ok "user '$SERVICE_USER' already exists"
-elif [ "$CHECK_ONLY" = 1 ]; then
-    say ""
-    note "user '$SERVICE_USER' does not exist yet, so the panel cannot be"
-    note "probed as it. Everything checkable without changing anything passed."
-    note "Run without --check to create the account and probe for real; it"
-    note "still stops before switching if the panel is unreachable."
-    exit 0
 else
     sudo useradd --system --create-home --shell /usr/sbin/nologin "$SERVICE_USER" \
         && ok "created user '$SERVICE_USER'" \
@@ -165,73 +169,23 @@ for grp in spi gpio netdev; do
 done
 ok "groups: $(id -nG "$SERVICE_USER")"
 
-# ── Hardware probe, as the new account ────────────────────────────────
-# The decisive test, and it runs before the switch: if the panel cannot be
-# reached from this account, the migration stops here with the device still
-# working as it was.
-
-say ""
-say "[3/6] Reaching the panel as '$SERVICE_USER'"
-
-# Plain `sudo -u` — it calls initgroups() for the target account, so the spi
-# and gpio memberships added above are in effect, which is the whole point of
-# the probe. Not `-i` (the account's shell is nologin, by design) and not `-g`
-# (that would replace exactly the groups being tested).
-probe_with_groups() {
-    sudo -u "$SERVICE_USER" "$VENV_PYTHON" -c "$1" 2>&1
-}
-
-SPI_OUT="$(probe_with_groups '
-import spidev
-s = spidev.SpiDev()
-s.open(0, 0)
-s.max_speed_hz = 4000000
-s.close()
-print("SPI OK")')"
-if printf '%s' "$SPI_OUT" | grep -q "SPI OK"; then
-    ok "SPI: /dev/spidev0.0 opened"
-else
-    bad "SPI could not be opened as '$SERVICE_USER':"
-    printf '%s\n' "$SPI_OUT" | sed 's/^/         /'
-    say ""
-    bad "Stopping. Nothing has been changed; the service is still running as before."
-    exit 1
-fi
-
-GPIO_OUT="$(probe_with_groups "
-import RPi.GPIO as GPIO
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
-GPIO.setup($BUSY_PIN, GPIO.IN)
-GPIO.input($BUSY_PIN)
-GPIO.cleanup()
-print('GPIO OK')")"
-if printf '%s' "$GPIO_OUT" | grep -q "GPIO OK"; then
-    ok "GPIO: BUSY pin readable"
-else
-    bad "GPIO could not be reached as '$SERVICE_USER':"
-    printf '%s\n' "$GPIO_OUT" | sed 's/^/         /'
-    say ""
-    bad "Stopping. Nothing has been changed; the service is still running as before."
-    exit 1
-fi
-
-if [ "$CHECK_ONLY" = 1 ]; then
-    say ""
-    ok "Preflight passed — the panel is reachable as '$SERVICE_USER'."
-    note "Nothing has been changed. Run without --check to migrate."
-    exit 0
-fi
-
 # ── Ownership and the sudo allowlist ──────────────────────────────────
+# This has to come before the panel probe, not after: the probe runs the
+# interpreter inside the checkout, and until the account owns it — and can
+# traverse the home directory above it — it cannot execute anything there.
+#
+# Doing it first is safe. The service is still root at this point, and root
+# reads and writes regardless of ownership, so the frame keeps working even if
+# the probe below then refuses to go any further.
 
 say ""
-say "[4/6] Ownership and privileges"
+say "[3/6] Ownership and privileges"
 
 # Whoever is running this keeps working in the checkout afterwards — git pull,
 # editing files — so they join the group rather than losing access to their own
 # directory.
 INVOKING_USER="${SUDO_USER:-$(id -un)}"
+UNDO_OWNERSHIP="sudo chown -R $INVOKING_USER:$INVOKING_USER $INSTALL_DIR"
 
 if ! sudo chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"; then
     bad "Could not give $INSTALL_DIR to '$SERVICE_USER'."
@@ -242,6 +196,42 @@ fi
 sudo chmod -R g+rwX "$INSTALL_DIR" \
     || note "chmod g+rwX did not fully apply; check you can still git pull here"
 ok "checkout owned by $SERVICE_USER, group-writable"
+
+# Owning the checkout is not enough — the account has to traverse every
+# directory above it to reach anything inside. Home directories are 0750 on
+# recent Raspberry Pi OS, so a checkout under /home/<someone> is the ordinary
+# case, not an edge one, and without this the interpreter is simply
+# "Permission denied". o+x grants traversal only: the directory still cannot
+# be listed and its other files stay unreadable.
+grant_traversal() {
+    local dirs=() dir="$INSTALL_DIR"
+    while [ "$dir" != "/" ] && [ -n "$dir" ] && [ "$dir" != "." ]; do
+        dirs=("$dir" "${dirs[@]}")
+        dir="$(dirname "$dir")"
+    done
+    for dir in "${dirs[@]}"; do
+        if ! sudo -u "$SERVICE_USER" test -x "$dir" 2>/dev/null; then
+            if sudo chmod o+x "$dir"; then
+                note "granted traverse on $dir (now $(stat -c '%a' "$dir"))"
+            else
+                bad "could not grant traverse on $dir"
+                return 1
+            fi
+        fi
+    done
+    sudo -u "$SERVICE_USER" test -x "$VENV_PYTHON"
+}
+
+if grant_traversal; then
+    ok "'$SERVICE_USER' can reach $VENV_PYTHON"
+else
+    bad "'$SERVICE_USER' cannot execute $VENV_PYTHON even after the handover."
+    say ""
+    bad "Stopping before the unit is touched — the frame is still running."
+    say "  Undo the ownership change with:"
+    say "      $UNDO_OWNERSHIP"
+    exit 1
+fi
 
 if [ "$INVOKING_USER" != "$SERVICE_USER" ] && [ "$INVOKING_USER" != "root" ]; then
     sudo usermod -aG "$SERVICE_USER" "$INVOKING_USER"
@@ -274,6 +264,70 @@ else
     sudo rm -f "$SUDOERS_FILE"
     bad "The sudoers file failed validation and was removed. Nothing else changed."
     exit 1
+fi
+
+
+# ── Hardware probe, as the new account ────────────────────────────────
+
+say ""
+say "[4/6] Reaching the panel as '$SERVICE_USER'"
+
+# Plain `sudo -u` — it calls initgroups() for the target account, so the spi
+# and gpio memberships added above are in effect, which is the whole point of
+# the probe. Not `-i` (the account's shell is nologin, by design) and not `-g`
+# (that would replace exactly the groups being tested).
+probe_with_groups() {
+    sudo -u "$SERVICE_USER" "$VENV_PYTHON" -c "$1" 2>&1
+}
+
+SPI_OUT="$(probe_with_groups '
+import spidev
+s = spidev.SpiDev()
+s.open(0, 0)
+s.max_speed_hz = 4000000
+s.close()
+print("SPI OK")')"
+if printf '%s' "$SPI_OUT" | grep -q "SPI OK"; then
+    ok "SPI: /dev/spidev0.0 opened"
+else
+    bad "SPI could not be opened as '$SERVICE_USER':"
+    printf '%s\n' "$SPI_OUT" | sed 's/^/         /'
+    say ""
+    bad "Stopping before the unit is touched — the frame is still running as"
+    bad "root, exactly as it was, and the panel is unaffected."
+    say "  Undo the ownership change with:"
+    say "      $UNDO_OWNERSHIP"
+    say "      sudo rm -f $SUDOERS_FILE"
+    exit 1
+fi
+
+GPIO_OUT="$(probe_with_groups "
+import RPi.GPIO as GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+GPIO.setup($BUSY_PIN, GPIO.IN)
+GPIO.input($BUSY_PIN)
+GPIO.cleanup()
+print('GPIO OK')")"
+if printf '%s' "$GPIO_OUT" | grep -q "GPIO OK"; then
+    ok "GPIO: BUSY pin readable"
+else
+    bad "GPIO could not be reached as '$SERVICE_USER':"
+    printf '%s\n' "$GPIO_OUT" | sed 's/^/         /'
+    say ""
+    bad "Stopping before the unit is touched — the frame is still running as"
+    bad "root, exactly as it was, and the panel is unaffected."
+    say "  Undo the ownership change with:"
+    say "      $UNDO_OWNERSHIP"
+    say "      sudo rm -f $SUDOERS_FILE"
+    exit 1
+fi
+
+if [ "$CHECK_ONLY" = 1 ]; then
+    say ""
+    ok "Preflight passed — the panel is reachable as '$SERVICE_USER'."
+    note "Nothing has been changed. Run without --check to migrate."
+    exit 0
 fi
 
 # ── The unit ──────────────────────────────────────────────────────────
