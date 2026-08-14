@@ -101,6 +101,18 @@ at boot, and points Vignette's own settings at the new address. Use a
 **subdomain** — a subpath like `example.com/yilin` would need every front-end
 path rewritten.
 
+During the login step the browser asks which domain to authorize. **Pick the
+one that owns your hostname** — `example.com` for `yilin.example.com`. Choosing
+another domain on the same account does not fail: `cloudflared` then treats the
+hostname as a name relative to *that* zone and creates
+`yilin.example.com.the-other-domain.com`, which nothing resolves. The script
+checks the record it actually created and stops if it does not match.
+
+If the address does not load right after setup, the likely cause is a cached
+"no such name" answer from before the record existed — Cloudflare's SOA keeps
+those for 30 minutes. Check from a phone on mobile data, which uses a different
+resolver, before assuming the tunnel is broken.
+
 ### ngrok (quick, but the address moves)
 
 Free ngrok issues a **new hostname on every reconnect**, so any address you
