@@ -445,12 +445,48 @@ else
     FAILED=1
 fi
 
+# The app repaints the panel during start-up, before it begins listening, and a
+# full 7.3" refresh takes the better part of half a minute. One reading eight
+# seconds in therefore says "nothing there" about a service that came up
+# perfectly — and on the first real device it rolled back a migration that had
+# worked, with `Sending image to e-paper...` sitting in the log as the reason.
+# Poll instead, and give the panel time to finish. Overridable for the same
+# reason as the paths above — a test that has to sit through 150 real seconds
+# does not get run.
+HTTP_WAIT="${VIGNETTE_HTTP_WAIT:-150}"
+
 if [ "$FAILED" = 0 ]; then
-    CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 http://localhost:5000/ 2>/dev/null)"
-    case "${CODE:-000}" in
-        200|301|302) ok "HTTP $CODE from localhost:5000" ;;
-        *)           bad "localhost:5000 answered '${CODE:-nothing}'"; FAILED=1 ;;
-    esac
+    waited=0
+    CODE=""
+    while :; do
+        CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \
+                http://localhost:5000/ 2>/dev/null)" || true
+        case "${CODE:-000}" in
+            200|301|302) break ;;
+        esac
+        # A service that has actually died is not worth waiting out.
+        if ! systemctl is-active --quiet vignette; then
+            bad "the service stopped while we were waiting for it"
+            FAILED=1
+            break
+        fi
+        if [ "$waited" -ge "$HTTP_WAIT" ]; then
+            bad "localhost:5000 still answering '${CODE:-nothing}' after ${HTTP_WAIT}s"
+            FAILED=1
+            break
+        fi
+        [ "$waited" = 0 ] && note "waiting for the interface — start-up repaints the panel first"
+        sleep 10
+        waited=$((waited + 10))
+    done
+
+    if [ "$FAILED" = 0 ]; then
+        if [ "$waited" -gt 0 ]; then
+            ok "HTTP $CODE from localhost:5000 (after ${waited}s, panel redraw)"
+        else
+            ok "HTTP $CODE from localhost:5000"
+        fi
+    fi
 fi
 
 if [ "$FAILED" = 1 ]; then
