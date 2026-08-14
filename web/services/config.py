@@ -19,6 +19,20 @@ DEFAULT_CONFIG = {
     # printed on the e-paper pairing screen; it is never shipped in the source.
     "ap_password": "",
 
+    # Whether losing the network drops the device back into pairing mode.
+    #
+    # On a unit still being set up this is the recovery path: the router was
+    # replaced, the frame moved house, and there is no keyboard to fix it with.
+    # On a finished unit on a wall it is a liability — raising the hotspot puts
+    # wlan0 into AP mode, which severs the very link it is trying to report on,
+    # so a two-minute router reboot turns into the frame advertising a pairing
+    # network and showing the setup screen.
+    #
+    # Off means the device keeps retrying the saved network quietly and forever,
+    # and never takes itself off the air. A device that has never been paired
+    # still raises the hotspot regardless — it has nothing else to try.
+    "setup_hotspot_fallback": True,
+
     # Auth System
     "admin_email": "",
     "admin_password_hash": "",

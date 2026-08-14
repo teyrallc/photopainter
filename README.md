@@ -144,6 +144,22 @@ photo are kept. While the fallback hotspot is up the display quietly retries the
 saved network every five minutes, so a router that was simply slow to reboot
 recovers on its own with nobody touching anything.
 
+### Turning that off on a finished unit
+
+Raising the hotspot puts `wlan0` into AP mode, which severs the link it is
+reporting on. That is the right trade while a device is still being set up and
+wrong for one hanging on a wall, where a two-minute router reboot should not
+turn into a frame advertising a pairing network. Set `setup_hotspot_fallback`
+to `false` and the device keeps retrying the saved network quietly and forever
+instead, never taking itself off the air:
+
+```bash
+POST /api/config   {"setup_hotspot_fallback": false}
+```
+
+A device that has never been paired still raises the hotspot either way — it
+has no saved network to retry and no other way in.
+
 ## Service Management
 
 ```bash
