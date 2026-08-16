@@ -217,6 +217,79 @@
         </div>
     </section>
 
+    <!-- ══ iPhone Shortcut ════════════════════════════════════════════════
+         The other direction: instead of the frame reaching into an account,
+         the phone sends photos out to it. Nothing about anyone's iCloud has
+         to be made public, and no Apple credential lands on this device. -->
+    <section class="card">
+        <div class="card__head">
+            {{ icon('send') }}<h2>{{ t.shortcut }}</h2>
+            <span class="spacer"></span>
+            {% if config.upload_token_hash_configured %}
+            <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+            {% endif %}
+        </div>
+        <div class="card__body stack">
+            <p class="small muted">{{ t.shortcut_hint }}</p>
+
+            <div class="field">
+                <label class="label" for="s-shortcut-url">{{ t.shortcut_url }}</label>
+                <div class="row" style="gap:8px;">
+                    <input type="text" class="input" id="s-shortcut-url" readonly
+                           value="" spellcheck="false">
+                    <button type="button" class="btn btn--sm" data-copy="s-shortcut-url">
+                        {{ icon('copy') }} {{ t.shortcut_copy }}
+                    </button>
+                </div>
+            </div>
+
+            {# Only ever populated by the mint response — never rendered from
+               storage, because storage only holds a hash. #}
+            <div class="field hidden" id="shortcut-token-field">
+                <label class="label" for="s-shortcut-token">{{ t.shortcut_token }}</label>
+                <div class="row" style="gap:8px;">
+                    <input type="text" class="input" id="s-shortcut-token" readonly
+                           value="" spellcheck="false">
+                    <button type="button" class="btn btn--sm" data-copy="s-shortcut-token">
+                        {{ icon('copy') }} {{ t.shortcut_copy }}
+                    </button>
+                </div>
+                <div class="alert alert--warning mt-1">
+                    {{ icon('alert') }}<span>{{ t.shortcut_once }}</span>
+                </div>
+            </div>
+
+            <div class="alert" id="shortcut-state">{{ t.loading }}</div>
+
+            <div class="accordion">
+                <div class="accordion__item">
+                    <button type="button" class="accordion__trigger" data-accordion-trigger="shortcut-steps"
+                            aria-expanded="false">
+                        {{ icon('info') }} {{ t.shortcut_steps_title }} {{ icon('chevron-down') }}
+                    </button>
+                    <div class="accordion__panel" id="shortcut-steps" hidden>
+                        <ol style="padding-left:18px;margin:0;">
+                            <li>{{ t.shortcut_step1 }}</li>
+                            <li>{{ t.shortcut_step2 }}</li>
+                            <li>{{ t.shortcut_step3 }}</li>
+                            <li>{{ t.shortcut_step4 }}</li>
+                            <li>{{ t.shortcut_step5 }}</li>
+                            <li>{{ t.shortcut_step6 }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="mint-shortcut-token">
+                {{ icon('key') }} <span id="mint-shortcut-label">{{ t.shortcut_new }}</span>
+            </button>
+            <button type="button" class="btn btn--quiet-danger hidden" id="revoke-shortcut-token">
+                {{ icon('x') }} {{ t.shortcut_revoke }}
+            </button>
+        </div>
+    </section>
+
     <!-- ══ Network ════════════════════════════════════════════════════════ -->
     <section class="card">
         <div class="card__head">{{ icon('wifi') }}<h2>{{ t.wifi_config }}</h2></div>
@@ -519,6 +592,101 @@
             });
         });
     }
+
+    /* ── iPhone Shortcut token ──────────────────────────────────────────── */
+
+    var shortcutState = document.getElementById('shortcut-state');
+    var mintBtn       = document.getElementById('mint-shortcut-token');
+    var revokeBtn     = document.getElementById('revoke-shortcut-token');
+    var tokenField    = document.getElementById('shortcut-token-field');
+
+    /* navigator.clipboard needs a secure context: it works over the tunnel
+       (HTTPS) and refuses on a plain-HTTP LAN address, which is exactly where
+       somebody is most likely to be standing. Fall back to selecting the text
+       so there is always a way to get the token off the screen. */
+    function copyField(input) {
+        input.focus();
+        input.select();
+        input.setSelectionRange(0, input.value.length);
+        var done = function () { V.toast(V.t('shortcut_copied'), 'success'); };
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(input.value).then(done, function () {});
+            return;
+        }
+        try { if (document.execCommand('copy')) done(); } catch (e) { /* select-and-copy by hand */ }
+    }
+
+    V.$$('[data-copy]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            copyField(document.getElementById(btn.getAttribute('data-copy')));
+        });
+    });
+
+    function renderShortcutState(s) {
+        document.getElementById('s-shortcut-url').value = s.upload_url || '';
+        var has = !!s.configured;
+        shortcutState.className = has ? 'alert alert--success' : 'alert';
+        shortcutState.textContent = has
+            ? V.t('shortcut_token') + ' · ' + V.t('shortcut_created') + ': ' +
+              (s.created || '').replace('T', ' ')
+            : V.t('shortcut_none');
+        // The label lives inside the mint button, and V.busy() replaces that
+        // button's contents while a request is in flight — so it can genuinely
+        // be absent here. Skip it rather than throwing halfway through and
+        // leaving the rest of the card un-rendered.
+        var label = document.getElementById('mint-shortcut-label');
+        if (label) label.textContent = has ? V.t('shortcut_replace') : V.t('shortcut_new');
+        revokeBtn.classList.toggle('hidden', !has);
+    }
+
+    function refreshShortcut() {
+        return V.api('/api/upload-token').then(renderShortcutState).catch(function () {});
+    }
+    refreshShortcut();
+
+    mintBtn.addEventListener('click', function () {
+        var btn = this;
+        var replacing = !revokeBtn.classList.contains('hidden');
+        var ask = replacing
+            ? V.confirm(V.t('shortcut_confirm_replace'), { title: V.t('shortcut_replace') })
+            : Promise.resolve(true);
+
+        ask.then(function (ok) {
+            if (!ok) return;
+            var restore = V.busy(btn);
+            V.api('/api/upload-token', { method: 'POST', body: {} })
+                .then(function (d) {
+                    // The one moment the token exists outside the device.
+                    tokenField.classList.remove('hidden');
+                    document.getElementById('s-shortcut-token').value = d.token;
+                    copyField(document.getElementById('s-shortcut-token'));
+                })
+                .catch(V.fail)
+                .then(function () {
+                    // Put the button back first — restore() rewrites its
+                    // contents — then re-render the card from the device, so
+                    // there is one source of truth for what it says.
+                    restore();
+                    refreshShortcut();
+                });
+        });
+    });
+
+    revokeBtn.addEventListener('click', function () {
+        V.confirm(V.t('shortcut_confirm_revoke'), {
+            title: V.t('shortcut_revoke'), danger: true
+        }).then(function (ok) {
+            if (!ok) return;
+            V.api('/api/upload-token', { method: 'DELETE' })
+                .then(function () {
+                    tokenField.classList.add('hidden');
+                    document.getElementById('s-shortcut-token').value = '';
+                    V.toast(V.t('done'), 'success');
+                    return refreshShortcut();
+                })
+                .catch(V.fail);
+        });
+    });
 
     /* ── System ─────────────────────────────────────────────────────────── */
 

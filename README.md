@@ -81,8 +81,9 @@ http://<Pi-IP>:5000
 
 ## Photo sources
 
-Photos reach the frame three ways: dropped onto **Upload**, imported from
-**Google Drive**, or pulled from an **iCloud shared album**. However they get
+Photos reach the frame four ways: dropped onto **Upload**, imported from
+**Google Drive**, pulled from an **iCloud shared album**, or pushed from an
+**iPhone Shortcut**. However they get
 there they end up as ordinary files in `output/`, so the slideshow, the photo
 page and the gallery treat them all alike.
 
@@ -107,6 +108,40 @@ a device with no keyboard. In Photos: open the album → **People** (or
   the photos.
 
 Treat the link as a credential: anyone who has it can see the album.
+
+### iPhone Shortcut
+
+The other direction, and the one to use if you would rather not make any album
+public: instead of the frame reaching into an account, your phone sends photos
+out to it. Nothing about your iCloud changes and no Apple credential is stored
+on the device.
+
+Apple publishes no API for a third party to read your iCloud photo library —
+CloudKit Web Services only reaches an app's own container, and PhotoKit only
+runs on Apple devices. The unofficial route (signing in to iCloud's private web
+API with your Apple ID) needs your real password on a device that answers to
+the public internet, plus a fresh 2FA code every month or so when the trust
+token expires. This path avoids all of that.
+
+**Settings → iPhone Shortcut → Create token.** The token is shown once and
+stored only as a hash, so keep the copy the page gives you. It authorises
+exactly one thing — sending a photo in — and nothing else on the device;
+revoke it any time without touching the sign-in account.
+
+Then, in Shortcuts on the phone:
+
+1. New shortcut → **Get Contents of URL**
+2. URL: the address the settings page shows. Method: **POST**. Request Body: **Form**
+3. Header — `Authorization` : `Bearer YOUR_TOKEN`
+4. Form field `file` → **Shortcut Input**. Optionally a field `display` set to `1`
+   to put the photo on the panel straight away.
+5. In the shortcut's settings turn on **Show in Share Sheet**, so it appears
+   under Share in Photos.
+
+For hands-off syncing, add a personal automation: daily → **Find Photos** where
+Album is your frame album and Date Added is within the last day → **Repeat with
+Each** → the upload step above. (iOS has no "photo added to album" trigger, so a
+daily sweep is how this is done.)
 
 ## Weather
 
@@ -355,6 +390,18 @@ one exception, and only while the device is unpaired — see
 | POST | `/api/gdrive/disconnect` | Forget the stored tokens |
 | GET | `/api/gdrive/files` | List images in Drive |
 | POST | `/api/gdrive/download` | Import selected files |
+
+### iPhone Shortcut
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/upload-token` | Whether a token exists, and the URL to send photos to |
+| POST | `/api/upload-token` | Mint a token, replacing any existing one. The only response that carries it |
+| DELETE | `/api/upload-token` | Revoke it |
+
+`POST /api/upload` and `/api/upload/batch` accept `Authorization: Bearer <token>`
+(or `X-Upload-Token`) in place of a session — those two endpoints only. Add
+`display=1` to the form to put the photo on the panel as it arrives.
 
 ### iCloud shared album
 

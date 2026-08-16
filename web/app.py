@@ -57,6 +57,7 @@ from services.i18n import get_translations
 from services import renderer
 from services import gdrive
 from services import icloud
+from services import upload_token
 from services import display_mgr
 from services import device_id
 from services import epd as epd_service
@@ -135,6 +136,29 @@ _PAIRING_OPEN_PREFIXES = ('/api/wifi/',)
 # the progress of a connection attempt the caller just made.
 _CONNECT_STATUS_PATH = '/api/wifi/connect/status'
 
+# The *only* endpoints an upload token opens, and only for POST. It is a
+# credential that lives in an automation on somebody's phone, so it authorises
+# sending a photo in and nothing else — not the config, not the WiFi, not the
+# factory reset. Widening this list is a decision about what a stolen phone
+# gets, so it is written out rather than derived from a prefix.
+_UPLOAD_TOKEN_PATHS = ('/api/upload', '/api/upload/batch')
+
+
+def _upload_token_authorised(path):
+    """Does this request carry a valid upload token for an endpoint it opens?"""
+    if request.method != 'POST' or path not in _UPLOAD_TOKEN_PATHS:
+        return False
+    if not upload_token.is_configured(config):
+        return False
+    presented = upload_token.from_request(request)
+    if not presented:
+        return False
+    if not upload_token.verify(config, presented):
+        logger.warning(f"Rejected an upload with a bad token from "
+                       f"{request.remote_addr}")
+        return False
+    return True
+
 
 @app.before_request
 def enforce_auth():
@@ -147,6 +171,12 @@ def enforce_auth():
     path = request.path
 
     if path.startswith(_ALWAYS_OPEN_PREFIXES) or path == _CONNECT_STATUS_PATH:
+        return
+
+    # A signed-in browser is not the only legitimate caller: an iPhone Shortcut
+    # sends photos with a token instead. Checked after the always-open paths
+    # and before the session, but only ever for the two upload endpoints.
+    if _upload_token_authorised(path):
         return
 
     if not config.is_setup_complete:
@@ -848,6 +878,44 @@ def api_reset():
                     "message": "Reset complete. QR setup displayed."})
 
 
+# ── API: Upload token (for the iPhone Shortcut) ──────────────────────────
+
+@app.route('/api/upload-token')
+def api_upload_token_status():
+    """Whether a token exists — never the token itself."""
+    return jsonify({
+        "configured": upload_token.is_configured(config),
+        "created": upload_token.created_at(config),
+        # What the Shortcut has to be pointed at. The tunnel address is the
+        # useful one: an automation on a phone that has left the house still
+        # has to reach the frame.
+        "upload_url": (remote_access.url or f"http://{_get_ip()}:5000") + "/api/upload",
+    })
+
+
+@app.route('/api/upload-token', methods=['POST'])
+def api_upload_token_mint():
+    """Mint a token, replacing any existing one.
+
+    This is the one and only response that carries the token itself; it is
+    stored hashed, so nothing can hand it back later.
+    """
+    token = upload_token.mint(config)
+    return jsonify({
+        "success": True,
+        "token": token,
+        "created": upload_token.created_at(config),
+        "upload_url": (remote_access.url or f"http://{_get_ip()}:5000") + "/api/upload",
+    })
+
+
+@app.route('/api/upload-token', methods=['DELETE'])
+def api_upload_token_revoke():
+    """Revoke the token. Any Shortcut carrying it stops working at once."""
+    upload_token.revoke(config)
+    return jsonify({"success": True})
+
+
 # ── API: Page Control (virtual buttons) ──────────────────────────────────
 
 @app.route('/api/page/switch', methods=['POST'])
@@ -935,6 +1003,44 @@ def api_photo_fit_mode():
 
 # ── API: Image Management ─────────────────────────────────────────────────
 
+def _show_after_upload(filename):
+    """Put a just-uploaded photo on the panel, without holding the request.
+
+    A panel refresh takes the better part of twenty seconds. Doing it inline
+    would leave a phone staring at a spinner for the whole repaint — and if the
+    Shortcut gave up first, the photo would still be landing. So the response
+    goes back immediately and the paint happens behind it, which is the same
+    shape the OTP and post-sign-in repaints already use.
+    """
+    path = safe_output_path(filename)
+    if not path or not os.path.isfile(path):
+        return
+
+    def paint():
+        # Wait rather than skip: something else holding the panel for a moment
+        # is normal, and the photo somebody just sent should still arrive.
+        if not display_lock.acquire(timeout=90):
+            logger.warning(f"Panel stayed busy; {filename} was not displayed")
+            return
+        try:
+            ok, message = display_mgr.display_image_on_epaper(path)
+            if ok:
+                for index, image in enumerate(get_image_list()):
+                    if image["filename"] == filename:
+                        photo_state["current_index"] = index
+                        photo_state["current_image"] = filename
+                        break
+                config.set("current_page", "photo")
+            else:
+                logger.error(f"Could not display {filename}: {message}")
+        except Exception as e:  # noqa: BLE001 - a background paint must not vanish silently
+            logger.error(f"Could not display {filename}: {e}", exc_info=True)
+        finally:
+            display_lock.release()
+
+    threading.Thread(target=paint, daemon=True).start()
+
+
 @app.route('/api/upload', methods=['POST'])
 def api_upload():
     if 'file' not in request.files:
@@ -947,10 +1053,14 @@ def api_upload():
 
     rotation = int(request.form.get('rotation', 0))
     fit_mode = request.form.get('fit_mode', config.get('photo_fit_mode', 'fit'))
+    show_now = request.form.get('display', '') in ('1', 'true', 'yes')
 
     try:
         filename = process_upload(file, rotation, fit_mode)
+        if show_now:
+            _show_after_upload(filename)
         return jsonify({"success": True, "filename": filename,
+                        "displaying": show_now,
                         "message": f"Image uploaded: {filename}"})
     except UnidentifiedImageError:
         # The extension said PNG but the bytes disagree. That is the caller's

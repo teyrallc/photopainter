@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import types
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1039,6 +1040,138 @@ def test_watchdog_honours_the_production_opt_out():
         assert config.get("setup_complete") is True
     finally:
         config.update(saved)
+
+
+def _png_bytes(colour=(10, 120, 200)):
+    from PIL import Image
+    buffer = io.BytesIO()
+    Image.new("RGB", (40, 30), colour).save(buffer, "PNG")
+    buffer.seek(0)
+    return buffer
+
+
+def test_upload_token_lets_a_shortcut_in_and_nothing_else():
+    """The credential that lives in an automation on somebody's phone.
+
+    It has to be enough to send a photo, and not enough to do anything else —
+    a phone is lost more often than a password is stolen.
+    """
+    from services import upload_token
+
+    client = _paired_client()                       # to mint it
+    anonymous = app.test_client()                   # the Shortcut: no cookie
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+
+    minted = client.post("/api/upload-token", headers=SAME_ORIGIN, json={})
+    token = minted.get_json()["token"]
+    assert token.startswith("vgn_")
+
+    try:
+        # …and the token is enough to upload.
+        sent = anonymous.post(
+            "/api/upload", headers={"Authorization": f"Bearer {token}"},
+            content_type="multipart/form-data",
+            data={"file": (_png_bytes(), "from-shortcut.png")})
+        assert sent.status_code == 200, sent.get_data(as_text=True)
+        assert sent.get_json()["displaying"] is False
+
+        # The other header spelling works too — Shortcuts makes a custom
+        # header easier to fill in than Authorization.
+        second = anonymous.post(
+            "/api/upload", headers={"X-Upload-Token": token},
+            content_type="multipart/form-data",
+            data={"file": (_png_bytes(), "from-shortcut.png")})
+        assert second.status_code == 200
+
+        # It is not enough for anything else.
+        for path in ("/api/config", "/api/reset", "/api/page/switch",
+                     "/api/system/reboot", "/api/icloud/connect"):
+            blocked = anonymous.post(path, headers={"Authorization": f"Bearer {token}"},
+                                     json={})
+            assert blocked.status_code == 401, (path, blocked.status_code)
+        assert anonymous.get(
+            "/api/config", headers={"Authorization": f"Bearer {token}"}
+        ).status_code == 401
+
+        # A wrong token is no token.
+        for bad in (token + "x", token[:-1], "vgn_nonsense", ""):
+            refused = anonymous.post(
+                "/api/upload", headers={"Authorization": f"Bearer {bad}"},
+                content_type="multipart/form-data",
+                data={"file": (_png_bytes(), "nope.png")})
+            assert refused.status_code == 401, bad
+
+        # Revoking stops it dead, and the status endpoint never hands it back.
+        assert "token" not in client.get("/api/upload-token").get_json()
+        assert client.delete("/api/upload-token", headers=SAME_ORIGIN).status_code == 200
+        assert upload_token.is_configured(config) is False
+        after_revoke = anonymous.post(
+            "/api/upload", headers={"Authorization": f"Bearer {token}"},
+            content_type="multipart/form-data",
+            data={"file": (_png_bytes(), "revoked.png")})
+        assert after_revoke.status_code == 401
+    finally:
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+        upload_token.revoke(config)
+
+
+def test_upload_token_is_never_disclosed():
+    """It is stored hashed, so nothing can hand it back — not even us."""
+    from services import upload_token
+
+    client = _paired_client()
+    token = client.post("/api/upload-token", headers=SAME_ORIGIN,
+                        json={}).get_json()["token"]
+    try:
+        assert token not in json.dumps(client.get("/api/config").get_json())
+        assert token not in json.dumps(client.get("/api/status").get_json())
+        for page in ("/settings", "/", "/gallery"):
+            assert token not in client.get(page).get_data(as_text=True), page
+
+        # The stored form is a hash, not the token.
+        assert config.get("upload_token_hash") != token
+        assert upload_token.verify(config, token) is True
+        assert upload_token.verify(config, token + "x") is False
+
+        # Minting again replaces it, so an old Shortcut stops working.
+        fresh = client.post("/api/upload-token", headers=SAME_ORIGIN,
+                            json={}).get_json()["token"]
+        assert fresh != token
+        assert upload_token.verify(config, token) is False
+    finally:
+        upload_token.revoke(config)
+
+
+def test_upload_can_ask_for_the_photo_to_be_shown():
+    """"Send it and show it" is one request, and does not block on the panel."""
+    from services import upload_token
+
+    client = _paired_client()
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+    try:
+        response = client.post(
+            "/api/upload", headers=SAME_ORIGIN, content_type="multipart/form-data",
+            data={"file": (_png_bytes(), "show-me.png"), "display": "1"})
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert response.get_json()["displaying"] is True
+
+        # The paint runs behind the response; give it a moment to land.
+        name = response.get_json()["filename"]
+        for _ in range(50):
+            if photo_state_current() == name:
+                break
+            time.sleep(0.1)
+        assert photo_state_current() == name, "the photo never reached the panel"
+        assert config.get("current_page") == "photo"
+    finally:
+        for leftover in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, leftover))
+        upload_token.revoke(config)
+
+
+def photo_state_current():
+    return vapp.photo_state.get("current_image")
 
 
 def test_update_script_never_waits_for_a_human():

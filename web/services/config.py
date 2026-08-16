@@ -89,6 +89,11 @@ DEFAULT_CONFIG = {
     "icloud_last_sync": "",
     "icloud_last_error": "",
 
+    # The credential an iPhone Shortcut carries to send photos in. Stored
+    # hashed; the token itself is shown once, when it is minted.
+    "upload_token_hash": "",
+    "upload_token_created": "",
+
     # Photo settings
     "photo_rotation": 0,  # 0, 90, 180, 270
     "photo_fit_mode": "fit",  # fit (letterbox) or stretch
@@ -116,6 +121,10 @@ SECRET_KEYS = frozenset({
     "gdrive_access_token",
     "gdrive_refresh_token",
     "ngrok_authtoken",
+    # Only ever a hash, but it is the stored half of a working credential and
+    # being on this list is also what gives the interface its
+    # `upload_token_hash_configured` marker.
+    "upload_token_hash",
     # Not a credential for this interface, but it is the key to the pairing
     # network — it belongs on the panel in front of the owner, not in an API
     # response that a tunnelled browser session can read.
@@ -133,6 +142,10 @@ WRITABLE_KEYS = frozenset(set(DEFAULT_CONFIG) - {
     "admin_password_hash",
     # Minted by the device, not chosen by the user.
     "ap_password",
+    # Minted and revoked through /api/upload-token, which is the only place
+    # that ever sees the token itself.
+    "upload_token_hash",
+    "upload_token_created",
     # Written by /api/icloud/connect once the album has actually answered.
     # Letting these through here would leave the console reporting a
     # connection to an album nothing has ever reached.
