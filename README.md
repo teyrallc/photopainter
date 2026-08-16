@@ -143,6 +143,18 @@ at boot, and points Vignette's own settings at the new address. Use a
 **subdomain** — a subpath like `example.com/yilin` would need every front-end
 path rewritten.
 
+During the login step the browser asks which domain to authorize. **Pick the
+one that owns your hostname** — `example.com` for `yilin.example.com`. Choosing
+another domain on the same account does not fail: `cloudflared` then treats the
+hostname as a name relative to *that* zone and creates
+`yilin.example.com.the-other-domain.com`, which nothing resolves. The script
+checks the record it actually created and stops if it does not match.
+
+If the address does not load right after setup, the likely cause is a cached
+"no such name" answer from before the record existed — Cloudflare's SOA keeps
+those for 30 minutes. Check from a phone on mobile data, which uses a different
+resolver, before assuming the tunnel is broken.
+
 ### ngrok (quick, but the address moves)
 
 Free ngrok issues a **new hostname on every reconnect**, so any address you
@@ -173,6 +185,22 @@ new network without a keyboard or a reset.
 photo are kept. While the fallback hotspot is up the display quietly retries the
 saved network every five minutes, so a router that was simply slow to reboot
 recovers on its own with nobody touching anything.
+
+### Turning that off on a finished unit
+
+Raising the hotspot puts `wlan0` into AP mode, which severs the link it is
+reporting on. That is the right trade while a device is still being set up and
+wrong for one hanging on a wall, where a two-minute router reboot should not
+turn into a frame advertising a pairing network. Set `setup_hotspot_fallback`
+to `false` and the device keeps retrying the saved network quietly and forever
+instead, never taking itself off the air:
+
+```bash
+POST /api/config   {"setup_hotspot_fallback": false}
+```
+
+A device that has never been paired still raises the hotspot either way — it
+has no saved network to retry and no other way in.
 
 ## Service Management
 
@@ -377,8 +405,34 @@ creates the account, adds it to `spi`, `gpio` and `netdev`, and installs a
 narrow sudo allowlist at `/etc/sudoers.d/vignette` covering only `nmcli`,
 `reboot`, `shutdown` and restarting its own unit.
 
-Upgrading an existing root install: re-run `bash scripts/install.sh`. It
-creates the account, takes ownership of the checkout, and rewrites the unit.
+Upgrading an existing root install on a device that is already working, use
+the targeted migration rather than the full installer — `install.sh` also runs
+`apt-get upgrade` and rebuilds the virtualenv, which are the risky parts and
+none of them are the point:
+
+```bash
+bash scripts/harden-service.sh --check     # verify, change nothing
+bash scripts/harden-service.sh             # migrate
+bash scripts/harden-service.sh --rollback  # undo
+```
+
+It tests the panel's SPI and GPIO access **as the new account before switching
+anything**, backs up the current unit, and restores it automatically if the
+service does not come back — a frame that cannot start is a frame you have to
+walk over to.
+
+How much can be locked down is capped by one thing: the four privileged actions
+(joining a network, rebooting, shutting down, restarting itself) go through
+`sudo`, which is setuid, so `NoNewPrivileges` has to stay off. That rules out a
+sealed capability set and a `SystemCallFilter` without `@privileged`.
+Everything compatible with it is set — read-only `/usr`, `/etc` and `/home`
+outside the checkout, a closed device policy admitting only the panel's SPI and
+GPIO nodes, and the kernel, clock, hostname and namespace protections.
+
+Even then it is a smaller blast radius, not none: `config.json` holds the WiFi
+password and the session key, and the service account can read it. What changes
+is that a flaw in image decoding or file serving no longer hands over the whole
+board and the LAN behind it.
 
 ## Project Structure
 

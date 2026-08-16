@@ -56,6 +56,12 @@ if ! printf '%s' "$HOSTNAME_ARG" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0
     exit 1
 fi
 
+# The Cloudflare zone that ought to own this hostname, and the label to create
+# inside it. Right for the ordinary one-subdomain case, which is what the
+# README tells people to use; only ever shown as guidance, never relied on.
+ZONE="${HOSTNAME_ARG#*.}"
+RECORD_NAME="${HOSTNAME_ARG%%.*}"
+
 echo "============================================"
 echo "  Vignette — Cloudflare Tunnel setup"
 echo "  Hostname: $HOSTNAME_ARG"
@@ -66,23 +72,51 @@ echo "============================================"
 echo ""
 echo "[1/6] Installing cloudflared..."
 
+CF_APT_LIST="/etc/apt/sources.list.d/cloudflared.list"
+
+# Cloudflare's repo lags new Debian releases, so a codename it has never heard
+# of has to fall back rather than fail. bookworm packages run fine on trixie —
+# it is a static Go binary.
+cf_codename() {
+    local codename
+    codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")"
+    case "$codename" in
+        bullseye|bookworm|buster|focal|jammy|noble) ;;
+        *) codename=bookworm ;;
+    esac
+    printf '%s' "$codename"
+}
+
+write_apt_list() {
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(cf_codename) main" \
+        | sudo tee "$CF_APT_LIST" >/dev/null
+}
+
+# A run from before that fallback existed leaves a list naming a codename
+# Cloudflare never published, and every later `apt-get update` on the machine
+# fails on it — not just this repository. Skipping the install below because
+# cloudflared is already present would leave that behind forever, so repair it
+# whichever branch we take.
+repair_stale_apt_list() {
+    [ -f "$CF_APT_LIST" ] || return 0
+    local want
+    want="$(cf_codename)"
+    grep -q "cloudflared ${want} main" "$CF_APT_LIST" && return 0
+    echo "  Repairing $CF_APT_LIST — it named a release Cloudflare does not publish."
+    write_apt_list
+}
+
 install_from_apt() {
     sudo mkdir -p --mode=0755 /usr/share/keyrings
     curl -fsSL --max-time 60 https://pkg.cloudflare.com/cloudflare-main.gpg \
         | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null || return 1
 
-    # Cloudflare's repo lags new Debian releases, so a codename it has never
-    # heard of has to fall back rather than fail. bookworm packages run fine
-    # on trixie — it is a static Go binary.
-    CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")"
-    case "$CODENAME" in
-        bullseye|bookworm|buster|focal|jammy|noble) ;;
-        *) echo "  ($CODENAME is not published by Cloudflare; using bookworm)"
-           CODENAME=bookworm ;;
-    esac
-
-    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared ${CODENAME} main" \
-        | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+    local codename
+    codename="$(cf_codename)"
+    if [ "$codename" != "$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")" ]; then
+        echo "  (this release is not published by Cloudflare; using $codename)"
+    fi
+    write_apt_list
 
     # Only refresh this one list. A full `apt-get update` on a flaky link can
     # take many minutes and fail on unrelated repositories.
@@ -111,6 +145,7 @@ install_from_deb() {
 
 if command -v cloudflared >/dev/null 2>&1; then
     echo "Already installed: $(cloudflared --version 2>&1 | head -1)"
+    repair_stale_apt_list
 elif install_from_apt || install_from_deb; then
     echo "Installed: $(cloudflared --version 2>&1 | head -1)"
 else
@@ -150,11 +185,23 @@ echo "[2/6] Authenticating with Cloudflare..."
 if sudo test -f /root/.cloudflared/cert.pem; then
     echo "Already authenticated."
 else
-    echo ""
-    echo "  A URL will be printed below. Open it in ANY browser (it does not"
-    echo "  have to be on this device), sign in, and pick the zone for"
-    echo "  ${HOSTNAME_ARG#*.} — the one that owns this hostname."
-    echo ""
+    cat <<LOGINEOF
+
+  ----------------------------------------------------------------
+   PICK THE RIGHT DOMAIN ON THE PAGE THAT OPENS:
+
+       $ZONE
+
+  ----------------------------------------------------------------
+
+  A URL will be printed below. Open it in ANY browser — it does not have
+  to be on this device — sign in, and authorize the domain named above.
+
+  Authorizing a *different* domain does not fail. cloudflared would go on
+  to create '$HOSTNAME_ARG.<that-other-domain>' instead, and
+  $HOSTNAME_ARG would never resolve. Step 4 checks for this and stops.
+
+LOGINEOF
     sudo cloudflared tunnel login
 fi
 
@@ -181,15 +228,76 @@ echo "Tunnel ID: $TUNNEL_ID"
 # ── Step 4: DNS record ────────────────────────────────────────────────
 echo ""
 echo "[4/6] Pointing $HOSTNAME_ARG at the tunnel..."
-# Idempotent in practice; an existing record for this hostname makes it fail,
-# which is worth reporting rather than silently overwriting somebody's DNS.
-if sudo cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME_ARG"; then
-    echo "DNS record created."
+
+manual_dns_instructions() {
+    cat <<DNSEOF
+
+  To add the record by hand: Cloudflare dashboard -> zone $ZONE -> DNS ->
+  Add record
+
+      Type    CNAME
+      Name    $RECORD_NAME
+      Target  ${TUNNEL_ID}.cfargotunnel.com
+      Proxy   Proxied (orange cloud) — DNS only will not work
+
+DNSEOF
+}
+
+# Three outcomes that have to be told apart. Two of them used to print the same
+# reassuring line, so a setup that had not worked at all looked finished:
+#
+#   * created for the hostname we asked for   -> done
+#   * a record already exists                 -> fine, but say which
+#   * created under some *other* zone         -> the login authorized the wrong
+#     domain, so cloudflared treated our fully-qualified hostname as a name
+#     relative to that zone and appended it. Nothing will ever resolve.
+ROUTE_LOG="$(sudo cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME_ARG" 2>&1)" \
+    && ROUTE_OK=1 || ROUTE_OK=0
+printf '%s\n' "$ROUTE_LOG"
+
+# e.g. "INF Added CNAME yilin.example.com which will route to this tunnel ..."
+ADDED="$(printf '%s\n' "$ROUTE_LOG" \
+    | sed -n 's/.*Added CNAME \([^ ][^ ]*\) which will route.*/\1/p' | head -1)"
+
+if [ -n "$ADDED" ] && [ "$ADDED" != "$HOSTNAME_ARG" ]; then
+    cat <<WRONGZONEEOF
+
+ERROR: the record was created as
+
+           $ADDED
+
+       but the hostname you asked for is
+
+           $HOSTNAME_ARG
+
+  cloudflared is authorized for a different Cloudflare zone than the one that
+  owns this hostname, so it created the record inside that zone instead.
+  $HOSTNAME_ARG will not resolve.
+
+  To fix it: delete the record above in the Cloudflare dashboard, then
+
+      sudo rm -f /root/.cloudflared/cert.pem
+      sudo cloudflared tunnel login       # authorize: $ZONE
+      bash $0 $HOSTNAME_ARG
+
+  Deleting cert.pem re-authorizes the account only. The tunnel and its
+  credentials are untouched, so nothing has to be rebuilt.
+WRONGZONEEOF
+    manual_dns_instructions
+    exit 1
+fi
+
+if [ "$ROUTE_OK" = 1 ]; then
+    echo "DNS record created for $HOSTNAME_ARG."
+elif printf '%s' "$ROUTE_LOG" | grep -qi 'already exists'; then
+    echo "A record for $HOSTNAME_ARG already exists — leaving it alone."
+    echo "Confirm in the dashboard that it is a CNAME to"
+    echo "${TUNNEL_ID}.cfargotunnel.com, proxied."
 else
     echo ""
-    echo "NOTE: the DNS route was not created. That is expected if a record for"
-    echo "      $HOSTNAME_ARG already exists. Check the Cloudflare dashboard —"
-    echo "      it should be a CNAME to ${TUNNEL_ID}.cfargotunnel.com (proxied)."
+    echo "ERROR: the DNS record could not be created (see the output above)."
+    manual_dns_instructions
+    exit 1
 fi
 
 # ── Step 5: tunnel config + service ───────────────────────────────────
@@ -280,12 +388,41 @@ echo "cloudflared: $(systemctl is-active cloudflared)"
 echo "vignette:    $(systemctl is-active vignette)"
 echo ""
 echo "Checking https://$HOSTNAME_ARG ..."
-CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 25 "https://$HOSTNAME_ARG" || echo "000")"
-case "$CODE" in
-    200|302|301) echo "  HTTP $CODE — reachable." ;;
-    000) echo "  No response yet. DNS can take a minute to propagate; try again shortly." ;;
-    *)   echo "  HTTP $CODE — reachable, but not the response expected. Check: journalctl -u vignette -n 50" ;;
-esac
+
+# Resolve before dialling. A name that is simply not known here yet is not an
+# HTTP failure, and reporting it as one sent people looking at the wrong logs.
+if ! getent hosts "$HOSTNAME_ARG" >/dev/null 2>&1; then
+    cat <<UNRESOLVEDEOF
+  $HOSTNAME_ARG does not resolve from this device yet.
+
+  The record was just created. A resolver that already answered "no such
+  name" for it — likely, if you tried the address before running this —
+  keeps that answer for up to 30 minutes.
+
+  The tunnel is up regardless. Retry with:
+      getent hosts $HOSTNAME_ARG
+  or check now from a phone on mobile data, which uses a different resolver.
+UNRESOLVEDEOF
+else
+    # `curl -w '%{http_code}'` prints 000 on a connection failure *and* exits
+    # non-zero. The old `|| echo "000"` appended a second one, so the variable
+    # held '000000', matched no case, and a device that never answered was
+    # reported as "reachable".
+    CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 25 \
+            "https://$HOSTNAME_ARG" 2>/dev/null)" || true
+    case "${CODE:-000}" in
+        200|301|302)
+            echo "  HTTP $CODE — reachable." ;;
+        000)
+            echo "  Resolved, but nothing answered in time."
+            echo "  Check: journalctl -u cloudflared -n 50" ;;
+        502|503|504)
+            echo "  HTTP $CODE — the tunnel is up, but $LOCAL_URL is not answering."
+            echo "  Check: systemctl status vignette; journalctl -u vignette -n 50" ;;
+        *)
+            echo "  HTTP $CODE — unexpected. Check: journalctl -u vignette -n 50" ;;
+    esac
+fi
 
 echo ""
 echo "============================================"

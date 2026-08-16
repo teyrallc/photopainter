@@ -876,6 +876,169 @@ def test_disconnecting_forgets_the_album_but_keeps_the_photos():
         for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
             os.remove(os.path.join(vapp.OUTPUT_DIR, name))
         _forget_icloud()
+def _fake_nmcli(responses):
+    """Stand in for `nmcli`, answering by the subcommand being asked about.
+
+    `responses` maps a substring of the argument list to the stdout to return.
+    """
+    def fake(*args, **kwargs):
+        joined = " ".join(args)
+        for key, stdout in responses.items():
+            if key in joined:
+                return types.SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    return fake
+
+
+def test_boot_check_reads_the_link_not_the_scan():
+    """A connected device with an empty scan list is connected.
+
+    The regression: `nmcli dev wifi` lists what a scan has seen, and after a
+    cold boot that list is empty for minutes while the interface is already
+    associated. The boot check read the emptiness as "the saved network is
+    unreachable", tore the working link down, and raised the pairing hotspot
+    on a device that had been holding a DHCP lease the whole time.
+    """
+    original = vapp.nmcli
+    try:
+        vapp.nmcli = _fake_nmcli({
+            # Associated, with a lease — but nothing has scanned yet.
+            "device status": "wlan0:wifi:connected:EXT0099\nlo:loopback:unmanaged:\n",
+            "dev wifi": "",
+            "802-11-wireless.ssid": "802-11-wireless.ssid:EXT0099\n",
+        })
+        assert vapp.get_active_ssid() == "EXT0099"
+    finally:
+        vapp.nmcli = original
+
+
+def test_disconnected_link_is_still_reported_as_disconnected():
+    """The fix must not make everything look connected."""
+    original = vapp.nmcli
+    try:
+        vapp.nmcli = _fake_nmcli({
+            "device status": "wlan0:wifi:disconnected:\nlo:loopback:unmanaged:\n",
+        })
+        assert vapp.get_active_ssid() is None
+    finally:
+        vapp.nmcli = original
+
+
+def test_our_own_hotspot_profile_is_not_a_network():
+    """`Vignette-Hotspot` is the profile name, not somewhere we joined."""
+    from services import device_id
+    assert device_id.is_own_ap("Vignette-Hotspot") is True
+    assert device_id.is_own_ap(device_id.ap_ssid()) is True
+    assert device_id.is_own_ap("Vignette-Setup") is True
+    # A network the owner happens to have named similarly is still theirs.
+    assert device_id.is_own_ap("Vignette-Home") is False
+    assert device_id.is_own_ap("EXT0099") is False
+
+
+def test_boot_adopts_a_live_network_instead_of_pairing():
+    """Being on the wrong network is not a reason to go off the air.
+
+    Raising the pairing hotspot puts wlan0 into AP mode, so doing it while the
+    device is reachable severs the link to announce that it cannot be reached.
+    """
+    saved = dict(config._data)
+    original_verify = vapp.verify_or_connect_wifi_on_boot
+    original_active = vapp.get_active_ssid
+    try:
+        config.update({"wifi_ssid": "OldRouter", "setup_hotspot_fallback": True})
+        vapp.verify_or_connect_wifi_on_boot = lambda: False   # saved SSID gone
+        vapp.get_active_ssid = lambda: "NewRouter"            # but we are online
+
+        assert vapp.resolve_boot_state() is True
+        assert config.get("setup_complete") is True
+        assert config.get("wifi_ssid") == "NewRouter"
+    finally:
+        vapp.verify_or_connect_wifi_on_boot = original_verify
+        vapp.get_active_ssid = original_active
+        config.update(saved)
+
+
+def test_production_unit_never_drops_itself_into_pairing():
+    """setup_hotspot_fallback=False keeps a finished unit out of setup mode."""
+    saved = dict(config._data)
+    original_verify = vapp.verify_or_connect_wifi_on_boot
+    original_active = vapp.get_active_ssid
+    try:
+        config.update({"wifi_ssid": "EXT0099", "setup_hotspot_fallback": False})
+        vapp.verify_or_connect_wifi_on_boot = lambda: False   # genuinely offline
+        vapp.get_active_ssid = lambda: None
+
+        assert vapp.resolve_boot_state() is True
+        assert config.get("setup_complete") is True           # no pairing portal
+        assert config.get("wifi_ssid") == "EXT0099"           # credentials kept
+    finally:
+        vapp.verify_or_connect_wifi_on_boot = original_verify
+        vapp.get_active_ssid = original_active
+        config.update(saved)
+
+
+def test_unpaired_device_still_raises_the_hotspot():
+    """The opt-out must not strand a device that has nothing to retry."""
+    saved = dict(config._data)
+    original_active = vapp.get_active_ssid
+    try:
+        config.update({"wifi_ssid": "", "setup_hotspot_fallback": False})
+        vapp.get_active_ssid = lambda: None
+
+        assert vapp.resolve_boot_state() is False
+        assert config.get("setup_complete") is False
+    finally:
+        vapp.get_active_ssid = original_active
+        config.update(saved)
+
+
+def test_watchdog_honours_the_production_opt_out():
+    """With the fallback off, a dead link retries instead of raising the AP."""
+    from services import net_watchdog as nw
+
+    saved = dict(config._data)
+    try:
+        config.update({"wifi_ssid": "EXT0099", "setup_hotspot_fallback": False,
+                       "setup_complete": True})
+        calls = []
+        watchdog = nw.NetWatchdog()
+        watchdog.init(
+            config,
+            active_ssid=lambda: None,                   # link down throughout
+            start_ap=lambda: calls.append("start_ap"),
+            stop_ap=lambda: calls.append("stop_ap"),
+            scan_wifi=lambda: calls.append("scan"),
+            show_pairing_screen=lambda: calls.append("pairing_screen"),
+            connect_saved=lambda: calls.append("retry") or False,
+            is_pairing_in_progress=lambda: False,
+        )
+
+        # Drive the loop directly: past the grace period, past the retry gap.
+        watchdog._down_since = 0
+        original_poll, original_stop = nw.POLL_SECONDS, watchdog._stop
+        try:
+            nw.POLL_SECONDS = 0
+            # One pass, then stop.
+            passes = [0]
+
+            class _OneShot:
+                def is_set(self): return passes[0] > 1
+                def wait(self, _): passes[0] += 1; return False
+                def set(self): passes[0] = 99
+                def clear(self): passes[0] = 0
+
+            watchdog._stop = _OneShot()
+            watchdog._run()
+        finally:
+            nw.POLL_SECONDS = original_poll
+            watchdog._stop = original_stop
+
+        assert "start_ap" not in calls, "a production unit raised the hotspot"
+        assert "pairing_screen" not in calls
+        assert "retry" in calls, "it stopped trying to get back on the network"
+        assert config.get("setup_complete") is True
+    finally:
+        config.update(saved)
 
 
 def test_config_survives_a_reload():
