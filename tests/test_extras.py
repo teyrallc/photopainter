@@ -21,6 +21,25 @@ import types
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(REPO, "src")
 
+# tests/test_smoke.py replaces subprocess.run and Popen process-wide so the web
+# app never shells out to nmcli. Both modules live in one pytest process, so by
+# the time the tests below run, `subprocess.run` is a stub that reports success
+# for everything — and the one test here that actually executes a script was
+# passing against that canned answer instead of the script. Keep handles on the
+# real callables, taken at import, before the stubs are installed.
+_real_run = subprocess.run
+_real_popen = subprocess.Popen
+
+
+def run_real(command, **kwargs):
+    """Actually execute `command`, stepping around any process-wide stubs."""
+    stubbed_run, stubbed_popen = subprocess.run, subprocess.Popen
+    subprocess.run, subprocess.Popen = _real_run, _real_popen
+    try:
+        return _real_run(command, **kwargs)
+    finally:
+        subprocess.run, subprocess.Popen = stubbed_run, stubbed_popen
+
 
 def _stub_vision_imports():
     """Let src/display_picture.py import without OpenCV or numpy present."""
@@ -148,7 +167,7 @@ def test_generator_paths_are_project_relative():
 def test_generator_explains_what_is_missing():
     """Run from elsewhere, it must still name the real paths and the fix."""
     with tempfile.TemporaryDirectory() as elsewhere:
-        result = subprocess.run(
+        result = run_real(
             [sys.executable, os.path.join(SRC, "generate_picture.py"), elsewhere],
             capture_output=True, text=True, cwd=elsewhere, timeout=60)
 
@@ -198,7 +217,7 @@ def test_install_extras_script_is_wired_up():
     # And the base installer has to point at it, or nobody will find it.
     assert "install-extras.sh" in open(os.path.join(REPO, "scripts", "install.sh")).read()
 
-    help_text = subprocess.run(["bash", script, "--help"],
+    help_text = run_real(["bash", script, "--help"],
                                capture_output=True, text=True, timeout=30)
     assert help_text.returncode == 0
     assert "set -euo" not in help_text.stdout, "help is leaking script body"

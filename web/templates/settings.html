@@ -29,12 +29,22 @@
                 <label class="label" for="s-weather-city">{{ t.city }}</label>
                 <input type="text" class="input" id="s-weather-city"
                        value="{{ config.weather_city }}" placeholder="{{ t.city_placeholder }}">
+                <p class="hint">{{ t.city_hint }}</p>
             </div>
             <div class="field">
                 <label class="label" for="s-weather-units">{{ t.units }}</label>
                 <select class="select" id="s-weather-units">
                     <option value="metric"   {% if config.weather_units != 'imperial' %}selected{% endif %}>{{ t.celsius }}</option>
                     <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
+                </select>
+            </div>
+            <div class="field">
+                {# Stored all along, but until now there was no way to change
+                   it — so every panel read its conditions in English. #}
+                <label class="label" for="s-weather-lang">{{ t.weather_desc_lang }}</label>
+                <select class="select" id="s-weather-lang">
+                    <option value="en"    {% if config.weather_lang != 'zh_tw' %}selected{% endif %}>English</option>
+                    <option value="zh_tw" {% if config.weather_lang == 'zh_tw' %}selected{% endif %}>中文</option>
                 </select>
             </div>
             {# Left empty (and marginless) until a test actually runs. #}
@@ -133,6 +143,76 @@
             <button type="button" class="btn btn--primary" id="save-gdrive">{{ icon('save') }} {{ t.save }}</button>
             {% if config.gdrive_client_id and not config.gdrive_connected %}
             <button type="button" class="btn btn--success" id="connect-gdrive">{{ icon('drive') }} {{ t.gdrive_connect }}</button>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- ══ iCloud Shared Album ════════════════════════════════════════════
+         No account to sign in to: an album with "Public Website" turned on is
+         readable from its link alone, which is the only kind of credential
+         worth typing on a device with no keyboard. -->
+    <section class="card">
+        <div class="card__head">
+            {{ icon('cloud') }}<h2>{{ t.icloud }}</h2>
+            <span class="spacer"></span>
+            {% if config.icloud_connected %}
+            <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+            {% endif %}
+        </div>
+        <div class="card__body stack">
+            <div class="field">
+                <label class="label" for="s-icloud-url">{{ t.icloud_link }}</label>
+                <input type="url" class="input" id="s-icloud-url"
+                       value="{{ config.icloud_album_url }}"
+                       placeholder="https://www.icloud.com/sharedalbum/#B0…"
+                       spellcheck="false" autocomplete="off">
+                <p class="hint">{{ t.icloud_link_hint }}</p>
+            </div>
+
+            <label class="field field--inline" for="s-icloud-auto">
+                <input type="checkbox" id="s-icloud-auto"
+                       {% if config.icloud_auto_sync %}checked{% endif %}>
+                <span>{{ t.icloud_auto_sync }}</span>
+            </label>
+
+            <div class="field">
+                <label class="label" for="s-icloud-interval">{{ t.icloud_sync_interval }}</label>
+                <select class="select" id="s-icloud-interval">
+                    <option value="900"   {% if config.icloud_sync_interval == 900 %}selected{% endif %}>15 {{ t.minutes }}</option>
+                    <option value="3600"  {% if config.icloud_sync_interval == 3600 or not config.icloud_sync_interval %}selected{% endif %}>1 {{ t.hour }}</option>
+                    <option value="21600" {% if config.icloud_sync_interval == 21600 %}selected{% endif %}>6 {{ t.hour }}</option>
+                    <option value="86400" {% if config.icloud_sync_interval == 86400 %}selected{% endif %}>24 {{ t.hour }}</option>
+                </select>
+            </div>
+
+            <div class="alert" id="icloud-state">{{ t.loading }}</div>
+
+            <div class="accordion">
+                <div class="accordion__item">
+                    <button type="button" class="accordion__trigger" data-accordion-trigger="icloud-steps"
+                            aria-expanded="false">
+                        {{ icon('info') }} {{ t.icloud_steps_title }} {{ icon('chevron-down') }}
+                    </button>
+                    <div class="accordion__panel" id="icloud-steps" hidden>
+                        <ol style="padding-left:18px;margin:0;">
+                            <li>{{ t.icloud_step1 }}</li>
+                            <li>{{ t.icloud_step2 }}</li>
+                            <li>{{ t.icloud_step3 }}</li>
+                            <li>{{ t.icloud_step4 }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="save-icloud">
+                {{ icon('cloud') }} {{ t.icloud_connect }}
+            </button>
+            <button type="button" class="btn" id="sync-icloud">{{ icon('refresh') }} {{ t.icloud_sync_now }}</button>
+            {% if config.icloud_connected %}
+            <button type="button" class="btn btn--quiet-danger" id="disconnect-icloud">
+                {{ icon('x') }} {{ t.icloud_disconnect }}
+            </button>
             {% endif %}
         </div>
     </section>
@@ -253,7 +333,8 @@
         saveConfig(this, {
             weather_api_key: document.getElementById('s-weather-key').value,
             weather_city: document.getElementById('s-weather-city').value,
-            weather_units: document.getElementById('s-weather-units').value
+            weather_units: document.getElementById('s-weather-units').value,
+            weather_lang: document.getElementById('s-weather-lang').value
         });
     });
 
@@ -262,7 +343,10 @@
         var restore = V.busy(this);
         out.className = 'alert mt-2';
         out.textContent = V.t('loading');
-        V.api('/api/weather')
+        // refresh=1: Test has to answer for the settings as they are now. It
+        // used to be served from the cache, so changing the city and pressing
+        // Test kept reporting the previous one for the best part of an hour.
+        V.api('/api/weather?refresh=1')
             .then(function (d) {
                 out.className = 'alert alert--success mt-2';
                 out.textContent = d.city + ': ' + d.temp + '° ' + (d.description || '');
@@ -357,6 +441,82 @@
             s.onload = start;
             s.onerror = function () { V.toast(V.t('gdrive_offline'), 'danger'); };
             document.head.appendChild(s);
+        });
+    }
+
+    /* ── iCloud shared album ────────────────────────────────────────────── */
+
+    var icloudState = document.getElementById('icloud-state');
+
+    function renderIcloudState(s) {
+        if (!s || !s.connected) {
+            icloudState.className = 'alert';
+            icloudState.textContent = s && s.last_error
+                ? s.last_error : V.t('icloud_not_connected');
+            return;
+        }
+        var parts = [V.t('icloud_connected_to') + ' ' + (s.album_name || '—'),
+                     s.imported + ' ' + V.t('icloud_imported')];
+        if (s.last_sync) parts.push(V.t('icloud_last_sync') + ': ' + s.last_sync.replace('T', ' '));
+        icloudState.className = s.last_error ? 'alert alert--warning' : 'alert alert--success';
+        icloudState.textContent = parts.join(' · ') + (s.last_error ? ' — ' + s.last_error : '');
+    }
+
+    function refreshIcloud() {
+        return V.api('/api/icloud/status').then(renderIcloudState).catch(function () {});
+    }
+    refreshIcloud();
+
+    document.getElementById('save-icloud').addEventListener('click', function () {
+        var url = document.getElementById('s-icloud-url').value.trim();
+        var restore = V.busy(this);
+        // The schedule is an ordinary setting; the link is not — it is only
+        // stored once the album has actually answered.
+        V.api('/api/config', { method: 'POST', body: {
+            icloud_auto_sync: document.getElementById('s-icloud-auto').checked,
+            icloud_sync_interval: parseInt(document.getElementById('s-icloud-interval').value, 10)
+        } })
+            .then(function () {
+                if (!url) { V.toast(V.t('saved'), 'success'); return null; }
+                return V.api('/api/icloud/connect', { method: 'POST', body: { url: url } })
+                    .then(function (d) {
+                        V.toast(d.album + ' — ' + d.photos + ' ' + V.t('images_count'), 'success');
+                        renderIcloudState(d.status);
+                        setTimeout(function () { window.location.reload(); }, 1200);
+                    });
+            })
+            .catch(function (err) {
+                V.fail(err);
+                icloudState.className = 'alert alert--danger';
+                icloudState.textContent = err.message;
+            })
+            .then(restore);
+    });
+
+    document.getElementById('sync-icloud').addEventListener('click', function () {
+        var restore = V.busy(this);
+        V.api('/api/icloud/sync', { method: 'POST' })
+            .then(function (d) {
+                V.toast(d.imported
+                    ? V.t('icloud_new_photos').replace('{n}', d.imported)
+                    : V.t('icloud_nothing_new'), d.imported ? 'success' : 'info');
+                renderIcloudState(d.status);
+            })
+            .catch(V.fail)
+            .then(restore);
+    });
+
+    var disconnectIcloud = document.getElementById('disconnect-icloud');
+    if (disconnectIcloud) {
+        disconnectIcloud.addEventListener('click', function () {
+            V.confirm(V.t('icloud_confirm_disconnect'), {
+                title: V.t('icloud_disconnect'), danger: true
+            }).then(function (ok) {
+                if (!ok) return;
+                V.api('/api/icloud/disconnect', { method: 'POST' })
+                    .then(function () { window.location.reload(); })
+                    .catch(V.fail);
+            });
         });
     }
 

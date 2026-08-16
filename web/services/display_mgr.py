@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 from services import renderer
 from services import epd as epd_service
 from services import device_id
-from services.weather import fetch_weather
+from services import weather as weather_svc
 from services.calendar_svc import fetch_calendar_events
 
 # Amsterdam Three logo font path
@@ -88,14 +88,8 @@ def display_current_page():
     page = config.get("current_page", "photo")
     logger.info(f"Rendering page: {page}")
 
-    weather = None
     events = []
-    if config.get("weather_api_key") and config.get("weather_city"):
-        weather = fetch_weather(
-            config.get("weather_api_key"),
-            config.get("weather_city"),
-            config.get("weather_units", "metric"),
-            config.get("weather_lang", "en"))
+    weather = weather_svc.fetch_for_config(config)
     if config.get("calendar_ical_url"):
         events = fetch_calendar_events(config.get("calendar_ical_url"))
 

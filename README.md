@@ -32,6 +32,7 @@ A smart display system based on the Waveshare 7.3" 6-color e-paper display, runn
 - **Web Remote Control** - Operate from any device via browser (responsive UI)
 - **Photo Upload** - Drag-and-drop upload with real-time 7-color e-paper preview
 - **Photo Navigation** - Browse photos via web virtual buttons (prev / next / latest)
+- **Photo Sources** - Import from Google Drive, or subscribe to an iCloud shared album and let the frame pull new photos on its own
 - **Test Pattern** - Send a 7-color test pattern with one click to verify hardware
 - **Remote Management** - Update code, reboot, or shut down remotely
 - **System Monitoring** - CPU temperature, memory, disk usage, and uptime
@@ -77,6 +78,47 @@ local one:
 ```
 http://<Pi-IP>:5000
 ```
+
+## Photo sources
+
+Photos reach the frame three ways: dropped onto **Upload**, imported from
+**Google Drive**, or pulled from an **iCloud shared album**. However they get
+there they end up as ordinary files in `output/`, so the slideshow, the photo
+page and the gallery treat them all alike.
+
+### iCloud shared album
+
+A shared album with **Public Website** turned on is readable from its link
+alone — there is no account to sign in to, which is the whole reason it suits
+a device with no keyboard. In Photos: open the album → **People** (or
+*Subscribers*) → turn on **Public Website** → copy the link. Paste it into
+**Settings → iCloud Shared Album** and press *Connect album*.
+
+- **Gallery → iCloud** opens a picker: choose photos, or import everything.
+  Photos already on the frame are marked, so importing twice cannot make
+  duplicates.
+- With **Pull new photos automatically** on, the frame re-checks the album on
+  a schedule (hourly by default, 15 minutes at the fastest) and downloads only
+  what it does not already have. Add a photo from your phone and it appears on
+  the frame by itself — and, if the slideshow is running, in the rotation.
+- Videos are skipped, and the ledger of what has been imported lives in
+  `icloud_album.json` beside `config.json`. Deleting a photo from the gallery
+  lets the next sync bring it back; *Disconnect* forgets the album and leaves
+  the photos.
+
+Treat the link as a credential: anyone who has it can see the album.
+
+## Weather
+
+**Settings → Weather** takes an [OpenWeatherMap](https://openweathermap.org/api)
+key and a place. The place can be a plain name (`Taipei`), a name with a
+country code when the name is ambiguous (`Kaohsiung, TW`), or a
+`latitude, longitude` pair (`25.03, 121.56`) for somewhere the gazetteer does
+not know by the name you use.
+
+*Test* always asks upstream rather than reading the cache, so it reports the
+settings as they are now. If the place cannot be found, or the key is
+rejected, it says so — it will not fall back to the last place that worked.
 
 ## Remote Access
 
@@ -206,14 +248,18 @@ suite runs on any machine — no Pi, no display, no extras installed:
 ```bash
 python3 -m pytest tests/
 # or, without pytest:
-python3 tests/test_smoke.py && python3 tests/test_extras.py
+python3 tests/test_smoke.py && python3 tests/test_weather.py \
+  && python3 tests/test_icloud.py && python3 tests/test_extras.py
 ```
 
 `test_smoke.py` asks every route for a response and checks the security
 boundaries (secret redaction, the config write allowlist, same-origin
 enforcement, path containment, cookie flags, the network watchdog).
-`test_extras.py` covers the `src/` tools: panel palettes, GPIO chip discovery,
-path resolution and the missing-dependency guards. Run both before pushing.
+`test_weather.py` and `test_icloud.py` cover the two services that talk to the
+internet, with every outbound request answered from canned data — nothing in
+`tests/` reaches the network. `test_extras.py` covers the `src/` tools: panel
+palettes, GPIO chip discovery, path resolution and the missing-dependency
+guards. Run them all before pushing.
 
 ## API Reference
 
@@ -265,6 +311,17 @@ one exception, and only while the device is unpaired — see
 | POST | `/api/gdrive/disconnect` | Forget the stored tokens |
 | GET | `/api/gdrive/files` | List images in Drive |
 | POST | `/api/gdrive/download` | Import selected files |
+
+### iCloud shared album
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/icloud/status` | Album, schedule, last sync, import count |
+| POST | `/api/icloud/connect` | Attach an album by link. `{"import_all": true}` also fills the gallery |
+| POST | `/api/icloud/disconnect` | Forget the album. Imported photos stay |
+| GET | `/api/icloud/photos` | List the album; `?refresh=1` skips the short listing cache |
+| POST | `/api/icloud/import` | Import `{"guids": [...]}`, or `{"all": true}`. `{"start_slideshow": true}` starts the slideshow afterwards |
+| POST | `/api/icloud/sync` | Pull whatever is new since the last sync |
 
 ### Display and system
 
@@ -348,6 +405,8 @@ Vignette/
 │   └── vignette.service         # systemd service file
 ├── tests/
 │   ├── test_smoke.py            # Web service; hardware is stubbed
+│   ├── test_weather.py          # Weather service; upstream is stubbed
+│   ├── test_icloud.py           # iCloud shared albums; upstream is stubbed
 │   └── test_extras.py           # The src/ tools; their deps are stubbed
 ├── output/                      # Image output directory
 ├── requirements.txt             # Python dependencies

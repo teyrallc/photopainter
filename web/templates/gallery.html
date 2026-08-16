@@ -23,6 +23,12 @@
         {% else %}
         <a class="btn btn--ghost" href="/settings">{{ icon('drive') }} {{ t.gdrive_setup_hint }}</a>
         {% endif %}
+
+        {% if icloud_connected %}
+        <button type="button" class="btn" id="open-icloud">{{ icon('cloud') }} iCloud</button>
+        {% else %}
+        <a class="btn btn--ghost" href="/settings">{{ icon('cloud') }} {{ t.icloud_setup_hint }}</a>
+        {% endif %}
     </div>
 </div>
 
@@ -161,6 +167,49 @@
             <button type="button" class="btn btn--subtle" data-modal-close>{{ t.close }}</button>
             <button type="button" class="btn btn--success" id="drive-download" disabled>
                 {{ icon('download') }} {{ t.gdrive_download }}
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ iCloud Shared Album ════════════════════════════════════════════════ -->
+<div class="modal" id="icloud-modal" hidden aria-hidden="true" role="dialog" aria-modal="true"
+     aria-labelledby="icloud-title">
+    <div class="modal__backdrop"></div>
+    <div class="modal__panel modal__panel--wide">
+        <div class="modal__head">
+            <h3 id="icloud-title">{{ icloud_album or t.icloud }} — {{ t.icloud_select }}</h3>
+            <button type="button" class="btn btn--ghost btn--icon btn--sm" id="icloud-refresh"
+                    aria-label="{{ t.refresh }}">{{ icon('refresh') }}</button>
+            <button type="button" class="btn btn--ghost btn--icon btn--sm" data-modal-close
+                    aria-label="{{ t.close }}">{{ icon('x') }}</button>
+        </div>
+        <div class="modal__body">
+            <div class="row mb-2">
+                <button type="button" class="btn btn--sm" id="icloud-all">{{ t.select_all }}</button>
+                <button type="button" class="btn btn--sm" id="icloud-none">{{ t.deselect_all }}</button>
+                <span class="spacer"></span>
+                <span class="badge badge--accent"><span id="icloud-count">0</span> {{ t.selected }}</span>
+            </div>
+            <div class="tiles tiles--compact" id="icloud-grid">
+                <p class="muted small">{{ t.loading }}</p>
+            </div>
+        </div>
+        <div class="modal__foot">
+            <div class="full hidden" id="icloud-progress-wrap">
+                <div class="progress mb-1"><div class="progress__bar progress__bar--striped" id="icloud-progress-bar"></div></div>
+                <p class="tiny dim mb-0" id="icloud-progress-text"></p>
+            </div>
+            <label class="field field--inline full mb-0" for="icloud-slideshow">
+                <input type="checkbox" id="icloud-slideshow">
+                <span class="small">{{ t.icloud_start_slideshow }}</span>
+            </label>
+            <button type="button" class="btn btn--subtle" data-modal-close>{{ t.close }}</button>
+            <button type="button" class="btn" id="icloud-import-all">
+                {{ icon('download') }} {{ t.icloud_import_all }}
+            </button>
+            <button type="button" class="btn btn--success" id="icloud-import" disabled>
+                {{ icon('download') }} {{ t.icloud_import }}
             </button>
         </div>
     </div>
@@ -552,6 +601,175 @@
                     setTimeout(function () { window.location.reload(); }, 1200);
                 })
                 .catch(function (err) { restore(); text.textContent = err.message; V.fail(err); });
+        });
+    }
+
+    /* ── iCloud shared album ────────────────────────────────────────────── */
+
+    var icloudSelected = {};        // guid -> caption
+
+    function syncIcloudCount() {
+        var n = Object.keys(icloudSelected).length;
+        document.getElementById('icloud-count').textContent = n;
+        document.getElementById('icloud-import').disabled = n === 0;
+    }
+
+    function renderIcloudPhotos(photos) {
+        var grid = document.getElementById('icloud-grid');
+        grid.innerHTML = '';
+
+        if (!photos.length) {
+            var p = document.createElement('p');
+            p.className = 'muted small';
+            p.textContent = V.t('icloud_no_photos');
+            grid.appendChild(p);
+            return;
+        }
+
+        photos.forEach(function (photo) {
+            var tile = document.createElement('div');
+            tile.className = 'tile' + (icloudSelected[photo.guid] ? ' is-selected' : '');
+            tile.dataset.guid = photo.guid;
+            tile.dataset.caption = photo.caption || '';
+            tile.dataset.imported = photo.imported ? '1' : '';
+
+            var thumb = document.createElement('button');
+            thumb.type = 'button';
+            thumb.className = 'tile__thumb';
+            thumb.setAttribute('aria-pressed', icloudSelected[photo.guid] ? 'true' : 'false');
+
+            var im = document.createElement('img');
+            im.src = photo.thumb;          // Apple's CDN, straight to the browser
+            im.alt = photo.caption || '';
+            im.loading = 'lazy';
+            im.referrerPolicy = 'no-referrer';
+            thumb.appendChild(im);
+
+            var check = document.createElement('span');
+            check.className = 'tile__check';
+            check.appendChild(V.svg('check-circle'));
+            thumb.appendChild(check);
+
+            thumb.addEventListener('click', function () {
+                if (icloudSelected[photo.guid]) delete icloudSelected[photo.guid];
+                else icloudSelected[photo.guid] = photo.caption || photo.guid;
+                var on = !!icloudSelected[photo.guid];
+                tile.classList.toggle('is-selected', on);
+                thumb.setAttribute('aria-pressed', on ? 'true' : 'false');
+                syncIcloudCount();
+            });
+
+            var meta = document.createElement('div');
+            meta.className = 'tile__meta';
+            var name = document.createElement('span');
+            name.className = 'tile__name';
+            name.textContent = photo.caption || (photo.created || '').slice(0, 10);
+            meta.appendChild(name);
+            if (photo.imported) {
+                // Importing again would only make a duplicate; say so instead
+                // of letting somebody find out afterwards.
+                var sub = document.createElement('span');
+                sub.className = 'tile__sub';
+                sub.textContent = V.t('icloud_on_frame');
+                meta.appendChild(sub);
+            }
+
+            tile.appendChild(thumb);
+            tile.appendChild(meta);
+            grid.appendChild(tile);
+        });
+    }
+
+    function loadIcloudPhotos(refresh) {
+        var grid = document.getElementById('icloud-grid');
+        grid.innerHTML = '<p class="muted small">' + V.t('loading') + '</p>';
+        return V.api('/api/icloud/photos' + (refresh ? '?refresh=1' : ''))
+            .then(function (data) {
+                document.getElementById('icloud-title').textContent =
+                    (data.album || V.t('icloud')) + ' — ' + V.t('icloud_select');
+                renderIcloudPhotos(data.photos || []);
+            })
+            .catch(function (err) {
+                grid.innerHTML = '';
+                var p = document.createElement('p');
+                p.className = 'small';
+                p.textContent = err.message;
+                grid.appendChild(p);
+                V.fail(err);
+            });
+    }
+
+    function runIcloudImport(body, btn) {
+        var wrap = document.getElementById('icloud-progress-wrap');
+        var bar  = document.getElementById('icloud-progress-bar');
+        var text = document.getElementById('icloud-progress-text');
+        var restore = V.busy(btn);
+
+        body.start_slideshow = document.getElementById('icloud-slideshow').checked;
+        wrap.classList.remove('hidden');
+        bar.classList.add('progress__bar--striped');
+        bar.style.width = '55%';
+        text.textContent = V.t('icloud_importing') + '…';
+
+        V.api('/api/icloud/import', { method: 'POST', body: body })
+            .then(function (data) {
+                bar.classList.remove('progress__bar--striped');
+                bar.style.width = '100%';
+                text.textContent = V.t('icloud_imported') + ': ' + data.imported +
+                                   (data.failed ? ' (' + data.failed + ' ✕)' : '');
+                V.toast(data.imported
+                    ? V.t('icloud_new_photos').replace('{n}', data.imported)
+                    : V.t('icloud_nothing_new'), data.imported ? 'success' : 'info');
+                if (data.imported) setTimeout(function () { window.location.reload(); }, 1200);
+                else restore();
+            })
+            .catch(function (err) {
+                bar.classList.remove('progress__bar--striped');
+                text.textContent = err.message;
+                restore();
+                V.fail(err);
+            });
+    }
+
+    var openIcloud = document.getElementById('open-icloud');
+    if (openIcloud) {
+        openIcloud.addEventListener('click', function () {
+            icloudSelected = {};
+            syncIcloudCount();
+            document.getElementById('icloud-progress-wrap').classList.add('hidden');
+            V.openModal('icloud-modal');
+            loadIcloudPhotos(false);
+        });
+
+        document.getElementById('icloud-refresh').addEventListener('click', function () {
+            icloudSelected = {};
+            syncIcloudCount();
+            loadIcloudPhotos(true);
+        });
+        document.getElementById('icloud-all').addEventListener('click', function () {
+            V.$$('#icloud-grid .tile').forEach(function (tile) {
+                icloudSelected[tile.dataset.guid] = tile.dataset.caption;
+                tile.classList.add('is-selected');
+                tile.querySelector('.tile__thumb').setAttribute('aria-pressed', 'true');
+            });
+            syncIcloudCount();
+        });
+        document.getElementById('icloud-none').addEventListener('click', function () {
+            icloudSelected = {};
+            V.$$('#icloud-grid .tile').forEach(function (tile) {
+                tile.classList.remove('is-selected');
+                tile.querySelector('.tile__thumb').setAttribute('aria-pressed', 'false');
+            });
+            syncIcloudCount();
+        });
+
+        document.getElementById('icloud-import').addEventListener('click', function () {
+            var guids = Object.keys(icloudSelected);
+            if (!guids.length) return;
+            runIcloudImport({ guids: guids }, this);
+        });
+        document.getElementById('icloud-import-all').addEventListener('click', function () {
+            runIcloudImport({ all: true }, this);
         });
     }
 

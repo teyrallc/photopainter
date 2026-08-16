@@ -10,6 +10,7 @@ would have been caught by nothing more than asking every route for a response.
     python3 tests/test_smoke.py     # also runs standalone, without pytest
 """
 
+import contextlib
 import io
 import json
 import os
@@ -102,6 +103,11 @@ DESTRUCTIVE = {
     "/api/wifi/connect",
 }
 
+# Routes that reach the public internet. "The upstream is unreachable" is the
+# normal answer in CI and is reported as 502, which is not a crash — a crash is
+# still a 500 and still fails the sweep below.
+UPSTREAM = {"/api/weather"}
+
 
 def _paired_client():
     """A signed-in session on a device that has completed setup."""
@@ -128,7 +134,8 @@ def test_every_get_route_responds():
         if "GET" not in rule.methods or rule.arguments:
             continue
         response = client.get(rule.rule)
-        if response.status_code >= 500:
+        if response.status_code >= 500 and not (
+                rule.rule in UPSTREAM and response.status_code == 502):
             failures.append((rule.rule, response.status_code,
                              response.get_data(as_text=True)[:200]))
     assert not failures, f"routes returned 5xx: {failures}"
@@ -617,6 +624,258 @@ def test_tunnel_setup_script_is_sane():
                    capture_output=True, text=True, timeout=30)
     assert bad.returncode != 0
     assert "does not look like a hostname" in bad.stdout + bad.stderr
+
+
+@contextlib.contextmanager
+def fake_upstream(handler):
+    """Answer every outbound HTTP call from `handler` for the block's duration.
+
+    Nothing in tests/ may reach the internet: these features are the two that
+    talk to one, and a test that quietly depends on OpenWeatherMap or iCloud
+    being up is worse than no test.
+    """
+    import urllib.request
+    real = urllib.request.urlopen
+    urllib.request.urlopen = handler
+    try:
+        yield
+    finally:
+        urllib.request.urlopen = real
+
+
+class _Body(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
+
+def test_changing_the_city_changes_what_the_test_button_reports():
+    """The reported bug, end to end: save Kaohsiung, press Test, see Taipei.
+
+    The city is saved through /api/config and read back through the same
+    endpoint Settings' Test button calls, so this covers the wiring as well as
+    the cache: nothing about the first answer may survive into the second.
+    """
+    from services import weather
+
+    def upstream(request, timeout=None):
+        url = request.full_url
+        if "/geo/1.0/direct" in url:
+            name = "Kaohsiung" if "Kaohsiung" in url else "Taipei"
+            lat = "22.62" if name == "Kaohsiung" else "25.03"
+            return _Body(json.dumps([{"name": name, "country": "TW",
+                                      "lat": lat, "lon": "120.31"}]).encode())
+        name = "Kaohsiung" if "22.62" in url else "Taipei"
+        if "/forecast" in url:
+            return _Body(json.dumps({"cod": "200", "list": []}).encode())
+        return _Body(json.dumps({
+            "cod": 200, "name": name, "timezone": 28800,
+            "main": {"temp": 29 if name == "Kaohsiung" else 21, "feels_like": 30,
+                     "temp_min": 20, "temp_max": 31, "humidity": 70},
+            "weather": [{"description": "clear sky", "icon": "01d"}],
+        }).encode())
+
+    client = _paired_client()
+    config.set("weather_api_key", "TEST-KEY")
+    weather.clear_cache()
+
+    try:
+        with fake_upstream(upstream):
+            client.post("/api/config", headers=SAME_ORIGIN,
+                        json={"weather_city": "Taipei"})
+            first = client.get("/api/weather?refresh=1").get_json()
+
+            client.post("/api/config", headers=SAME_ORIGIN,
+                        json={"weather_city": "Kaohsiung"})
+            second = client.get("/api/weather?refresh=1").get_json()
+            # …and the panel's own (cached) path must see it too.
+            third = client.get("/api/weather").get_json()
+    finally:
+        weather.clear_cache()
+        config.update({"weather_api_key": "", "weather_city": ""})
+
+    assert first["city"] == "Taipei", first
+    assert second["city"] == "Kaohsiung", second
+    assert third["city"] == "Kaohsiung", third
+
+
+def test_a_weather_failure_is_reported_rather_than_answered_with_stale_data():
+    from services import weather
+    import urllib.error
+
+    def upstream(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 401, "nope", None,
+                                     io.BytesIO(b"{}"))
+
+    client = _paired_client()
+    config.update({"weather_api_key": "BAD-KEY", "weather_city": "Taipei"})
+    weather.clear_cache()
+
+    try:
+        with fake_upstream(upstream):
+            response = client.get("/api/weather?refresh=1")
+    finally:
+        weather.clear_cache()
+        config.update({"weather_api_key": "", "weather_city": ""})
+
+    assert response.status_code == 400, response.get_data(as_text=True)
+    assert "key" in response.get_json()["error"].lower()
+
+
+# ── iCloud shared album ───────────────────────────────────────────────────
+
+ICLOUD_TOKEN = "B0abcdefghijkl"
+
+
+def _icloud_upstream(photo_guids=("PHOTO-1", "PHOTO-2")):
+    """Serve a two-photo album plus real PNG bytes for the assets."""
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (60, 40), (10, 120, 200)).save(buffer, "PNG")
+    png = buffer.getvalue()
+
+    def upstream(request, timeout=None):
+        url = request.full_url
+        if url.endswith("/webstream"):
+            return _Body(json.dumps({
+                "streamName": "Family",
+                "photos": [{
+                    "photoGuid": guid,
+                    "caption": guid,
+                    "dateCreated": "2024-03-15T09:00:00Z",
+                    "derivatives": {"2048": {"checksum": f"{guid}-c",
+                                             "width": "2048", "height": "1365",
+                                             "fileSize": str(len(png))}},
+                } for guid in photo_guids],
+            }).encode())
+        if url.endswith("/webasseturls"):
+            wanted = json.loads(request.data.decode())["photoGuids"]
+            return _Body(json.dumps({"items": {
+                f"{guid}-c": {"url_location": "cvws.icloud-content.com",
+                              "url_path": f"/S/{guid}.jpg"}
+                for guid in wanted}}).encode())
+        return _Body(png)
+
+    return upstream
+
+
+def _forget_icloud():
+    vapp.icloud.forget_album()
+    vapp.icloud_ledger.clear()
+    config.update({"icloud_album_url": "", "icloud_album_token": "",
+                   "icloud_album_name": "", "icloud_connected": False})
+
+
+def test_icloud_endpoints_need_an_album_first():
+    client = _paired_client()
+    _forget_icloud()
+    for path in ("/api/icloud/photos",):
+        assert client.get(path).status_code == 401, path
+    for path in ("/api/icloud/import", "/api/icloud/sync"):
+        assert client.post(path, headers=SAME_ORIGIN, json={}).status_code == 401, path
+
+    # A link that is not an album link must be refused before anything is
+    # stored — and refused as the caller's mistake, not as a server fault.
+    for junk in ("", "https://example.com/not-an-album", "../../etc/passwd"):
+        bad = client.post("/api/icloud/connect", headers=SAME_ORIGIN,
+                          json={"url": junk})
+        assert bad.status_code == 400, (junk, bad.status_code)
+        assert config.get("icloud_connected") is False
+        assert config.get("icloud_album_token") == ""
+
+
+def test_the_album_link_cannot_be_set_behind_the_validation():
+    """/api/config must not be able to claim a connection nothing has reached."""
+    client = _paired_client()
+    _forget_icloud()
+    client.post("/api/config", headers=SAME_ORIGIN, json={
+        "icloud_album_url": "https://www.icloud.com/sharedalbum/#B0deadbeef99",
+        "icloud_album_token": "B0deadbeef99",
+        "icloud_connected": True,
+    })
+    assert config.get("icloud_album_url") == ""
+    assert config.get("icloud_connected") is False
+    # The schedule, which needs no validation, still applies.
+    client.post("/api/config", headers=SAME_ORIGIN,
+                json={"icloud_sync_interval": 21600, "icloud_auto_sync": False})
+    assert config.get("icloud_sync_interval") == 21600
+    config.set("icloud_auto_sync", True)
+
+
+def test_an_album_connects_imports_once_and_syncs_without_duplicating():
+    client = _paired_client()
+    _forget_icloud()
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+
+    try:
+        with fake_upstream(_icloud_upstream()):
+            connected = client.post(
+                "/api/icloud/connect", headers=SAME_ORIGIN,
+                json={"url": f"https://www.icloud.com/sharedalbum/#{ICLOUD_TOKEN}"})
+            imported = client.post("/api/icloud/import", headers=SAME_ORIGIN,
+                                   json={"all": True})
+            listing = client.get("/api/icloud/photos").get_json()
+            # Nothing new upstream: a second sync must not re-import the album.
+            resynced = client.post("/api/icloud/sync", headers=SAME_ORIGIN, json={})
+
+        assert connected.status_code == 200, connected.get_data(as_text=True)
+        assert connected.get_json()["album"] == "Family"
+        assert config.get("icloud_connected") is True
+
+        assert imported.get_json()["imported"] == 2, imported.get_data(as_text=True)
+        assert all(p["imported"] for p in listing["photos"]), listing
+        assert resynced.get_json()["imported"] == 0, resynced.get_data(as_text=True)
+
+        added = set(os.listdir(vapp.OUTPUT_DIR)) - before
+        assert len(added) == 2, added
+        assert all(name.startswith("icloud_") for name in added), added
+
+        # The imported photos are ordinary gallery photos — which is what makes
+        # the slideshow pick them up with no further wiring.
+        gallery = {image["filename"] for image in client.get("/api/images").get_json()}
+        assert added <= gallery, added - gallery
+
+        # A photo deleted from the gallery comes back on the next sync.
+        victim = sorted(added)[0]
+        client.delete(f"/api/images/{victim}", headers=SAME_ORIGIN)
+
+        with fake_upstream(_icloud_upstream()):
+            recovered = client.post("/api/icloud/sync", headers=SAME_ORIGIN, json={})
+        assert recovered.get_json()["imported"] == 1
+    finally:
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+        _forget_icloud()
+
+
+def test_disconnecting_forgets_the_album_but_keeps_the_photos():
+    client = _paired_client()
+    _forget_icloud()
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+
+    try:
+        with fake_upstream(_icloud_upstream(photo_guids=("ONLY-1",))):
+            client.post("/api/icloud/connect", headers=SAME_ORIGIN, json={
+                "url": f"https://www.icloud.com/sharedalbum/#{ICLOUD_TOKEN}",
+                "import_all": True})
+        added = set(os.listdir(vapp.OUTPUT_DIR)) - before
+        assert len(added) == 1, added
+
+        assert client.post("/api/icloud/disconnect",
+                           headers=SAME_ORIGIN, json={}).status_code == 200
+        assert config.get("icloud_connected") is False
+        assert config.get("icloud_album_token") == ""
+        assert vapp.icloud_ledger.count == 0
+        # The photos are the owner's now, whatever happens to the album.
+        assert set(os.listdir(vapp.OUTPUT_DIR)) - before == added
+    finally:
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+        _forget_icloud()
 
 
 def test_config_survives_a_reload():

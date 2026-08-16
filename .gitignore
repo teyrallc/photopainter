@@ -15,3 +15,7 @@ __pycache__/
 # Runtime device configuration — holds the WiFi password, admin password hash
 # and session secret, so it must never be committed.
 config.json
+
+# Which iCloud shared-album photos this device has already imported. Device
+# state, rebuilt on the next sync.
+icloud_album.json

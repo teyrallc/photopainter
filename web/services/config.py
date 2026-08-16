@@ -61,6 +61,20 @@ DEFAULT_CONFIG = {
     "gdrive_refresh_token": "",
     "gdrive_connected": False,
 
+    # iCloud Shared Album. The link is the whole credential — there is no
+    # account to sign in to — so it is set through /api/icloud/connect, which
+    # checks the album answers before storing anything.
+    "icloud_album_url": "",
+    "icloud_album_token": "",
+    "icloud_album_name": "",
+    "icloud_connected": False,
+    # Pull newly shared photos on a timer, so a photo added on somebody's
+    # phone reaches the frame without anyone opening this console.
+    "icloud_auto_sync": True,
+    "icloud_sync_interval": 3600,   # seconds between checks
+    "icloud_last_sync": "",
+    "icloud_last_error": "",
+
     # Photo settings
     "photo_rotation": 0,  # 0, 90, 180, 270
     "photo_fit_mode": "fit",  # fit (letterbox) or stretch
@@ -105,6 +119,15 @@ WRITABLE_KEYS = frozenset(set(DEFAULT_CONFIG) - {
     "admin_password_hash",
     # Minted by the device, not chosen by the user.
     "ap_password",
+    # Written by /api/icloud/connect once the album has actually answered.
+    # Letting these through here would leave the console reporting a
+    # connection to an album nothing has ever reached.
+    "icloud_album_url",
+    "icloud_album_token",
+    "icloud_album_name",
+    "icloud_connected",
+    "icloud_last_sync",
+    "icloud_last_error",
 })
 
 # Secrets the settings form deliberately submits empty when the user did not

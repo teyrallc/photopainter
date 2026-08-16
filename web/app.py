@@ -32,6 +32,10 @@ WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(PROJECT_DIR, "output")
 LIB_DIR = os.path.join(PROJECT_DIR, "lib")
 CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
+# Which iCloud photos this frame already holds. Deliberately not in
+# config.json: an album can run to thousands of entries and config.json is
+# rewritten whole on every settings change.
+ICLOUD_LEDGER_PATH = os.path.join(PROJECT_DIR, "icloud_album.json")
 
 # Add lib to path for waveshare_epd, add web to path for services
 sys.path.insert(0, LIB_DIR)
@@ -46,11 +50,13 @@ logger = logging.getLogger("vignette")
 
 # Services
 from services.config import Config
-from services.weather import fetch_weather
+from services import weather as weather_svc
+from services.weather import WeatherError
 from services.calendar_svc import fetch_calendar_events, get_today_info
 from services.i18n import get_translations
 from services import renderer
 from services import gdrive
+from services import icloud
 from services import display_mgr
 from services import device_id
 from services import epd as epd_service
@@ -562,6 +568,54 @@ def process_upload(file_storage, rotation=0, fit_mode="fit"):
     return filename
 
 
+def reserve_output_name(preferred, fallback):
+    """A free filename inside OUTPUT_DIR, and the path it resolves to.
+
+    Shared by every import path (Google Drive, iCloud) so that a photo whose
+    name collides with one already in the gallery lands beside it as
+    `name_1.jpg` instead of overwriting it.
+    """
+    from werkzeug.utils import secure_filename
+
+    safe_name = secure_filename(preferred or "") or secure_filename(fallback) or "photo.jpg"
+    base, ext = os.path.splitext(safe_name)
+    dest = os.path.join(OUTPUT_DIR, safe_name)
+    counter = 1
+    while os.path.exists(dest):
+        safe_name = f"{base}_{counter}{ext}"
+        dest = os.path.join(OUTPUT_DIR, safe_name)
+        counter += 1
+    return safe_name, dest
+
+
+def fit_downloaded_image(path, rotation=0, fit_mode="fit"):
+    """Reshape a freshly downloaded photo for the panel, in place.
+
+    The bytes come off the internet, so they are verified before being decoded
+    — an import used to leave whatever it fetched sitting in the gallery, where
+    every later listing counted it as a photo even when it was not one.
+    """
+    with Image.open(path) as probe:
+        probe.verify()                       # settles what the bytes really are
+
+    img = Image.open(path).convert("RGB")
+    try:
+        if rotation:
+            img = img.rotate(-rotation, expand=True)
+        if fit_mode == "stretch":
+            img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+        else:
+            img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+            canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+            px = (EPD_WIDTH - img.width) // 2
+            py = (EPD_HEIGHT - img.height) // 2
+            canvas.paste(img, (px, py))
+            img = canvas
+        img.save(path)
+    finally:
+        img.close()
+
+
 # ── E-Paper Display Functions ──────────────────────────────────────────────
 
 # Initialize display manager with our state and shared config
@@ -634,7 +688,9 @@ def gallery_page():
     gdrive_configured = bool(config.get("gdrive_client_id", ""))
     return render_template('gallery.html', images=images, config=config.public_dict(),
                            gdrive_connected=gdrive_connected,
-                           gdrive_configured=gdrive_configured)
+                           gdrive_configured=gdrive_configured,
+                           icloud_connected=bool(config.get("icloud_connected")),
+                           icloud_album=config.get("icloud_album_name", ""))
 
 
 @app.route('/settings')
@@ -675,6 +731,7 @@ def api_setup():
     if data.get("weather_api_key"):
         saved["weather_api_key"] = data["weather_api_key"]
     config.update(saved)
+    weather_svc.clear_cache()
     logger.info("Setup complete!")
     return jsonify({"success": True, "message": "Setup saved"})
 
@@ -684,10 +741,20 @@ def api_config_get():
     return jsonify(config.public_dict())
 
 
+_WEATHER_KEYS = frozenset({"weather_api_key", "weather_city",
+                           "weather_units", "weather_lang"})
+
+
 @app.route('/api/config', methods=['POST'])
 def api_config_set():
     data = request.get_json() or {}
     applied = config.apply_user_settings(data)
+    # Saving a new city has to change what the next read returns. The cache is
+    # keyed by the whole query so a changed setting is already a miss, but
+    # dropping it here means the panel repaints with the new place rather than
+    # finishing out the old entry's hour.
+    if _WEATHER_KEYS & set(applied):
+        weather_svc.clear_cache()
     return jsonify({"success": True, "applied": sorted(applied),
                     "config": config.public_dict()})
 
@@ -709,6 +776,11 @@ def api_reset():
                 logger.error(f"Factory reset: could not delete {image['filename']}: {e}")
         photo_state.update({"current_index": -1, "current_image": None, "total": 0})
         logger.info(f"Factory reset: deleted {removed} photos")
+
+    # The album link is a credential of sorts, and the ledger names photos the
+    # previous owner shared; neither belongs to whoever gets the frame next.
+    icloud.forget_album()
+    icloud_ledger.clear()
 
     config.reset()
     logger.info("System reset to factory defaults")
@@ -1050,40 +1122,17 @@ def api_gdrive_download():
         if not file_id:
             continue
 
-        # Sanitize filename
-        from werkzeug.utils import secure_filename
-        safe_name = secure_filename(name)
-        if not safe_name:
-            safe_name = f"gdrive_{file_id}.jpg"
-
-        dest = os.path.join(OUTPUT_DIR, safe_name)
-        counter = 1
-        base, ext = os.path.splitext(safe_name)
-        while os.path.exists(dest):
-            safe_name = f"{base}_{counter}{ext}"
-            dest = os.path.join(OUTPUT_DIR, safe_name)
-            counter += 1
+        safe_name, dest = reserve_output_name(name, f"gdrive_{file_id}.jpg")
 
         ok = gdrive.download_file(token, file_id, dest)
         if ok:
-            # Process the downloaded image (rotation + fit)
             try:
-                img = Image.open(dest).convert("RGB")
-                if rotation:
-                    img = img.rotate(-rotation, expand=True)
-                if fit_mode == "stretch":
-                    img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-                else:
-                    img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-                    canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
-                    px = (EPD_WIDTH - img.width) // 2
-                    py = (EPD_HEIGHT - img.height) // 2
-                    canvas.paste(img, (px, py))
-                    img = canvas
-                img.save(dest)
+                fit_downloaded_image(dest, rotation, fit_mode)
                 results.append({"name": safe_name, "success": True})
             except Exception as e:
                 logger.error(f"Failed to process {safe_name}: {e}")
+                if os.path.exists(dest):
+                    os.remove(dest)
                 results.append({"name": safe_name, "success": False, "error": str(e)})
         else:
             results.append({"name": name, "success": False, "error": "Download failed"})
@@ -1091,6 +1140,257 @@ def api_gdrive_download():
     ok_count = sum(1 for r in results if r["success"])
     return jsonify({"success": True, "downloaded": ok_count,
                     "total": len(results), "results": results})
+
+
+# ── API: iCloud Shared Album ──────────────────────────────────────────────
+#
+# The same shape as Google Drive above — connect, browse, import — but with no
+# account to sign in to: an album with "Public Website" turned on is readable
+# from the link alone, which is the only kind of credential worth typing on a
+# device with no keyboard. The extra piece is the sync loop at the bottom, so
+# a photo added on somebody's phone reaches the frame on its own.
+
+icloud_ledger = icloud.ImportLedger(ICLOUD_LEDGER_PATH)
+
+# The album is read on a background thread as well as from requests; one
+# import at a time keeps two of them from writing the same photo twice.
+_icloud_import_lock = threading.Lock()
+
+
+def _icloud_token():
+    return config.get("icloud_album_token", "") or ""
+
+
+def _upstream_status(exc):
+    """Map a service failure onto a status code.
+
+    Anything the owner can fix — a link that is not a link, a rejected
+    credential — is their 4xx, not our 5xx; only an upstream that is genuinely
+    misbehaving or unreachable is a 502.
+    """
+    status = getattr(exc, "status", None)
+    if status in (401, 403):
+        # The link (or the API key) *is* the credential here, so a refusal is
+        # something to fix in Settings rather than a server fault.
+        return 400
+    if status and 400 <= status < 500:
+        return status
+    return 502
+
+
+def _icloud_error(exc):
+    """One place that decides what an iCloud failure looks like on the wire."""
+    return jsonify({"error": str(exc)}), _upstream_status(exc)
+
+
+def _icloud_import(album, photos, rotation=None, fit_mode=None):
+    """Download `photos` from `album` into the gallery. Returns a summary.
+
+    Only ever called with entries that came from a listing this process
+    fetched: the URLs are Apple's, signed and short-lived, and are never taken
+    from the browser.
+    """
+    rotation = config.get("photo_rotation", 0) if rotation is None else rotation
+    fit_mode = config.get("photo_fit_mode", "fit") if fit_mode is None else fit_mode
+
+    imported, failed = [], []
+    with _icloud_import_lock:
+        icloud_ledger.bind(album["token"])
+        for photo in photos:
+            guid = photo.get("guid")
+            if not guid or icloud_ledger.has(guid):
+                continue
+
+            name, dest = reserve_output_name(icloud.suggested_filename(photo),
+                                             f"icloud_{len(imported)}.jpg")
+            if not icloud.download_asset(photo.get("url"), dest):
+                failed.append({"guid": guid, "error": "Download failed"})
+                continue
+            try:
+                fit_downloaded_image(dest, rotation, fit_mode)
+            except Exception as e:  # noqa: BLE001 - one bad photo, not the album
+                logger.error(f"iCloud: could not process {name}: {e}")
+                if os.path.exists(dest):
+                    os.remove(dest)
+                failed.append({"guid": guid, "error": "Not a readable image"})
+                continue
+            icloud_ledger.record(guid, name)
+            imported.append(name)
+
+    if imported:
+        logger.info(f"iCloud: imported {len(imported)} photo(s)")
+    return {"imported": len(imported), "failed": len(failed),
+            "names": imported, "errors": failed}
+
+
+def _icloud_sync():
+    """Bring in every album photo the frame does not already have."""
+    token = _icloud_token()
+    if not token:
+        raise icloud.ICloudError("No iCloud album is connected.")
+
+    album = icloud.fetch_album(token, refresh=True)
+    # A photo deleted from the gallery should be able to come back on the next
+    # sync rather than being remembered forever as "already imported".
+    icloud_ledger.bind(album["token"])
+    icloud_ledger.prune({image["filename"] for image in get_image_list()})
+
+    summary = _icloud_import(album, album["photos"])
+    summary["album"] = album["name"]
+    summary["total"] = len(album["photos"])
+
+    config.update({
+        "icloud_album_name": album["name"],
+        "icloud_last_sync": datetime.now().isoformat(timespec="seconds"),
+        "icloud_last_error": "",
+    })
+    return summary
+
+
+def _icloud_status():
+    return {
+        "connected": bool(config.get("icloud_connected")),
+        "album_url": config.get("icloud_album_url", ""),
+        "album_name": config.get("icloud_album_name", ""),
+        "auto_sync": bool(config.get("icloud_auto_sync", True)),
+        "interval": int(config.get("icloud_sync_interval", 3600) or 0),
+        "last_sync": config.get("icloud_last_sync", ""),
+        "last_error": config.get("icloud_last_error", ""),
+        "imported": icloud_ledger.count,
+    }
+
+
+@app.route('/api/icloud/status')
+def api_icloud_status():
+    return jsonify(_icloud_status())
+
+
+@app.route('/api/icloud/connect', methods=['POST'])
+def api_icloud_connect():
+    """Attach a shared album, after checking that it actually answers."""
+    data = request.get_json() or {}
+    link = (data.get("url") or "").strip()
+    try:
+        token = icloud.parse_album_token(link)
+        album = icloud.fetch_album(token, refresh=True)
+    except icloud.ICloudError as exc:
+        config.set("icloud_last_error", str(exc))
+        return _icloud_error(exc)
+
+    icloud_ledger.bind(token)
+    config.update({
+        "icloud_album_url": icloud.album_url(token),
+        "icloud_album_token": token,
+        "icloud_album_name": album["name"],
+        "icloud_connected": True,
+        "icloud_last_error": "",
+    })
+    logger.info(f"iCloud album connected: {album['name']!r} "
+                f"({len(album['photos'])} photos)")
+
+    result = {"success": True, "album": album["name"], "owner": album["owner"],
+              "photos": len(album["photos"]), "status": _icloud_status()}
+
+    # "Connect and fill the frame" is the common case, so it is one request.
+    if data.get("import_all"):
+        result["import"] = _icloud_import(album, album["photos"])
+        result["status"] = _icloud_status()
+    return jsonify(result)
+
+
+@app.route('/api/icloud/disconnect', methods=['POST'])
+def api_icloud_disconnect():
+    """Forget the album. Photos already imported stay in the gallery."""
+    icloud.forget_album(_icloud_token())
+    icloud_ledger.clear()
+    config.update({
+        "icloud_album_url": "",
+        "icloud_album_token": "",
+        "icloud_album_name": "",
+        "icloud_connected": False,
+        "icloud_last_error": "",
+        "icloud_last_sync": "",
+    })
+    return jsonify({"success": True})
+
+
+@app.route('/api/icloud/photos')
+def api_icloud_photos():
+    """List the album, marking what the frame already holds."""
+    token = _icloud_token()
+    if not token:
+        return jsonify({"error": "No iCloud album is connected."}), 401
+    try:
+        album = icloud.fetch_album(
+            token, refresh=request.args.get("refresh") in ("1", "true", "yes"))
+    except icloud.ICloudError as exc:
+        config.set("icloud_last_error", str(exc))
+        return _icloud_error(exc)
+
+    imported = icloud_ledger.guids()
+    return jsonify({
+        "album": album["name"],
+        "owner": album["owner"],
+        "photos": [{
+            "guid": p["guid"],
+            "caption": p["caption"],
+            "created": p["created"],
+            "width": p["width"],
+            "height": p["height"],
+            # Apple's own CDN URL: the browser fetches the thumbnail directly
+            # rather than making a Pi Zero proxy every tile.
+            "thumb": p["thumb"],
+            "imported": p["guid"] in imported,
+        } for p in album["photos"]],
+    })
+
+
+@app.route('/api/icloud/import', methods=['POST'])
+def api_icloud_import():
+    """Import selected album photos — or everything not yet imported."""
+    token = _icloud_token()
+    if not token:
+        return jsonify({"error": "No iCloud album is connected."}), 401
+
+    data = request.get_json() or {}
+    guids = data.get("guids") or []
+    try:
+        album = icloud.fetch_album(token)
+        if data.get("all") or not guids:
+            photos = album["photos"]
+        else:
+            wanted = set(guids)
+            photos = [p for p in album["photos"] if p["guid"] in wanted]
+            if not photos:
+                return jsonify({"error": "Those photos are no longer in the album."}), 404
+        summary = _icloud_import(album, photos)
+    except icloud.ICloudError as exc:
+        config.set("icloud_last_error", str(exc))
+        return _icloud_error(exc)
+
+    if data.get("start_slideshow"):
+        config.set("slideshow_active", True)
+        start_slideshow_thread()
+        summary["slideshow"] = True
+
+    summary["success"] = True
+    summary["status"] = _icloud_status()
+    return jsonify(summary)
+
+
+@app.route('/api/icloud/sync', methods=['POST'])
+def api_icloud_sync():
+    """Pull anything new since the last sync."""
+    if not _icloud_token():
+        return jsonify({"error": "No iCloud album is connected."}), 401
+    try:
+        summary = _icloud_sync()
+    except icloud.ICloudError as exc:
+        config.set("icloud_last_error", str(exc))
+        return _icloud_error(exc)
+    summary["success"] = True
+    summary["status"] = _icloud_status()
+    return jsonify(summary)
 
 
 # ── API: Photo Navigation ───────────────────────────────────────────────
@@ -1189,14 +1489,8 @@ def api_sleep():
 def api_preview_current():
     """Render the current page as a PNG for the dashboard preview."""
     page = config.get("current_page", "photo")
-    weather = None
     events = []
-    if config.get("weather_api_key") and config.get("weather_city"):
-        weather = fetch_weather(
-            config.get("weather_api_key"),
-            config.get("weather_city"),
-            config.get("weather_units", "metric"),
-            config.get("weather_lang", "en"))
+    weather = weather_svc.fetch_for_config(config)
     if config.get("calendar_ical_url"):
         events = fetch_calendar_events(config.get("calendar_ical_url"))
 
@@ -1380,6 +1674,56 @@ def start_auto_refresh():
     _refresh_stop.clear()
     refresh_thread = threading.Thread(target=_auto_refresh_loop, daemon=True)
     refresh_thread.start()
+
+
+# ── iCloud album sync ───────────────────────────────────────────────────
+#
+# The point of connecting an album rather than uploading files: somebody adds
+# a photo from their phone and it appears on the frame. That only happens if
+# something checks, so this is the thing that checks.
+
+_icloud_stop = threading.Event()
+icloud_sync_thread = None
+
+# A shared album is not a busy feed, and each check costs the Pi a round trip
+# plus a download per new photo. Ten minutes is as often as it is worth asking.
+MIN_ICLOUD_INTERVAL = 600
+
+
+def _icloud_sync_loop():
+    logger.info("iCloud sync loop started")
+    while not _icloud_stop.is_set():
+        interval = max(int(config.get("icloud_sync_interval", 3600) or 0),
+                       MIN_ICLOUD_INTERVAL)
+        _icloud_stop.wait(interval)
+        if _icloud_stop.is_set():
+            break
+
+        if not config.get("icloud_auto_sync", True) or not _icloud_token():
+            continue
+        try:
+            summary = _icloud_sync()
+            if summary["imported"]:
+                logger.info(f"iCloud sync: {summary['imported']} new photo(s) "
+                            f"from {summary['album']!r}")
+        except icloud.ICloudError as e:
+            # Expected while the house WiFi is down. Record it for the console
+            # and try again at the next tick rather than stopping the loop.
+            logger.warning(f"iCloud sync failed: {e}")
+            config.set("icloud_last_error", str(e))
+        except Exception as e:  # noqa: BLE001 - a sync fault must not kill the thread
+            logger.error(f"iCloud sync error: {e}", exc_info=True)
+            config.set("icloud_last_error", str(e))
+    logger.info("iCloud sync loop stopped")
+
+
+def start_icloud_sync():
+    global icloud_sync_thread
+    if icloud_sync_thread and icloud_sync_thread.is_alive():
+        return
+    _icloud_stop.clear()
+    icloud_sync_thread = threading.Thread(target=_icloud_sync_loop, daemon=True)
+    icloud_sync_thread.start()
 
 
 @app.route('/api/slideshow/status')
@@ -1707,15 +2051,22 @@ def api_status():
 
 @app.route('/api/weather')
 def api_weather():
-    """Get current weather data."""
-    weather = fetch_weather(
-        config.get("weather_api_key", ""),
-        config.get("weather_city", ""),
-        config.get("weather_units", "metric"),
-        config.get("weather_lang", "en"))
-    if weather:
-        return jsonify(weather)
-    return jsonify({"error": "No weather data. Check API key and city."}), 404
+    """Current weather for the configured place.
+
+    `?refresh=1` skips the cache entirely. Settings' "Test" button uses it:
+    the whole point of pressing Test after changing the city is to find out
+    what *that* city says, and an answer from the previous one — which is what
+    this used to return for the best part of an hour — is worse than no answer.
+    """
+    force = request.args.get("refresh") in ("1", "true", "yes")
+    try:
+        return jsonify(weather_svc.fetch_weather_strict(
+            force=force, **weather_svc.params_from_config(config)))
+    except WeatherError as exc:
+        # A rejected key or an unknown city is something the owner fixes in
+        # Settings; anything else is the upstream being unreachable, and
+        # saying so beats handing back another city's reading.
+        return jsonify({"error": str(exc)}), _upstream_status(exc)
 
 
 @app.route('/api/calendar')
@@ -1970,6 +2321,10 @@ def start_background_services():
         start_slideshow_thread()
 
     start_auto_refresh()
+
+    if config.get("icloud_connected") and config.get("icloud_auto_sync", True):
+        logger.info("Watching the connected iCloud album for new photos")
+    start_icloud_sync()
 
 
 def serve():
