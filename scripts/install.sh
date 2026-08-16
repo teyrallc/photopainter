@@ -93,6 +93,28 @@ done
 # checkout to belong to it.
 sudo chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"
 
+# …and that same account is the one that fetches when somebody presses Update
+# Software. It has no home to keep an SSH key in, so an SSH `origin` fails
+# there with "Host key verification failed" even though it works perfectly for
+# the account running this installer. Say so now, at a terminal, rather than
+# months later through a web console with no way to fix it.
+ORIGIN_URL="$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null || true)"
+case "$ORIGIN_URL" in
+    git@*:*|ssh://git@*)
+        HTTPS_ORIGIN="$(printf '%s\n' "$ORIGIN_URL" \
+            | sed -E -e 's#^ssh://git@([^/]+)/#https://\1/#' -e 's#^git@([^:]+):#https://\1/#')"
+        echo ""
+        echo "NOTE: 'origin' is an SSH address:"
+        echo "        $ORIGIN_URL"
+        echo "      The '$SERVICE_USER' account has no SSH key, so Update Software"
+        echo "      cannot fetch through it. For a public repository, switch to"
+        echo "      HTTPS now — it needs no credentials:"
+        echo "        sudo -u $SERVICE_USER git -C $INSTALL_DIR remote set-url origin \\"
+        echo "            $HTTPS_ORIGIN"
+        echo "      For a private one, install a deploy key for that account."
+        ;;
+esac
+
 # Exactly the privileged operations the interface offers, and nothing else.
 SUDOERS_FILE="/etc/sudoers.d/vignette"
 sudo bash -c "cat > $SUDOERS_FILE" << 'SUDOEOF'

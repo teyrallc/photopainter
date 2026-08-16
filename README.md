@@ -229,6 +229,22 @@ bash scripts/update.sh
 
 You can also trigger a remote update from the Web UI under **Settings → System → Update**.
 
+That path runs as the `vignette` service account, which is a system user with
+no home to keep an SSH key in. If `origin` is an SSH address the fetch fails
+with `Host key verification failed` — however well SSH works for your own
+login, since that key is never consulted. For a public repository HTTPS needs
+no credentials at all, so that is the address to be on:
+
+```bash
+sudo -u vignette git -C /path/to/photopainter \
+    remote set-url origin https://github.com/OWNER/REPO.git
+```
+
+`update.sh` does this for you when it can: on an SSH failure it checks whether
+the same repository answers over HTTPS and, only if it does, switches `origin`
+across and retries. A private repository needs a deploy key installed for the
+`vignette` account instead — the script leaves the remote alone and says so.
+
 ## Optional extras
 
 The three tools in `src/` are independent of the frame — nothing in `web/`

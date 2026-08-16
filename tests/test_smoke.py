@@ -1041,6 +1041,79 @@ def test_watchdog_honours_the_production_opt_out():
         config.update(saved)
 
 
+def test_update_script_never_waits_for_a_human():
+    """Update Software runs with no terminal attached.
+
+    A git credential prompt or SSH's "continue connecting (yes/no)?" asks
+    nobody anything there — it just hangs until the request times out fifteen
+    minutes later, with the browser spinning the whole time.
+    """
+    body = open(os.path.join(REPO, "scripts", "update.sh")).read()
+    assert "GIT_TERMINAL_PROMPT=0" in body
+    assert "BatchMode=yes" in body
+
+    help_text = run_real(["bash", os.path.join(REPO, "scripts", "update.sh"), "--help"],
+                         capture_output=True, text=True, timeout=30)
+    assert help_text.returncode == 0
+    assert "set -euo" not in help_text.stdout, "help is leaking script body"
+
+    bad = run_real(["bash", os.path.join(REPO, "scripts", "update.sh"), "--nonsense"],
+                   capture_output=True, text=True, timeout=30)
+    assert bad.returncode == 2, bad.stdout + bad.stderr
+
+
+def test_update_diagnoses_an_ssh_remote_it_cannot_use():
+    """The failure a device in the field actually hits.
+
+    The checkout belongs to the service account — a system user with no home
+    to keep an SSH key in — so an `origin` on SSH fails with "Host key
+    verification failed" no matter how well SSH works for the login account.
+    Git's own message says nothing about any of that, so the script has to.
+
+    Nothing here reaches the network: github.invalid fails at DNS, which is
+    also what makes it stand in for a device that cannot be fixed
+    automatically. `origin` must survive unchanged in that case.
+    """
+    import shutil
+
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "scripts"))
+        shutil.copy(os.path.join(REPO, "scripts", "update.sh"),
+                    os.path.join(tmp, "scripts", "update.sh"))
+
+        # This sandbox injects url.insteadOf rewrites through GIT_CONFIG_*,
+        # which would quietly turn the SSH remote back into an HTTPS one and
+        # test nothing at all.
+        env = {**os.environ, "GIT_CONFIG_COUNT": "0", "HOME": "/nonexistent"}
+
+        def git(*args):
+            return run_real(["git", "-C", tmp, *args], capture_output=True,
+                            text=True, timeout=30, env=env)
+
+        git("init", "-q", "-b", "main", ".")
+        git("config", "user.email", "test@example.com")
+        git("config", "user.name", "Test")
+        with open(os.path.join(tmp, "file.txt"), "w") as handle:
+            handle.write("x\n")
+        git("add", "-A")
+        git("commit", "-qm", "base")
+        git("remote", "add", "origin", "git@github.invalid:owner/repo.git")
+
+        result = run_real(["bash", os.path.join(tmp, "scripts", "update.sh")],
+                          capture_output=True, text=True, timeout=120, env=env)
+        output = result.stdout + result.stderr
+
+        assert result.returncode != 0, output
+        assert "SSH" in output, output
+        # It must name the account that actually does the fetching, and not
+        # leave the reader thinking their own ~/.ssh key is being used.
+        assert "~/.ssh" in output, output
+        assert "deploy key" in output, output
+        # An unreachable replacement must not be written over a working one.
+        assert git("config", "--get", "remote.origin.url").stdout.strip() == \
+            "git@github.invalid:owner/repo.git"
+
+
 def test_config_survives_a_reload():
     """Round-trip through the atomic save path."""
     from services.config import Config
