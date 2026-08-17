@@ -321,175 +321,207 @@ def empty_state(draw, box, message, hint=None):
 # of them would have come out as an empty box. These also scale to any size
 # and land on exact palette colours.
 
-def _line(size):
-    """Stroke weight.
+# Icons are drawn four times over size and then thresholded back down. Two
+# reasons, and both are about this panel specifically:
+#
+#   * PIL draws unantialiased shapes with square-ended strokes, so a circle at
+#     30 pixels is visibly faceted and every line ends in a cut corner. Drawing
+#     large and shrinking gives correctly formed curves and round caps.
+#   * The driver quantises with Floyd-Steinberg. Grey survives that as a field
+#     of speckle, so the shrunk icon is thresholded to pure black and white —
+#     which passes through the dither untouched.
+SS = 4
+_INK_THRESHOLD = 142
 
-    Thin and near-constant, the way a line-icon set is drawn: the weight is a
-    property of the set, not of how big any one icon happens to be. Scaling it
-    proportionally is what made the hero icon look like a marker drawing. Never
-    below two pixels — a one-pixel stroke on an unantialiased panel breaks up.
+
+def _line(size):
+    """Stroke weight, in the icon's own (supersampled) coordinates.
+
+    A property of the set rather than of the icon: thin and near-constant, so
+    a large icon reads as the same drawing rather than a heavier one.
     """
-    return int(min(4, max(2, round(size * 0.026))))
+    return max(SS * 2, round(size * 0.026))
+
+
+def _cap(draw, points, w):
+    """A polyline with round caps and joins.
+
+    PIL's own line ends are square. On an icon that is mostly short strokes —
+    rain, rays, fog — square ends are most of what makes a set look crude.
+    """
+    draw.line(points, fill=0, width=w, joint="curve")
+    r = w / 2
+    for x, y in points:
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=0)
 
 
 def _sun(draw, cx, cy, size, rays=True):
-    """A small open circle with eight detached rays."""
     from math import cos, sin, pi
     w = _line(size)
-    r = size * 0.185
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=BLACK, width=w)
+    r = size * 0.175
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=0, width=w)
     if not rays:
         return
-    inner, outer = r + size * 0.075, r + size * 0.165
+    inner, outer = r + size * 0.080, r + size * 0.165
     for i in range(8):
-        angle = i * pi / 4
-        draw.line([(cx + cos(angle) * inner, cy + sin(angle) * inner),
-                   (cx + cos(angle) * outer, cy + sin(angle) * outer)],
-                  fill=BLACK, width=w)
+        a = i * pi / 4
+        _cap(draw, [(cx + cos(a) * inner, cy + sin(a) * inner),
+                    (cx + cos(a) * outer, cy + sin(a) * outer)], w)
 
 
 def _moon(draw, cx, cy, size):
-    """A crescent: one disc with a second bitten out of it."""
+    """A crescent: an outlined disc with a second disc bitten out of it."""
     w = _line(size)
-    r = size * 0.20
-    # Outline the disc, then bite a second disc out of it in the page colour,
-    # which removes both the fill and the arc that the bite crosses.
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=BLACK, width=w)
-    draw.ellipse([cx - r * 1.62, cy - r * 1.22, cx + r * 0.34, cy + r * 1.22],
-                 fill=WHITE)
-    draw.arc([cx - r, cy - r, cx + r, cy + r], start=296, end=64,
-             fill=BLACK, width=w)
+    r = size * 0.205
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=0, width=w)
+    draw.ellipse([cx - r * 1.58, cy - r * 1.24, cx + r * 0.30, cy + r * 1.24], fill=255)
+    draw.arc([cx - r, cy - r, cx + r, cy + r], start=298, end=62, fill=0, width=w)
 
 
-def _cloud(draw, cx, cy, size, fill=WHITE):
-    """A cloud as one continuous outline.
-
-    Three bumps over a flat base, drawn as a silhouette twice — grown by the
-    stroke in black, then at true size in the fill — so the joins between the
-    parts never show and the stroke is the same weight the whole way round.
-    """
+def _cloud(draw, cx, cy, size, fill=255):
+    """Three bumps over a flat base, as one continuous outline."""
     w = _line(size)
     width = size * 0.94
     base = cy + width * 0.115
 
     def silhouette(grow, colour):
         for dx, dy, r in ((-0.255, -0.030, 0.180),
-                          (-0.010, -0.185, 0.255),
-                          (+0.245, -0.070, 0.205)):
+                          (-0.010, -0.190, 0.258),
+                          (+0.245, -0.075, 0.205)):
             px, py, rr = cx + width * dx, base + width * dy, width * r + grow
             draw.ellipse([px - rr, py - rr, px + rr, py + rr], fill=colour)
         draw.rounded_rectangle(
-            [cx - width * 0.435 - grow, base - width * 0.06 - grow,
-             cx + width * 0.450 + grow, base + width * 0.105 + grow],
-            radius=width * 0.075 + grow, fill=colour)
+            [cx - width * 0.435 - grow, base - width * 0.055 - grow,
+             cx + width * 0.450 + grow, base + width * 0.100 + grow],
+            radius=width * 0.080 + grow, fill=colour)
 
-    silhouette(w, BLACK)
+    silhouette(w, 0)
     silhouette(0, fill)
 
 
-def _rain(draw, cx, cy, size, count=3, length=0.13):
-    """Short parallel strokes, slanted the way rain is drawn."""
+def _rain(draw, cx, cy, size, count=3, length=0.135):
     w = _line(size)
     for i in range(count):
-        x = cx + (i - (count - 1) / 2) * size * 0.135
-        draw.line([(x + size * 0.035, cy), (x - size * 0.035, cy + size * length)],
-                  fill=BLACK, width=w)
+        x = cx + (i - (count - 1) / 2) * size * 0.130
+        _cap(draw, [(x + size * 0.032, cy),
+                    (x - size * 0.032, cy + size * length)], w)
 
 
 def _drizzle(draw, cx, cy, size, count=4):
-    """Dots rather than strokes: lighter than rain, and reads as it."""
-    r = max(1.5, size * 0.021)
+    r = max(SS, size * 0.020)
     for i in range(count):
         x = cx + (i - (count - 1) / 2) * size * 0.105
-        y = cy + (size * 0.045 if i % 2 else 0)
-        draw.ellipse([x - r, y - r, x + r, y + r], fill=BLACK)
+        y = cy + (size * 0.042 if i % 2 else 0)
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=0)
 
 
 def _snow(draw, cx, cy, size, count=3):
-    """Six-spoke flakes, or dots when there is not room to draw one.
-
-    Below about 60 pixels a flake is three crossed strokes inside four pixels,
-    which quantises to a black smudge. Dots stay legible all the way down.
-    """
+    """Six-spoke flakes, or dots where a flake would not survive the shrink."""
     from math import cos, sin, pi
-    if size < 60:
+    if size < 60 * SS:
         _drizzle(draw, cx, cy + size * 0.02, size, count=count)
         return
-    w = max(2, _line(size) - 1)
+    w = max(SS * 2, _line(size) - SS)
     r = size * 0.055
     for i in range(count):
         x = cx + (i - (count - 1) / 2) * size * 0.155
         y = cy + size * 0.045
         for k in range(3):
-            angle = k * pi / 3
-            draw.line([(x - cos(angle) * r, y - sin(angle) * r),
-                       (x + cos(angle) * r, y + sin(angle) * r)],
-                      fill=BLACK, width=w)
+            a = k * pi / 3
+            _cap(draw, [(x - cos(a) * r, y - sin(a) * r),
+                        (x + cos(a) * r, y + sin(a) * r)], w)
 
 
 def _bolt(draw, cx, cy, size):
-    """A lightning bolt, filled — at this scale an outline closes up."""
     a = size * 0.115
     draw.polygon([(cx + a * 0.55, cy - a * 0.2), (cx - a * 0.95, cy + a * 1.35),
                   (cx - a * 0.10, cy + a * 1.35), (cx - a * 0.55, cy + a * 2.7),
                   (cx + a * 0.95, cy + a * 1.0), (cx + a * 0.10, cy + a * 1.0)],
-                 fill=BLACK)
+                 fill=0)
 
 
 def _fog(draw, cx, cy, size, lines=3):
-    """Stacked horizontal strokes of alternating length."""
     w = _line(size)
     for i in range(lines):
         y = cy + (i - (lines - 1) / 2) * size * 0.13
         half = size * (0.30 if i % 2 == 0 else 0.23)
-        draw.line([(cx - half, y), (cx + half, y)], fill=BLACK, width=w)
+        _cap(draw, [(cx - half, y), (cx + half, y)], w)
 
 
-def weather_icon(draw, box, code, size=None):
-    """Draw the condition for an OpenWeatherMap icon code, centred in `box`.
-
-    Unknown codes fall back to a plain cloud rather than drawing nothing, so a
-    code added upstream later still leaves the layout intact.
-    """
-    size = size or min(box.w, box.h)
-    cx, cy = box.cx, box.cy
+def _paint_icon(draw, size, code):
+    """Draw one condition, centred, in ink (0) on a white (255) layer."""
+    cx = cy = size / 2
     kind = (code or "")[:2]
     night = str(code or "").endswith("n")
 
-    if kind == "01":                                     # clear
+    if kind == "01":
         (_moon if night else _sun)(draw, cx, cy, size)
-    elif kind == "02":                                   # a few clouds
-        # The luminary sits behind the cloud's right shoulder; the cloud is
-        # drawn after it, and its white fill does the occluding.
+    elif kind == "02":
         if night:
             _moon(draw, cx + size * 0.24, cy - size * 0.26, size * 0.80)
         else:
             _sun(draw, cx + size * 0.22, cy - size * 0.22, size * 0.62)
         _cloud(draw, cx - size * 0.06, cy + size * 0.11, size * 0.80)
-    elif kind == "03":                                   # scattered
+    elif kind == "03":
         _cloud(draw, cx, cy, size * 0.86)
-    elif kind == "04":                                   # broken / overcast
-        if size >= 42:
+    elif kind == "04":
+        if size >= 42 * SS:
             _cloud(draw, cx + size * 0.15, cy - size * 0.15, size * 0.56)
             _cloud(draw, cx - size * 0.06, cy + size * 0.08, size * 0.84)
         else:
             _cloud(draw, cx, cy, size * 0.88)
-    elif kind == "09":                                   # shower
+    elif kind == "09":
         _cloud(draw, cx, cy - size * 0.13, size * 0.82)
         _rain(draw, cx, cy + size * 0.20, size, count=4)
-    elif kind == "10":                                   # rain
+    elif kind == "10":
         _cloud(draw, cx, cy - size * 0.13, size * 0.82)
-        _rain(draw, cx, cy + size * 0.20, size, count=3, length=0.17)
-    elif kind == "11":                                   # thunderstorm
+        _rain(draw, cx, cy + size * 0.20, size, count=3, length=0.175)
+    elif kind == "11":
         _cloud(draw, cx, cy - size * 0.15, size * 0.82)
         _bolt(draw, cx, cy + size * 0.13, size)
-    elif kind == "13":                                   # snow
+    elif kind == "13":
         _cloud(draw, cx, cy - size * 0.13, size * 0.82)
         _snow(draw, cx, cy + size * 0.17, size)
-    elif kind == "50":                                   # mist
+    elif kind == "50":
         _fog(draw, cx, cy, size)
     else:
         _cloud(draw, cx, cy, size * 0.86)
+
+
+def weather_icon(image, box, code, size=None):
+    """Draw an OpenWeatherMap condition icon centred in `box`, onto `image`.
+
+    Takes the image rather than a draw handle because the icon is composited
+    as a thresholded mask, not stroked directly onto the page.
+    """
+    size = int(size or min(box.w, box.h))
+    if size < 8:
+        return
+
+    layer = Image.new("L", (size * SS, size * SS), 255)
+    _paint_icon(ImageDraw.Draw(layer), size * SS, code)
+    layer = layer.resize((size, size), Image.LANCZOS)
+
+    # Pure ink or nothing: greys would be dithered into speckle downstream.
+    mask = layer.point(lambda v: 255 if v < _INK_THRESHOLD else 0)
+    image.paste(Image.new("RGB", (size, size), BLACK),
+                (int(box.cx - size / 2), int(box.cy - size / 2)), mask)
+
+
+def flatten_to_palette(image):
+    """Snap every pixel to the panel's six colours, with no dithering.
+
+    The driver quantises with Floyd-Steinberg, which is right for a photograph
+    and wrong for everything else: antialiased type and hairlines come out as
+    fields of speckle. Pages made of text and rules are flattened here first,
+    so what reaches the panel is already exactly on-palette and the dither has
+    nothing left to do.
+    """
+    reference = Image.new("P", (1, 1))
+    reference.putpalette([c for colour in PALETTE for c in colour] +
+                         [0, 0, 0] * (256 - len(PALETTE)))
+    return image.convert("RGB").quantize(
+        palette=reference, dither=Image.Dither.NONE).convert("RGB")
 
 
 # ── Labels ───────────────────────────────────────────────────────────────

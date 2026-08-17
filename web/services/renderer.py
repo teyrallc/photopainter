@@ -79,9 +79,15 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     draw = ImageDraw.Draw(img)
 
     COLUMN_W = 320
-    _draw_home_column(draw, ui.Box(0, 0, COLUMN_W, EPD_H),
+    _draw_home_column(img, draw, ui.Box(0, 0, COLUMN_W, EPD_H),
                       weather_data, calendar_events)
     draw.line([(COLUMN_W, 0), (COLUMN_W, EPD_H)], fill=BLACK, width=2)
+
+    # Flatten the chrome before the photograph goes in: type and hairlines
+    # want exact palette colours, and the photograph wants the driver's dither.
+    # This returns a new image, so anything drawn after it needs a new handle.
+    img = ui.flatten_to_palette(img)
+    draw = ImageDraw.Draw(img)
 
     photo_box = ui.Box(COLUMN_W + 2, 0, EPD_W - COLUMN_W - 2, EPD_H)
     if photo_path and os.path.exists(photo_path):
@@ -98,7 +104,7 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     return img
 
 
-def _draw_home_column(draw, box, weather, events):
+def _draw_home_column(img, draw, box, weather, events):
     """Date, weather, and what is on. Three things, and nothing else.
 
     The previous version also carried a three-day forecast and a fourth rule,
@@ -127,7 +133,7 @@ def _draw_home_column(draw, box, weather, events):
         ui.rule(draw, ui.Box(inner.x, rest.y - 7, inner.w, 1))
         now_box, rest = rest.cut_top(104, gap=14)
         icon_box, reading = now_box.cut_left(96, gap=8)
-        ui.weather_icon(draw, ui.Box(icon_box.x, icon_box.y + 6, icon_box.w, 84),
+        ui.weather_icon(img, ui.Box(icon_box.x, icon_box.y + 6, icon_box.w, 84),
                         weather.get("icon"))
 
         draw.text((reading.x, reading.y), _temp(weather.get("temp")),
@@ -155,16 +161,17 @@ def render_widget_page(mode, weather_data, calendar_events):
     draw = ImageDraw.Draw(img)
 
     if mode == "split":
-        _draw_split_page(draw, weather_data, calendar_events)
+        _draw_split_page(img, draw, weather_data, calendar_events)
     elif mode == "weather":
-        _draw_weather_fullscreen(draw, weather_data)
+        _draw_weather_fullscreen(img, draw, weather_data)
     else:
         _draw_calendar_fullscreen(draw, calendar_events)
 
-    return img
+    # No photograph on these pages, so nothing here wants dithering.
+    return ui.flatten_to_palette(img)
 
 
-def _draw_split_page(draw, weather, events):
+def _draw_split_page(img, draw, weather, events):
     """Calendar and weather side by side, each given a full-height column.
 
     Not the quarter-panel layouts stretched: those are designed for 240 pixels
@@ -217,7 +224,7 @@ def _draw_split_page(draw, weather, events):
     rest_r = rest_r.inset(14, 12)
     hero, lower = rest_r.cut_top(int(rest_r.h * 0.42), gap=8)
     icon_box, reading = hero.cut_left(int(hero.w * 0.42), gap=4)
-    ui.weather_icon(draw, icon_box, weather.get("icon"))
+    ui.weather_icon(img, icon_box, weather.get("icon"))
 
     temp_font = ui.font(66)
     draw.text((reading.x, reading.cy - 12), _temp(weather.get("temp")),
@@ -241,7 +248,7 @@ def _draw_split_page(draw, weather, events):
         label_box, days = forecast_box.cut_top(20, gap=2)
         draw.text((label_box.x, label_box.y), "Next 3 days",
                   fill=BLUE, font=ui.font(14), anchor="lt")
-        _draw_forecast_row(draw, days, forecast)
+        _draw_forecast_row(img, draw, days, forecast)
 
 
 def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
@@ -599,7 +606,7 @@ def _temp(value):
 
 
 
-def _draw_forecast_row(draw, box, forecast, compact=False):
+def _draw_forecast_row(img, draw, box, forecast, compact=False):
     """The three-day strip: one column each, icon over day over high/low."""
     days = (forecast or [])[:3]
     if not days:
@@ -614,7 +621,7 @@ def _draw_forecast_row(draw, box, forecast, compact=False):
     for column, day in zip(box.cols(len(days), gap=4), days):
         icon_side = min(column.w * (0.54 if compact else 0.60), max(0, column.h - text_h))
         icon = ui.Box(column.cx - icon_side / 2, column.y, icon_side, icon_side)
-        ui.weather_icon(draw, icon, day.get("icon"))
+        ui.weather_icon(img, icon, day.get("icon"))
 
         label_y = column.bottom - text_h
         label = day.get("weekday") or day.get("date", "")
@@ -636,7 +643,7 @@ def _draw_stat(draw, box, label, value, accent=BLUE):
               fill=BLACK, font=ui.font(24), anchor="mm")
 
 
-def _draw_weather_fullscreen(draw, weather):
+def _draw_weather_fullscreen(img, draw, weather):
     """Full-screen weather: header, hero reading, four figures, three days."""
     page = ui.Box(0, 0, EPD_W, EPD_H)
 
@@ -656,7 +663,7 @@ def _draw_weather_fullscreen(draw, weather):
 
     # ── Hero: the icon and the temperature, side by side and large ──
     icon_box, reading = hero.cut_left(int(hero.w * 0.32), gap=8)
-    ui.weather_icon(draw, icon_box, weather.get("icon"))
+    ui.weather_icon(img, icon_box, weather.get("icon"))
 
     # The temperature is the one thing read from across the room, so it sets
     # the baseline and everything else hangs off it.
@@ -700,7 +707,7 @@ def _draw_weather_fullscreen(draw, weather):
         draw.text((label_box.x, label_box.y),
                   "Next 3 days",
                   fill=BLUE, font=ui.font(15), anchor="lt")
-        _draw_forecast_row(draw, days, forecast)
+        _draw_forecast_row(img, draw, days, forecast)
 
 
 def _draw_calendar_fullscreen(draw, events):
