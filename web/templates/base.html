@@ -6,11 +6,9 @@
     ('/upload',   'upload',   t.upload,      t.upload),
     ('/gallery',  'gallery',  t.gallery,     t.gallery),
     ('/wifi',     'wifi',     t.wifi_config, t.nav_wifi),
-    ('/settings', 'settings', t.settings,    t.settings),
-    ('/manual',   'book',     t.manual,      t.manual)
+    ('/settings', 'settings', t.settings,    t.settings)
 ] -%}
-{#- Only five thumb-sized targets fit; the manual is a read-once page, so on
-    small screens it lives in the top bar instead. -#}
+{#- Five thumb-sized targets is the most that fits a phone tab bar. -#}
 {%- set tab_items = nav_items[:5] -%}
 <!DOCTYPE html>
 <html lang="{{ current_lang }}" data-theme="light">
@@ -59,9 +57,11 @@
         <div class="topbar__spacer"></div>
 
         <div class="topbar__actions">
-            {#- The sidebar already lists the manual on wide screens. -#}
-            <a class="btn btn--ghost btn--icon topbar__only-mobile" href="/manual"
-               aria-label="{{ t.manual }}" title="{{ t.manual }}">{{ icon('book') }}</a>
+            {#- The documentation lives in the repository, which is where it
+                is edited and where it is always current. -#}
+            <a class="btn btn--ghost btn--icon" target="_blank" rel="noopener"
+               href="https://github.com/teyrallc/photopainter"
+               aria-label="{{ t.docs }}" title="{{ t.docs }}">{{ icon('book') }}</a>
 
             <button type="button" class="btn btn--ghost btn--sm" id="lang-toggle"
                     aria-label="{{ t.language }}: {{ 'English' if current_lang == 'zh' else '中文' }}">

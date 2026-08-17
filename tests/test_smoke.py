@@ -459,7 +459,7 @@ def test_no_page_names_the_old_shared_hotspot():
     client = _paired_client()
     ssid = device_id.ap_ssid()
 
-    for page in ("/wifi", "/manual", "/settings"):
+    for page in ("/wifi", "/settings"):
         html = client.get(page).get_data(as_text=True)
         assert "vignette123" not in html, page
         assert "Vignette-Setup" not in html, page

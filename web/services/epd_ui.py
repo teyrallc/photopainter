@@ -260,20 +260,30 @@ class Box:
 
 # ── Chrome ───────────────────────────────────────────────────────────────
 
-def header(draw, box, title, right_text=None, fill=BLACK, fg=WHITE,
-           title_size=26, right_size=15):
-    """A solid title bar. Flat colour, which is what e-paper renders best."""
-    draw.rectangle([box.x, box.y, box.right, box.bottom], fill=fill)
+def header(draw, box, title, right_text=None, accent=BLUE,
+           title_size=26, right_size=15, pad=18):
+    """A title with a thin accent rule under it.
+
+    Was a solid bar of red or blue across the full width. On a panel with six
+    flat colours and no tints, that much saturation is the loudest thing in the
+    room and it pushed everything else down — the page read as a warning, not
+    as a calendar. A rule carries the same structure at a fraction of the ink.
+    """
     title_font = font(title_size)
+    baseline = box.bottom - 10
+
     reserved = 0
     if right_text:
         right_font = font(right_size)
-        reserved = text_width(right_text, right_font) + 24
-        draw.text((box.right - 14, box.cy), right_text,
-                  fill=fg, font=right_font, anchor="rm")
-    draw.text((box.x + 14, box.cy),
-              fit(title, title_font, box.w - 28 - reserved),
-              fill=fg, font=title_font, anchor="lm")
+        reserved = text_width(right_text, right_font) + 20
+        draw.text((box.right - pad, baseline), right_text,
+                  fill=BLACK, font=right_font, anchor="rs")
+
+    draw.text((box.x + pad, baseline),
+              fit(title, title_font, box.w - 2 * pad - reserved),
+              fill=BLACK, font=title_font, anchor="ls")
+    draw.line([(box.x + pad, box.bottom - 3), (box.right - pad, box.bottom - 3)],
+              fill=accent, width=3)
 
 
 def rule(draw, box, color=BLACK, width=1, vertical=False):
@@ -311,129 +321,138 @@ def empty_state(draw, box, message, hint=None):
 # of them would have come out as an empty box. These also scale to any size
 # and land on exact palette colours.
 
-def _sun(draw, cx, cy, r, rays=True):
-    if rays:
-        for i in range(8):
-            from math import cos, sin, pi
-            angle = i * pi / 4
-            x1, y1 = cx + cos(angle) * (r + r * 0.35), cy + sin(angle) * (r + r * 0.35)
-            x2, y2 = cx + cos(angle) * (r + r * 0.85), cy + sin(angle) * (r + r * 0.85)
-            draw.line([(x1, y1), (x2, y2)], fill=YELLOW, width=max(2, int(r * 0.18)))
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=YELLOW, outline=BLACK,
-                 width=max(1, int(r * 0.12)))
+def _line(size):
+    """Stroke weight for an icon of this size.
 
-
-def _moon(draw, cx, cy, r):
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=YELLOW, outline=BLACK,
-                 width=max(1, int(r * 0.12)))
-    # Bite out of the disc, in the page colour, to make the crescent.
-    draw.ellipse([cx - r * 1.5, cy - r * 1.25, cx + r * 0.35, cy + r * 1.25],
-                 fill=WHITE, outline=None)
-    draw.arc([cx - r, cy - r, cx + r, cy + r], start=300, end=60,
-             fill=BLACK, width=max(1, int(r * 0.12)))
-
-
-def _cloud(draw, cx, cy, w, fill=WHITE, outline=BLACK):
-    """A cloud `w` wide, centred on (cx, cy).
-
-    Drawn as a silhouette twice — once grown by the stroke width in the
-    outline colour, once at true size in the fill colour. Stroking each puff
-    individually instead leaves the seams between them showing straight
-    through the middle of the cloud, which is what the first version did.
+    Thin enough to read as line art, never below two pixels — one-pixel strokes
+    survive neither the panel's quantiser nor being looked at from a sofa.
     """
-    line = max(2, w * 0.05)
-    base = cy + w * 0.14
+    # Capped as well as scaled: a proportional stroke on a 140-pixel hero icon
+    # comes out seven pixels thick and reads as a marker drawing.
+    return min(6, max(2, round(size * 0.042)))
+
+
+def _sun(draw, cx, cy, size, rays=True):
+    """An open circle with short rays. No fill: filled discs read as cartoons."""
+    from math import cos, sin, pi
+    w = _line(size)
+    r = size * 0.21
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=BLACK, width=w)
+    if not rays:
+        return
+    for i in range(8):
+        angle = i * pi / 4
+        inner, outer = r + size * 0.09, r + size * 0.20
+        draw.line([(cx + cos(angle) * inner, cy + sin(angle) * inner),
+                   (cx + cos(angle) * outer, cy + sin(angle) * outer)],
+                  fill=BLACK, width=w)
+
+
+def _moon(draw, cx, cy, size):
+    """A crescent, cut from one disc by another."""
+    w = _line(size)
+    r = size * 0.26
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=BLACK)
+    draw.ellipse([cx - r * 1.55, cy - r * 1.25, cx + r * 0.42, cy + r * 1.25],
+                 fill=WHITE)
+    draw.arc([cx - r, cy - r, cx + r, cy + r], start=298, end=62,
+             fill=BLACK, width=w)
+
+
+def _cloud(draw, cx, cy, size, outline=BLACK, fill=WHITE):
+    """A cloud outline.
+
+    Drawn as a silhouette twice — grown by the stroke width in the outline
+    colour, then at true size in the fill — so the seams between its parts
+    never show through. Flatter and simpler than a three-puff cartoon.
+    """
+    w = _line(size)
+    width = size * 0.78
+    base = cy + width * 0.16
 
     def silhouette(grow, colour):
-        puffs = (
-            (cx - w * 0.05, base - w * 0.13, w * 0.27),   # tall centre puff
-            (cx - w * 0.27, base - w * 0.01, w * 0.20),   # left shoulder
-            (cx + w * 0.24, base - w * 0.04, w * 0.22),   # right shoulder
-        )
-        for px, py, r in puffs:
+        for px, py, r in ((cx - width * 0.06, base - width * 0.15, width * 0.26),
+                          (cx + width * 0.25, base - width * 0.03, width * 0.19)):
             r += grow
             draw.ellipse([px - r, py - r, px + r, py + r], fill=colour)
-        # The flat base that ties the puffs together.
         draw.rounded_rectangle(
-            [cx - w * 0.46 - grow, base - w * 0.06 - grow,
-             cx + w * 0.46 + grow, base + w * 0.16 + grow],
-            radius=w * 0.08 + grow, fill=colour)
+            [cx - width * 0.44 - grow, base - width * 0.10 - grow,
+             cx + width * 0.44 + grow, base + width * 0.11 + grow],
+            radius=width * 0.21 + grow, fill=colour)
 
-    silhouette(line, outline)
+    silhouette(w, outline)
     silhouette(0, fill)
 
 
-def _drops(draw, cx, cy, w, color=BLUE, count=3):
-    line = max(2, int(w * 0.055))
+def _rain(draw, cx, cy, size, count=3):
+    w = _line(size)
     for i in range(count):
-        x = cx + (i - (count - 1) / 2) * w * 0.22
-        draw.line([(x, cy), (x - w * 0.05, cy + w * 0.20)], fill=color, width=line)
+        x = cx + (i - (count - 1) / 2) * size * 0.16
+        draw.line([(x + size * 0.04, cy), (x - size * 0.04, cy + size * 0.16)],
+                  fill=BLACK, width=w)
 
 
-def _flakes(draw, cx, cy, w, color=BLUE, count=3):
-    line = max(1, int(w * 0.04))
+def _snow(draw, cx, cy, size, count=3):
+    w = max(2, _line(size) - 1)
     for i in range(count):
-        x = cx + (i - (count - 1) / 2) * w * 0.22
-        s = w * 0.08
-        draw.line([(x - s, cy + s), (x + s, cy + s * 3)], fill=color, width=line)
-        draw.line([(x - s, cy + s * 3), (x + s, cy + s)], fill=color, width=line)
-        draw.line([(x, cy + s * 0.5), (x, cy + s * 3.5)], fill=color, width=line)
+        x = cx + (i - (count - 1) / 2) * size * 0.17
+        a = size * 0.055
+        draw.line([(x - a, cy + a), (x + a, cy + a * 3)], fill=BLACK, width=w)
+        draw.line([(x - a, cy + a * 3), (x + a, cy + a)], fill=BLACK, width=w)
+        draw.line([(x, cy), (x, cy + a * 4)], fill=BLACK, width=w)
 
 
-def _bolt(draw, cx, cy, w, color=YELLOW):
-    s = w * 0.22
-    draw.polygon([(cx + s * 0.25, cy), (cx - s * 0.55, cy + s * 1.15),
-                  (cx - s * 0.05, cy + s * 1.15), (cx - s * 0.35, cy + s * 2.2),
-                  (cx + s * 0.65, cy + s * 0.9), (cx + s * 0.1, cy + s * 0.9)],
-                 fill=color, outline=BLACK)
+def _bolt(draw, cx, cy, size):
+    """An outlined bolt, so it reads as a symbol rather than a sticker."""
+    a = size * 0.13
+    draw.polygon([(cx + a * 0.5, cy), (cx - a * 0.9, cy + a * 1.5),
+                  (cx - a * 0.1, cy + a * 1.5), (cx - a * 0.5, cy + a * 2.9),
+                  (cx + a * 0.95, cy + a * 1.2), (cx + a * 0.15, cy + a * 1.2)],
+                 fill=BLACK)
 
 
 def weather_icon(draw, box, code, size=None):
     """Draw the condition for an OpenWeatherMap icon code, centred in `box`.
 
     Unknown codes fall back to a cloud rather than drawing nothing, so a code
-    Apple or OWM adds later still leaves the layout intact.
+    added upstream later still leaves the layout intact.
     """
     size = size or min(box.w, box.h)
     cx, cy = box.cx, box.cy
     kind = (code or "")[:2]
     night = str(code or "").endswith("n")
-    r = size * 0.26
 
     if kind == "01":
-        if night:
-            _moon(draw, cx, cy, r * 1.1)
-        else:
-            _sun(draw, cx, cy, r)
+        (_moon if night else _sun)(draw, cx, cy, size)
     elif kind == "02":
-        # Sun (or moon) peeking out behind a cloud.
+        # Clear behind, cloud in front and slightly low.
         if night:
-            _moon(draw, cx + size * 0.16, cy - size * 0.18, r * 0.72)
+            _moon(draw, cx + size * 0.17, cy - size * 0.17, size * 0.72)
         else:
-            _sun(draw, cx + size * 0.16, cy - size * 0.18, r * 0.62)
-        _cloud(draw, cx - size * 0.06, cy + size * 0.06, size * 0.78)
+            _sun(draw, cx + size * 0.17, cy - size * 0.17, size * 0.66)
+        _cloud(draw, cx - size * 0.06, cy + size * 0.10, size * 0.86)
     elif kind in ("03", "04"):
         if kind == "04":
-            _cloud(draw, cx + size * 0.10, cy - size * 0.10, size * 0.60)
-        _cloud(draw, cx - size * 0.04, cy + size * 0.04, size * 0.82)
+            _cloud(draw, cx + size * 0.13, cy - size * 0.13, size * 0.62)
+        _cloud(draw, cx - size * 0.04, cy + size * 0.05, size * 0.90)
     elif kind in ("09", "10"):
-        _cloud(draw, cx, cy - size * 0.10, size * 0.80)
-        _drops(draw, cx, cy + size * 0.24, size, count=3 if kind == "09" else 2)
+        _cloud(draw, cx, cy - size * 0.12, size * 0.86)
+        _rain(draw, cx, cy + size * 0.22, size, count=3 if kind == "09" else 2)
     elif kind == "11":
-        _cloud(draw, cx, cy - size * 0.12, size * 0.80)
+        _cloud(draw, cx, cy - size * 0.14, size * 0.86)
         _bolt(draw, cx, cy + size * 0.14, size)
     elif kind == "13":
-        _cloud(draw, cx, cy - size * 0.10, size * 0.78)
-        _flakes(draw, cx, cy + size * 0.16, size)
+        _cloud(draw, cx, cy - size * 0.12, size * 0.86)
+        _snow(draw, cx, cy + size * 0.16, size)
     elif kind == "50":
-        line = max(2, int(size * 0.055))
+        w = _line(size)
         for i in range(4):
-            y = cy - size * 0.18 + i * size * 0.14
-            indent = size * (0.08 if i % 2 else 0.0)
-            draw.line([(cx - size * 0.32 + indent, y), (cx + size * 0.32 - indent, y)],
-                      fill=BLUE, width=line)
+            y = cy - size * 0.17 + i * size * 0.13
+            indent = size * (0.09 if i % 2 else 0.0)
+            draw.line([(cx - size * 0.30 + indent, y), (cx + size * 0.30 - indent, y)],
+                      fill=BLACK, width=w)
     else:
-        _cloud(draw, cx, cy, size * 0.82)
+        _cloud(draw, cx, cy, size * 0.90)
 
 
 # ── Labels ───────────────────────────────────────────────────────────────

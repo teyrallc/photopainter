@@ -78,7 +78,7 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
-    COLUMN_W = 300
+    COLUMN_W = 320
     _draw_home_column(draw, ui.Box(0, 0, COLUMN_W, EPD_H),
                       weather_data, calendar_events)
     draw.line([(COLUMN_W, 0), (COLUMN_W, EPD_H)], fill=BLACK, width=2)
@@ -99,74 +99,54 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
 
 
 def _draw_home_column(draw, box, weather, events):
-    """The information column: date, weather now, three days, what is on."""
+    """Date, weather, and what is on. Three things, and nothing else.
+
+    The previous version also carried a three-day forecast and a fourth rule,
+    which is how a 300-pixel column ends up looking like a spreadsheet. The
+    forecast has a whole page of its own; here it was one more row of numbers
+    competing with the two facts anybody actually glances over for — what day
+    it is, and whether to take a coat.
+    """
     now = datetime.now()
-    inner = box.inset(16, 14)
+    inner = box.inset(18, 20)
 
-    # ── The date, as the column's headline ──
-    date_box, rest = inner.cut_top(74, gap=8)
-    day_font = ui.font(64)
-    draw.text((date_box.x, date_box.y - 6), str(now.day),
+    # ── The date, given the room to be the headline ──
+    date_box, rest = inner.cut_top(112, gap=14)
+    day_font = ui.font(92)
+    draw.text((date_box.x - 4, date_box.y - 12), str(now.day),
               fill=BLACK, font=day_font, anchor="lt")
-    offset = ui.text_width(str(now.day), day_font) + 12
-    draw.text((date_box.x + offset, date_box.y + 6),
+    draw.text((date_box.x, date_box.y + 78),
               ui.weekday_label(now.weekday(), short=False),
-              fill=RED if now.weekday() >= 5 else BLUE, font=ui.font(19), anchor="lt")
-    draw.text((date_box.x + offset, date_box.y + 32),
-              ui.month_label(now), fill=BLACK, font=ui.font(14), anchor="lt")
+              fill=RED if now.weekday() >= 5 else BLUE,
+              font=ui.font(24), anchor="lt")
+    draw.text((date_box.right, date_box.y + 84), ui.month_label(now),
+              fill=BLACK, font=ui.font(15), anchor="rt")
 
-    if not weather:
-        ui.rule(draw, ui.Box(inner.x, rest.y - 4, inner.w, 1))
-        label_box, list_box = rest.inset(0, 6).cut_top(18, gap=4)
-        draw.text((label_box.x, label_box.y), "Coming up",
-                  fill=BLUE, font=ui.font(13), anchor="lt")
-        _draw_agenda(draw, list_box, events, limit=4)
-        return
+    # ── Weather: an icon, a number, and one line of detail ──
+    if weather:
+        ui.rule(draw, ui.Box(inner.x, rest.y - 7, inner.w, 1))
+        now_box, rest = rest.cut_top(104, gap=14)
+        icon_box, reading = now_box.cut_left(96, gap=8)
+        ui.weather_icon(draw, ui.Box(icon_box.x, icon_box.y + 6, icon_box.w, 84),
+                        weather.get("icon"))
 
-    # ── Weather now: the icon and the number, then the detail under them ──
-    ui.rule(draw, ui.Box(inner.x, rest.y - 4, inner.w, 1))
-    now_box, rest = rest.cut_top(96, gap=8)
-    icon_box, reading = now_box.cut_left(78, gap=6)
-    ui.weather_icon(draw, ui.Box(icon_box.x, icon_box.y + 4, icon_box.w, 66),
-                    weather.get("icon"))
+        draw.text((reading.x, reading.y), _temp(weather.get("temp")),
+                  fill=BLACK, font=ui.font(58), anchor="lt")
+        draw.text((reading.x, reading.y + 62),
+                  ui.fit(_describe(weather), ui.font(16), reading.w),
+                  fill=BLACK, font=ui.font(16), anchor="lt")
+        draw.text((reading.x, reading.y + 83),
+                  f"{_temp(weather.get('temp_max'))} / {_temp(weather.get('temp_min'))}",
+                  fill=BLUE, font=ui.font(15), anchor="lt")
 
-    temp_font = ui.font(50)
-    draw.text((reading.x, reading.y + 2), _temp(weather.get("temp")),
-              fill=BLACK, font=temp_font, anchor="lt")
-    draw.text((reading.x, reading.y + 54),
-              ui.fit(weather.get("description", ""), ui.font(15), reading.w),
-              fill=BLACK, font=ui.font(15), anchor="lt")
-    draw.text((reading.x, reading.y + 74),
-              f"{_temp(weather.get('temp_max'))} / {_temp(weather.get('temp_min'))}"
-              f"   {weather.get('humidity', '—')}%",
-              fill=BLUE, font=ui.font(13), anchor="lt")
-
-    # ── Three days, one per line ──
-    # A 300-pixel column reads far better down than across: three columns here
-    # would leave each day 90 pixels for an icon, a name and two temperatures.
-    forecast = (weather.get("forecast") or [])[:3]
-    if forecast:
-        ui.rule(draw, ui.Box(inner.x, rest.y - 4, inner.w, 1))
-        strip, rest = rest.cut_top(40 * len(forecast) + 6, gap=8)
-        for row, day in zip(strip.rows(len(forecast)), forecast):
-            draw.text((row.x + 2, row.cy), day.get("weekday") or day.get("date", ""),
-                      fill=BLACK, font=ui.font(15), anchor="lm")
-            # Inset so rain and lightning, which hang below the icon's centre,
-            # stay inside their own row instead of touching the next one.
-            ui.weather_icon(draw, ui.Box(row.x + 56, row.y + 3, 34, row.h - 6),
-                            day.get("icon"))
-            draw.text((row.right - 2, row.cy),
-                      f"{_temp(day.get('temp_max'))} / {_temp(day.get('temp_min'))}",
-                      fill=BLACK, font=ui.font(15), anchor="rm")
-
-    # ── And whatever is left goes to the agenda ──
+    # ── Whatever is on, with all the space that is left ──
     if rest.h < 40:
         return
-    ui.rule(draw, ui.Box(inner.x, rest.y - 4, inner.w, 1))
-    label_box, list_box = rest.inset(0, 6).cut_top(18, gap=4)
+    ui.rule(draw, ui.Box(inner.x, rest.y - 7, inner.w, 1))
+    label_box, list_box = rest.cut_top(20, gap=6)
     draw.text((label_box.x, label_box.y), "Coming up",
-              fill=BLUE, font=ui.font(13), anchor="lt")
-    _draw_agenda(draw, list_box, events, limit=3, compact=True)
+              fill=BLUE, font=ui.font(14), anchor="lt")
+    _draw_agenda(draw, list_box, events, limit=3)
 
 
 def render_widget_page(mode, weather_data, calendar_events):
@@ -198,7 +178,7 @@ def _draw_split_page(draw, weather, events):
 
     # ── Left: the month, then what is on ──
     head, rest = left.cut_top(46)
-    ui.header(draw, head, ui.month_label(now), fill=RED, title_size=21)
+    ui.header(draw, head, ui.month_label(now), accent=RED, title_size=21)
 
     rest = rest.inset(14, 12)
     today_box, below = rest.cut_top(72, gap=8)
@@ -223,8 +203,7 @@ def _draw_split_page(draw, weather, events):
     # ── Right: now, then the next three days ──
     if not weather:
         head_r, rest_r = right.cut_top(46)
-        ui.header(draw, head_r, "Weather",
-                  fill=BLUE, title_size=21)
+        ui.header(draw, head_r, "Weather", accent=BLUE, title_size=21)
         ui.empty_state(draw, rest_r,
                        "No weather data",
                        "Settings → Weather")
@@ -232,7 +211,7 @@ def _draw_split_page(draw, weather, events):
 
     head_r, rest_r = right.cut_top(46)
     ui.header(draw, head_r, weather.get("city", "—"),
-              right_text=weather.get("updated", ""), fill=BLUE,
+              right_text=weather.get("updated", ""), accent=BLUE,
               title_size=21, right_size=13)
 
     rest_r = rest_r.inset(14, 12)
@@ -244,7 +223,7 @@ def _draw_split_page(draw, weather, events):
     draw.text((reading.x, reading.cy - 12), _temp(weather.get("temp")),
               fill=BLACK, font=temp_font, anchor="lm")
     draw.text((reading.x, reading.cy + 26),
-              ui.fit(weather.get("description", ""), ui.font(17), reading.w),
+              ui.fit(_describe(weather), ui.font(17), reading.w),
               fill=BLACK, font=ui.font(17), anchor="lt")
 
     stats, forecast_box = lower.cut_top(58, gap=10)
@@ -605,6 +584,15 @@ def _draw_agenda(draw, box, events, limit=3, compact=False):
                   fill=BLACK, font=title_font, anchor="lt")
 
 
+def _describe(weather_or_day):
+    """OpenWeatherMap sends "scattered clouds"; the panel wants a label.
+
+    Title-cased at the point of drawing rather than in the service, so the API
+    keeps returning exactly what upstream said.
+    """
+    return str((weather_or_day or {}).get("description") or "").title()
+
+
 def _temp(value):
     """A temperature, or an em dash when the reading is missing."""
     return f"{value}°" if value is not None else "—"
@@ -653,8 +641,7 @@ def _draw_weather_fullscreen(draw, weather):
     page = ui.Box(0, 0, EPD_W, EPD_H)
 
     if not weather:
-        ui.header(draw, ui.Box(0, 0, EPD_W, 56),
-                  "Weather", fill=BLUE)
+        ui.header(draw, ui.Box(0, 0, EPD_W, 56), "Weather", accent=BLUE)
         ui.empty_state(draw, ui.Box(0, 56, EPD_W, EPD_H - 56),
                        "No weather data",
                        "Settings → Weather")
@@ -662,8 +649,7 @@ def _draw_weather_fullscreen(draw, weather):
 
     head, body = page.cut_top(56)
     ui.header(draw, head, weather.get("city", "—"),
-              right_text=f"Updated {weather.get('updated', '?')}",
-              fill=BLUE)
+              right_text=f"Updated {weather.get('updated', '?')}", accent=BLUE)
 
     body = body.inset(18, 14)
     hero, lower = body.cut_top(int(body.h * 0.52), gap=12)
@@ -683,7 +669,7 @@ def _draw_weather_fullscreen(draw, weather):
     side = reading.x + temp_w + 16
     side_w = max(0, reading.right - side)
     draw.text((side, reading.cy - 26),
-              ui.fit(weather.get("description", ""), ui.font(24), side_w),
+              ui.fit(_describe(weather), ui.font(24), side_w),
               fill=BLACK, font=ui.font(24), anchor="lm")
     draw.text((side, reading.cy + 4),
               f"Feels like {_temp(weather.get('feels_like'))}",
@@ -723,12 +709,11 @@ def _draw_calendar_fullscreen(draw, events):
     page = ui.Box(0, 0, EPD_W, EPD_H)
 
     head, body = page.cut_top(56)
-    ui.header(draw, head, ui.month_label(now),
-              right_text=ui.time_label(now), fill=RED)
+    ui.header(draw, head, ui.month_label(now), accent=RED)
 
     # A solid block of red is heavy; the grid needs to breathe under it or the
     # whole page reads as one crowded slab.
-    body = body.inset(18, 26)
+    body = body.inset(18, 16)
     grid_box, side = body.cut_left(int(body.w * 0.56), gap=18)
 
     _draw_month_grid(draw, grid_box, now, events)

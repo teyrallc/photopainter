@@ -784,11 +784,6 @@ def settings_page():
     return render_template('settings.html', config=config.public_dict())
 
 
-@app.route('/manual')
-def manual_page():
-    return render_template('manual.html')
-
-
 @app.route('/wifi')
 def wifi_page():
     return render_template('wifi.html', config=config.public_dict())
