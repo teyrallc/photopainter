@@ -91,6 +91,35 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 
+# ── Static assets carry their own version ────────────────────────────────
+#
+# The stylesheet and the scripts are served from fixed paths, so a browser that
+# has them cached keeps using them after an update — and the new markup renders
+# against the old CSS. That does not look like a caching problem to anybody; it
+# looks like the update broke the console. It is why a settings page arrived
+# with its rows unstacked and a QR code rendered at full column width.
+#
+# Stamping the file's mtime onto every url_for('static', …) makes the address
+# change whenever the file does, which is the whole fix: same file, same URL,
+# cached; changed file, new URL, fetched.
+@app.url_defaults
+def _version_static_assets(endpoint, values):
+    if endpoint != 'static' or 'filename' not in values or 'v' in values:
+        return
+    try:
+        stamp = os.stat(os.path.join(app.static_folder, values['filename'])).st_mtime
+    except OSError:
+        return          # a missing file is the 404's problem, not this hook's
+    values['v'] = int(stamp)
+
+
+@app.url_value_preprocessor
+def _drop_static_version(endpoint, values):
+    # The version is addressing, not an argument the view should see.
+    if endpoint == 'static' and values:
+        values.pop('v', None)
+
+
 class SchemeAwareSessionInterface(SecureCookieSessionInterface):
     """Mark the session cookie Secure exactly when the connection was HTTPS.
 
@@ -157,15 +186,39 @@ _UPLOAD_TOKEN_PATHS = ('/api/upload', '/api/upload/batch')
 _UPLOAD_TOKEN_URL_PREFIX = '/api/upload/t/'
 
 
+def _sync_url_token(path):
+    """The token in a sync address, if this path is one and carries a whole one.
+
+    Only the first segment counts: anything after it is a different route, and
+    a token that "matches" with a suffix attached is not a match.
+    """
+    if not path.startswith(_UPLOAD_TOKEN_URL_PREFIX):
+        return None
+    candidate = path[len(_UPLOAD_TOKEN_URL_PREFIX):].strip('/')
+    if not candidate or '/' in candidate:
+        return None
+    return candidate
+
+
+def _is_scanned_sync_address(path):
+    """A GET on a sync address — somebody who scanned the QR with their camera.
+
+    Allowed through without a session whatever the token turns out to be, and
+    deliberately so: the view renders a help page either way, and telling a
+    revoked address apart from a live one is the entire point of letting the
+    dead case render too. It performs nothing and discloses nothing the caller
+    did not already have in their address bar.
+    """
+    return request.method == 'GET' and _sync_url_token(path) is not None
+
+
 def _upload_token_authorised(path):
     """Does this request carry a valid upload token for an endpoint it opens?"""
     if request.method != 'POST':
         return False
     if path.startswith(_UPLOAD_TOKEN_URL_PREFIX):
-        # Only the first segment: anything after it is a different route,
-        # and a token that "matches" with a suffix attached is not a match.
-        presented = path[len(_UPLOAD_TOKEN_URL_PREFIX):].strip('/')
-        if '/' in presented:
+        presented = _sync_url_token(path)
+        if not presented:
             return False
     elif path in _UPLOAD_TOKEN_PATHS:
         presented = upload_token.from_request(request)
@@ -198,7 +251,7 @@ def enforce_auth():
     # A signed-in browser is not the only legitimate caller: an iPhone Shortcut
     # sends photos with a token instead. Checked after the always-open paths
     # and before the session, but only ever for the two upload endpoints.
-    if _upload_token_authorised(path):
+    if _upload_token_authorised(path) or _is_scanned_sync_address(path):
         return
 
     if not config.is_setup_complete:
@@ -1109,6 +1162,26 @@ def _show_after_upload(filename):
 # Same handler, two doors. The token-in-the-path form exists so a Shortcuts
 # automation can be built from one pasted URL instead of a hand-typed
 # Authorization header — see _upload_token_authorised for the boundary.
+@app.route('/api/upload/t/<token>', methods=['GET'])
+def sync_address_page(token):
+    """What a scanned QR code lands on.
+
+    The camera opens the address with a GET, and the upload route answers those
+    with "the method is not allowed" — a raw JSON error, on the phone, at the
+    exact moment somebody is trying to follow the setup. So the address renders
+    a page instead: the address itself, a button that copies it, and the steps
+    it is needed for. It performs nothing.
+
+    Reached without a session on purpose: the phone scanning it is not signed
+    in, and the address in the bar is the credential. Anyone holding it can
+    already upload, so showing it back to them discloses nothing new.
+    """
+    if not (upload_token.is_configured(config) and upload_token.verify(config, token)):
+        # A revoked or mistyped address must not look like a working one.
+        return render_template('sync_address.html', address=None), 404
+    return render_template('sync_address.html', address=request.url)
+
+
 @app.route('/api/upload', methods=['POST'])
 @app.route('/api/upload/t/<token>', methods=['POST'])
 def api_upload(token=None):

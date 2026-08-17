@@ -1150,15 +1150,26 @@ def test_phone_sync_url_carries_the_token_and_nothing_more():
                                      data={"file": (_png_bytes(), "nope.png")})
             assert refused.status_code in (401, 404), (path, refused.status_code)
 
-        # GET is not a door, whatever the token says.
-        assert anonymous.get(f"/api/upload/t/{token}").status_code in (401, 405)
+        # A GET is somebody who scanned the QR code with their camera. It has
+        # to answer with the help page rather than "method not allowed" in raw
+        # JSON — and it must perform nothing at all.
+        settled = set(os.listdir(vapp.OUTPUT_DIR))
+        landing = anonymous.get(f"/api/upload/t/{token}")
+        assert landing.status_code == 200, landing.status_code
+        body = landing.get_data(as_text=True)
+        assert "<html" in body.lower(), "the scanned address returned raw JSON"
+        assert set(os.listdir(vapp.OUTPUT_DIR)) == settled, "a GET changed something"
 
-        # And revoking closes it, exactly as it closes the header form.
+        # A GET without a real token must not look like a working address.
+        assert anonymous.get("/api/upload/t/vgn_nonsense").status_code in (401, 404)
+
+        # And revoking closes both doors, exactly as it closes the header form.
         client.delete("/api/upload-token", headers=SAME_ORIGIN)
         assert anonymous.post(f"/api/upload/t/{token}",
                               content_type="multipart/form-data",
                               data={"file": (_png_bytes(), "after.png")}
                               ).status_code == 401
+        assert anonymous.get(f"/api/upload/t/{token}").status_code in (401, 404)
     finally:
         for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
             os.remove(os.path.join(vapp.OUTPUT_DIR, name))
@@ -1570,6 +1581,42 @@ def test_update_hands_over_when_it_rewrites_itself():
         assert "Restart scheduled" in output, output
         # And exactly one hand-over: no loop.
         assert output.count("continuing with the new version") == 1, output
+
+
+def test_static_assets_change_address_when_they_change():
+    """An update must not leave the console rendering against its old CSS.
+
+    The stylesheet is served from a fixed path, so a browser that has it cached
+    keeps using it after an update and the new markup lands on the old rules.
+    That does not read as a caching problem to anybody — it reads as the update
+    having broken the page. It happened: a settings page arrived with its rows
+    unstacked and a QR code rendered at full column width.
+    """
+    client = _paired_client()
+    html = client.get("/settings").get_data(as_text=True)
+
+    import re
+    hrefs = re.findall(r'/static/css/app\.css\?v=(\d+)', html)
+    assert hrefs, "app.css is served without a version stamp"
+
+    scripts = re.findall(r'/static/js/\w+\.js\?v=(\d+)', html)
+    assert scripts, "the scripts are served without a version stamp"
+
+    # The stamp has to follow the file, or it is decoration.
+    css = os.path.join(REPO, "web", "static", "css", "app.css")
+    original = os.stat(css).st_mtime
+    try:
+        os.utime(css, (original + 120, original + 120))
+        moved = re.findall(r'/static/css/app\.css\?v=(\d+)',
+                           client.get("/settings").get_data(as_text=True))
+        assert moved and moved[0] != hrefs[0], (hrefs, moved)
+    finally:
+        os.utime(css, (original, original))
+
+    # And the versioned URL still serves the file rather than 404ing on the
+    # argument it carries.
+    fetched = client.get(f"/static/css/app.css?v={hrefs[0]}")
+    assert fetched.status_code == 200, fetched.status_code
 
 
 def test_config_survives_a_reload():

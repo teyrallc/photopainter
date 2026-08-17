@@ -1,0 +1,68 @@
+{% extends "_kiosk.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Vignette — {{ t.shortcut }}{% endblock %}
+
+{#- Where the QR code lands. Whoever is reading this is standing with a phone
+    in one hand, halfway through building a Shortcuts automation, so it says
+    the address, offers to copy it, and lists what to do with it. Nothing on
+    this page performs anything. -#}
+
+{% block brand %}
+<h1>{{ t.shortcut }}</h1>
+<p>{{ t.shortcut_sub }}</p>
+{% endblock %}
+
+{% block card %}
+{% if address %}
+<div class="field">
+    <label class="label" for="sync-address">{{ t.shortcut_token }}</label>
+    <input type="text" class="input mono" id="sync-address" readonly
+           value="{{ address }}" spellcheck="false"
+           style="font-size:13px;">
+</div>
+
+<button type="button" class="btn btn--primary btn--block" id="copy-address">
+    {{ icon('copy') }} {{ t.shortcut_copy }}
+</button>
+
+<div class="tips" style="margin-top:20px;">
+    <p class="label">{{ t.shortcut_steps_title }}</p>
+    <ol class="steps">
+        <li>{{ t.shortcut_step1 }}</li>
+        <li>{{ t.shortcut_step2 }}</li>
+        <li>{{ t.shortcut_step3 }}</li>
+        <li>{{ t.shortcut_step4 }}</li>
+    </ol>
+</div>
+{% else %}
+<div class="status-view">
+    <div class="status-view__badge status-view__badge--warn">{{ icon('alert') }}</div>
+    <h2 class="warn">{{ t.shortcut_none }}</h2>
+    <p>{{ t.sync_address_dead }}</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var btn = document.getElementById('copy-address');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+        var field = document.getElementById('sync-address');
+        field.focus();
+        field.select();
+        field.setSelectionRange(0, field.value.length);
+        var done = function () { V.toast(V.t('shortcut_copied'), 'success'); };
+        /* navigator.clipboard needs a secure context. Over the tunnel this is
+           HTTPS and it works; on a plain-HTTP LAN address it refuses, and the
+           selection above is then the way the text gets off the screen. */
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(field.value).then(done, function () {});
+            return;
+        }
+        try { if (document.execCommand('copy')) done(); } catch (e) { /* select by hand */ }
+    });
+})();
+</script>
+{% endblock %}
