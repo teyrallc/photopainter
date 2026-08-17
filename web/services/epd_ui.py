@@ -24,10 +24,13 @@ given. Slicing at 20 characters cut Chinese titles mid-word and left English
 ones with half the space empty.
 """
 
+import logging
 import os
 from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont
+
+logger = logging.getLogger("vignette.epd_ui")
 
 # ── Palette ──────────────────────────────────────────────────────────────
 # The exact six the panel can render. Every colour used anywhere on a page
@@ -73,10 +76,18 @@ def font(size):
             loaded = ImageFont.truetype(path, size, index=0)
         except Exception:  # noqa: BLE001 - a broken font file is just the next one
             continue
+        if _resolved_path != path:
+            # Said once, at the first draw: "why is my calendar entry a row of
+            # boxes" is answered by this line in the journal.
+            _resolved_path = path
+            logger.info("Panel font: %s (CJK: %s)", path,
+                        "yes" if any(n in path for n in _CJK_FONTS) else
+                        "no — install fonts-wqy-zenhei")
         _font_cache[size] = loaded
-        _resolved_path = path
         return loaded
 
+    logger.warning("No usable font found in %s; the panel will fall back to a "
+                   "bitmap face and its pages will be hard to read.", FONT_PATHS)
     fallback = ImageFont.load_default()
     _font_cache[size] = fallback
     return fallback
@@ -425,50 +436,36 @@ def weather_icon(draw, box, code, size=None):
         _cloud(draw, cx, cy, size * 0.82)
 
 
-# ── Locale ───────────────────────────────────────────────────────────────
+# ── Labels ───────────────────────────────────────────────────────────────
+#
+# The panel's own chrome is English, always. Content is a different matter: an
+# event titled in Chinese, or a city name, is drawn as it comes, which is why
+# the font stack above still leads with a CJK face. `has_cjk()` reports whether
+# that face is actually installed, so "my calendar entries are empty boxes" has
+# an answer in the log rather than being a mystery.
 
-_WEEKDAY_EN_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-_WEEKDAY_EN_LONG = ("Monday", "Tuesday", "Wednesday", "Thursday",
-                    "Friday", "Saturday", "Sunday")
-# "週一" rather than a bare "一": alone in a forecast column, the single
-# stroke for Monday is indistinguishable from a dash.
-_WEEKDAY_ZH_SHORT = ("週一", "週二", "週三", "週四", "週五", "週六", "週日")
-# The grid header has six neighbours for context, so it can stay bare.
-_WEEKDAY_ZH_INITIAL = ("一", "二", "三", "四", "五", "六", "日")
-_WEEKDAY_EN_INITIAL = ("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
-_WEEKDAY_ZH_LONG = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
-
-_MONTH_EN = ("January", "February", "March", "April", "May", "June", "July",
-             "August", "September", "October", "November", "December")
-
-
-def use_chinese(lang):
-    """Chinese only when it is both asked for and renderable."""
-    return str(lang or "").startswith("zh") and has_cjk()
+_WEEKDAY_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_WEEKDAY_LONG = ("Monday", "Tuesday", "Wednesday", "Thursday",
+                 "Friday", "Saturday", "Sunday")
+_WEEKDAY_INITIAL = ("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
+_MONTH = ("January", "February", "March", "April", "May", "June", "July",
+          "August", "September", "October", "November", "December")
 
 
-def weekday_label(index, lang="en", short=True):
-    if use_chinese(lang):
-        return (_WEEKDAY_ZH_SHORT if short else _WEEKDAY_ZH_LONG)[index]
-    return (_WEEKDAY_EN_SHORT if short else _WEEKDAY_EN_LONG)[index]
+def weekday_label(index, short=True):
+    return (_WEEKDAY_SHORT if short else _WEEKDAY_LONG)[index]
 
 
-def weekday_initial(index, lang="en"):
-    """The one- or two-character form used in a calendar grid header."""
-    if use_chinese(lang):
-        return _WEEKDAY_ZH_INITIAL[index]
-    return _WEEKDAY_EN_INITIAL[index]
+def weekday_initial(index):
+    """The two-letter form used in a calendar grid header."""
+    return _WEEKDAY_INITIAL[index]
 
 
-def month_label(when, lang="en"):
-    if use_chinese(lang):
-        return f"{when.year} 年 {when.month} 月"
-    return f"{_MONTH_EN[when.month - 1]} {when.year}"
+def month_label(when):
+    return f"{_MONTH[when.month - 1]} {when.year}"
 
 
-def date_label(when, lang="en"):
-    if use_chinese(lang):
-        return f"{when.month} 月 {when.day} 日"
+def date_label(when):
     # Built by hand rather than with %-d, which is not portable.
     return f"{when.strftime('%b')} {when.day}"
 
@@ -477,15 +474,14 @@ def time_label(when):
     return when.strftime("%H:%M")
 
 
-def relative_day(when, lang="en", now=None):
+def relative_day(when, now=None):
     """"Today" / "Tomorrow" / a weekday, for an agenda line."""
     now = now or datetime.now()
     delta = (when.date() - now.date()).days
-    chinese = use_chinese(lang)
     if delta == 0:
-        return "今天" if chinese else "Today"
+        return "Today"
     if delta == 1:
-        return "明天" if chinese else "Tomorrow"
+        return "Tomorrow"
     if 0 < delta < 7:
-        return weekday_label(when.weekday(), lang, short=not chinese)
+        return _WEEKDAY_SHORT[when.weekday()]
     return f"{when.month}/{when.day}"

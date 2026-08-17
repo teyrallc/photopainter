@@ -350,6 +350,32 @@ python3 tests/test_smoke.py && python3 tests/test_weather.py \
 `test_smoke.py` asks every route for a response and checks the security
 boundaries (secret redaction, the config write allowlist, same-origin
 enforcement, path containment, cookie flags, the network watchdog).
+### Panel fonts
+
+The panel draws its own text, so fonts are a dependency rather than decoration.
+`scripts/install.sh` installs both: `fonts-dejavu-core` for Latin and
+`fonts-wqy-zenhei` for Chinese — about 15 MB together. Without them Pillow
+falls back to a bitmap face and every page comes out hard to read.
+
+The panel's own labels are English. The CJK font is for **content**: a calendar
+entry, a city name or a weather description in Chinese is drawn as it comes,
+and without that font each character is an empty box. On a device installed
+before this was added:
+
+```bash
+sudo apt-get install -y fonts-dejavu-core fonts-wqy-zenhei
+sudo systemctl restart vignette
+```
+
+The service logs which face it picked on the first draw, so you can check:
+
+```bash
+journalctl -u vignette | grep "Panel font"
+# Panel font: /usr/share/fonts/truetype/wqy/wqy-zenhei.ttc (CJK: yes)
+```
+
+## Tests
+
 `test_weather.py` and `test_icloud.py` cover the two services that talk to the
 internet, with every outbound request answered from canned data — nothing in
 `tests/` reaches the network. `test_extras.py` covers the `src/` tools: panel

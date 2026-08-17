@@ -1666,8 +1666,7 @@ def api_preview_current():
         img = renderer.render_home_page(weather, events, photo_path, config)
     elif page == "widget":
         mode = config.get("widget_mode", "weather")
-        img = renderer.render_widget_page(mode, weather, events,
-                                          config.get("lang", "en"))
+        img = renderer.render_widget_page(mode, weather, events)
     else:
         rotation = config.get("photo_rotation", 0)
         fit_mode = config.get("photo_fit_mode", "fit")

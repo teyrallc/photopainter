@@ -25,7 +25,15 @@ sudo apt-get -y install \
     git \
     tmux \
     dnsmasq \
-    iptables
+    iptables \
+    fonts-dejavu-core \
+    fonts-wqy-zenhei
+
+# The panel draws its own text, so the fonts are not optional decoration —
+# without them Pillow falls back to a bitmap face and the pages come out
+# unreadable. DejaVu covers Latin; WenQuanYi Zen Hei is what renders a Chinese
+# calendar entry or city name as characters instead of empty boxes. Together
+# they are about 15 MB.
 
 # dnsmasq is needed for NetworkManager shared mode DNS.
 # Disable the system service so it doesn't conflict with NM's managed instance.
