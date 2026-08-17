@@ -166,6 +166,80 @@ def logout():
     return redirect(url_for('auth.login'))
 
 
+# ── Changing the account itself ───────────────────────────────────────────
+# Until now the sign-in address was whatever was typed during pairing and could
+# never be changed again — the only way to correct a typo was a factory reset.
+# The address is also the reset channel, so changing it is a credential change,
+# and it goes through the same proof the reset does: the code is shown on the
+# panel, which means whoever asks has to be standing in front of the frame.
+
+@bp.route('/account', methods=['POST'])
+def account_change():
+    if not session.get('logged_in'):
+        # `redirect` is what tells the console this is the session wall rather
+        # than a rejected credential, so only the former sends it to sign in.
+        return jsonify({"error": "Unauthorized.", "redirect": "/auth/login"}), 401
+
+    ip = _client_ip()
+    delay = _throttle_delay(ip)
+    if delay:
+        time.sleep(delay)
+
+    data = request.json or request.form
+    email = data.get('email', '').strip()
+    current = data.get('password', '')
+    new_password = data.get('new_password', '')
+
+    if not check_password_hash(auth_mgr.config.get("admin_password_hash"), current):
+        _record_failure(ip)
+        return jsonify({"error": "Current password is incorrect."}), 401
+    _clear_failures(ip)
+
+    if not email or '@' not in email:
+        return jsonify({"error": "Enter a valid email address."}), 400
+    if new_password and len(new_password) < 6:
+        return jsonify({"error": "Password too short (min 6 chars)."}), 400
+    if email == auth_mgr.config.get("admin_email") and not new_password:
+        return jsonify({"error": "Nothing to change."}), 400
+
+    session['pending_account'] = {
+        'email': email,
+        'password_hash': generate_password_hash(new_password) if new_password else None,
+    }
+    generate_otp(email)
+    return jsonify({"success": True, "needs_otp": True})
+
+
+@bp.route('/account-verify', methods=['POST'])
+def account_verify():
+    if not session.get('logged_in'):
+        return jsonify({"error": "Unauthorized.", "redirect": "/auth/login"}), 401
+
+    pending = session.get('pending_account')
+    if not pending:
+        return jsonify({"error": "No change in progress."}), 400
+
+    code = (request.json or request.form).get('code', '').strip()
+    if not verify_otp(pending['email'], code):
+        return jsonify({"error": "Invalid or expired OTP."}), 401
+
+    auth_mgr.config.set("admin_email", pending['email'])
+    if pending['password_hash']:
+        auth_mgr.config.set("admin_password_hash", pending['password_hash'])
+
+    session.pop('pending_account', None)
+    session['email'] = pending['email']
+
+    # The panel is still showing the code. Put the dashboard back.
+    try:
+        import threading
+        threading.Thread(target=display_mgr.display_current_page, daemon=True).start()
+    except Exception as e:
+        logger.error(f"Failed to restore display after account change: {e}")
+
+    return jsonify({"success": True, "email": pending['email']})
+
+
 @bp.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
     if request.method == 'GET':

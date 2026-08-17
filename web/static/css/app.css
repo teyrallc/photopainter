@@ -99,6 +99,12 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* The hidden attribute is only `display:none` in the browser's own stylesheet,
+   so any component rule that sets a display beats it. `.setting { display:grid }`
+   did exactly that, and the Cloudflare-only address field stayed on screen
+   under an ngrok tunnel. Hidden means hidden. */
+[hidden] { display: none !important; }
+
 html {
     -webkit-text-size-adjust: 100%;
     scroll-behavior: smooth;
@@ -1025,6 +1031,106 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
 }
 .tabs__btn[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 .tabpanel[hidden] { display: none; }
+
+/* Scrolling variant: five labelled sections do not fit a phone at equal
+   widths, and squeezing them there is what turns a tab row into five
+   truncated words. These keep their natural width and scroll instead. */
+.tabs--scroll {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    /* The sticky offset clears the header; on a phone the row is the only way
+       back to the other sections, so it stays reachable while scrolling. */
+    position: sticky;
+    top: calc(var(--header-h) + 8px);
+    z-index: 20;
+    background: color-mix(in srgb, var(--surface-3) 94%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+.tabs--scroll::-webkit-scrollbar { display: none; }
+.tabs--scroll .tabs__btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+}
+.tabs--scroll .tabs__btn .icon { width: 16px; height: 16px; }
+@media (min-width: 900px) {
+    .tabs--scroll .tabs__btn { flex: 1 1 0; justify-content: center; }
+}
+
+/* ── Setting rows ───────────────────────────────────────────────────────────
+   A settings page is a list of decisions, not a stack of forms. Each row says
+   what the decision is on the left and carries its single control on the
+   right, so the eye runs down one column of labels instead of hunting for the
+   next input in a wall of boxes. Below 760px the control drops underneath,
+   which is the same row read on a narrower page. */
+
+/* The rule goes on top of each row, not under it. A trailing bottom border
+   would need a :last-child that the empty test-result and console holders
+   quietly steal, which is how a stray line appears under the final row. */
+.setting {
+    display: grid;
+    gap: 8px 28px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+}
+.section-head + .setting { border-top: 0; padding-top: 0; }
+@media (min-width: 760px) {
+    .setting {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+        align-items: center;
+    }
+    /* A control taller than one line reads better hung from the top of the
+       row than floated against the middle of a two-line description. */
+    .setting--top { align-items: start; }
+}
+
+.setting__text { min-width: 0; }
+.setting__title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .93rem;
+    font-weight: 600;
+}
+.setting__desc {
+    margin: 3px 0 0;
+    font-size: .8rem;
+    line-height: 1.5;
+    color: var(--text-mute);
+}
+.setting__desc a { color: var(--accent-text); }
+.setting__control { min-width: 0; }
+/* Full width on the narrow side, so every control in the column lines up. */
+.setting__control > .btn { width: 100%; }
+.setting__control .row > .btn { width: auto; }
+
+/* A row whose content is a block — a steps list, a status box, a console —
+   rather than a labelled control. */
+.setting--wide { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 760px) { .setting--wide { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── Section head inside a panel ────────────────────────────────────────── */
+
+.section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.section-head .icon { color: var(--text-mute); }
+.section-head h2 { font-size: 1.02rem; }
+.section-head .spacer { flex: 1; }
+.section-head__sub {
+    margin: 2px 0 0;
+    font-size: .8rem;
+    color: var(--text-mute);
+    font-weight: 400;
+}
 
 /* ── Accordion ──────────────────────────────────────────────────────────── */
 

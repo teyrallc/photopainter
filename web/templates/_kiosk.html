@@ -8,11 +8,14 @@
 #}
 {% from "_icons.html" import icon %}
 <!DOCTYPE html>
-<html lang="{{ current_lang | default('en') }}" data-theme="dark">
+{#- These pages are always light: they are the first thing anyone sees, and
+    there is no signed-in preference to read yet. -#}
+<html lang="{{ current_lang | default('en') }}" data-theme="light" style="color-scheme: light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#0b0d12">
+    <meta name="theme-color" content="#f4f2ef">
+    <meta name="color-scheme" content="light">
     <title>{% block title %}Vignette{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', filename='img/vignette-logo.svg') }}">
     <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">

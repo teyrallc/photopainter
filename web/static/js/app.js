@@ -17,8 +17,11 @@
      *
      * Rejects with an Error carrying the server's `error` field when there is
      * one, so callers can surface a real message instead of "[object Object]".
-     * A 401 means the session expired — bounce to the login page rather than
-     * showing a toast the user cannot act on.
+     *
+     * A 401 only bounces to the login page when the server names where to go.
+     * The session wall does; a route rejecting a credential the user just
+     * typed does not — and treating those alike signed people out of the page
+     * for mistyping their current password, losing the form with it.
      */
     V.api = function (path, options) {
         options = options || {};
@@ -39,8 +42,8 @@
                     catch (e) { data = { error: text.slice(0, 300) }; }
                 }
 
-                if (res.status === 401) {
-                    window.location.href = data.redirect || '/auth/login';
+                if (res.status === 401 && data.redirect) {
+                    window.location.href = data.redirect;
                     throw new Error(data.error || 'Unauthorized');
                 }
                 if (!res.ok || data.error) {

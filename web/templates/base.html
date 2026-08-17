@@ -16,7 +16,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#f4f2ef">
-    <meta name="color-scheme" content="light dark">
+    {# "light dark" told the browser to paint its own furniture — form controls,
+       scrollbars, the overscroll gutter — from the phone's night mode, under a
+       page that is light by default. Light leads, and the page's own switch
+       reorders it. #}
+    <meta name="color-scheme" content="light">
     <title>{% block title %}Vignette{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', filename='img/vignette-logo.svg') }}">
     {# "Add to Home Screen" on a phone. This is the whole point: sending a
@@ -31,17 +35,18 @@
     <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
     {% block head %}{% endblock %}
     <script>
-    // Resolve the theme before first paint so the page never flashes light.
+    // Resolve the theme before first paint so a dark page never flashes light.
+    // Light is the default: it is only dark if somebody chose dark here, which
+    // is why the phone's own night mode is not consulted.
     (function () {
         var pref = null;
         try { pref = localStorage.getItem('vignette-theme'); } catch (e) {}
-        var dark = pref
-            ? pref === 'dark'
-            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        var dark = pref === 'dark';
         document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-        document.documentElement.setAttribute('data-theme-pref', pref || 'auto');
+        document.documentElement.setAttribute('data-theme-pref', pref || 'light');
         var meta = document.querySelector('meta[name="theme-color"]');
         if (meta) meta.setAttribute('content', dark ? '#0e1014' : '#f4f2ef');
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     })();
     </script>
 </head>

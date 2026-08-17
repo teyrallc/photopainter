@@ -1259,6 +1259,91 @@ def test_config_survives_a_reload():
         assert os.listdir(tmp) == ["config.json"]
 
 
+# ── Changing the sign-in address ──────────────────────────────────────────
+
+def _pending_otp(email):
+    """The code the panel was told to show, read out of the OTP cache."""
+    from services import auth_mgr
+    return auth_mgr._otp_cache[email]["code"]
+
+
+def test_account_change_needs_the_current_password():
+    client = _paired_client()
+    denied = client.post("/auth/account", headers=SAME_ORIGIN, json={
+        "email": "new@example.com", "password": "not-the-password"})
+    assert denied.status_code == 401
+    # And it must not read as an expired session: the console only bounces to
+    # the login page when the server names a redirect, and a wrong password
+    # here has to leave the user on the form they were filling in.
+    assert "redirect" not in denied.get_json()
+    assert config.get("admin_email") == "test@example.com"
+
+
+def test_account_change_needs_the_code_from_the_panel():
+    client = _paired_client()
+    started = client.post("/auth/account", headers=SAME_ORIGIN, json={
+        "email": "new@example.com", "password": "test-password"})
+    assert started.status_code == 200
+    assert started.get_json()["needs_otp"] is True
+
+    # Nothing is written until the code comes back.
+    assert config.get("admin_email") == "test@example.com"
+
+    wrong = client.post("/auth/account-verify", headers=SAME_ORIGIN,
+                        json={"code": "000000"})
+    assert wrong.status_code == 401
+    assert config.get("admin_email") == "test@example.com"
+
+    ok = client.post("/auth/account-verify", headers=SAME_ORIGIN,
+                     json={"code": _pending_otp("new@example.com")})
+    assert ok.status_code == 200
+    assert config.get("admin_email") == "new@example.com"
+
+    # The new address signs in and the old one does not.
+    fresh = app.test_client()
+    assert fresh.post("/auth/login", headers=SAME_ORIGIN, json={
+        "email": "new@example.com", "password": "test-password"}).status_code == 200
+    assert app.test_client().post("/auth/login", headers=SAME_ORIGIN, json={
+        "email": "test@example.com", "password": "test-password"}).status_code == 401
+
+
+def test_account_change_is_closed_to_a_signed_out_browser():
+    _paired_client()                      # sets the credential, discards the session
+    anonymous = app.test_client()
+    denied = anonymous.post("/auth/account", headers=SAME_ORIGIN, json={
+        "email": "attacker@example.com", "password": "test-password"})
+    assert denied.status_code == 401
+    # This one *is* the session wall, so it says where to go.
+    assert denied.get_json()["redirect"] == "/auth/login"
+    assert config.get("admin_email") == "test@example.com"
+
+
+def test_account_password_change_takes_effect():
+    client = _paired_client()
+    client.post("/auth/account", headers=SAME_ORIGIN, json={
+        "email": "test@example.com", "password": "test-password",
+        "new_password": "a-longer-password"})
+    client.post("/auth/account-verify", headers=SAME_ORIGIN,
+                json={"code": _pending_otp("test@example.com")})
+
+    fresh = app.test_client()
+    assert fresh.post("/auth/login", headers=SAME_ORIGIN, json={
+        "email": "test@example.com", "password": "a-longer-password"}).status_code == 200
+    assert app.test_client().post("/auth/login", headers=SAME_ORIGIN, json={
+        "email": "test@example.com", "password": "test-password"}).status_code == 401
+
+
+def test_console_opens_light_by_default():
+    """The pre-paint script must not consult the device's night mode."""
+    html = _paired_client().get("/settings").get_data(as_text=True)
+    assert 'data-theme="light"' in html
+    assert "prefers-color-scheme" not in html
+
+    script = os.path.join(REPO, "web", "static", "js", "ui.js")
+    with open(script, encoding="utf-8") as handle:
+        assert "prefers-color-scheme" not in handle.read()
+
+
 # ── Standalone runner, so this works without pytest installed ─────────────
 
 if __name__ == "__main__":

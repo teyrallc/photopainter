@@ -188,28 +188,34 @@
         </div>
     </section>
 
-    <!-- ══ Device health ══════════════════════════════════════════════════ -->
-    <section class="card">
+    <!-- ══ The device itself ══════════════════════════════════════════════
+         Health and panel maintenance were two cards, and because one is a
+         list of readings and the other is three small buttons, they never
+         came out the same height — so the page always ended on a ragged
+         edge with a short card next to a void. They are one card now: what
+         the device is doing on the left, what can be done to it on the
+         right. -->
+    <section class="card span-2">
         <div class="card__head">{{ icon('cpu') }}<h2>{{ t.system_info }}</h2></div>
-        <div class="card__body" id="system-info">
-            <p class="muted small mb-0">{{ t.loading }}</p>
-        </div>
-    </section>
+        <div class="card__body">
+            <div class="device-split">
+                <div id="system-info">
+                    <p class="muted small mb-0">{{ t.loading }}</p>
+                </div>
 
-    <!-- ══ Panel maintenance ══════════════════════════════════════════════ -->
-    <section class="card">
-        <div class="card__head">{{ icon('sliders') }}<h2>{{ t.panel_actions }}</h2></div>
-        <div class="card__body stack">
-            <p class="small muted mb-0">{{ t.panel_actions_hint }}</p>
-            <div class="row" style="gap:8px;">
-                <button type="button" class="btn btn--sm" id="btn-clear">{{ icon('eraser') }} {{ t.clear }}</button>
-                <button type="button" class="btn btn--sm" id="btn-sleep">{{ icon('moon') }} {{ t.sleep }}</button>
-                <button type="button" class="btn btn--sm" id="btn-test">{{ icon('grid') }} {{ t.test_pattern }}</button>
+                <div class="stack">
+                    <p class="label mb-0">{{ t.panel_actions }}</p>
+                    <p class="small muted mb-0">{{ t.panel_actions_hint }}</p>
+                    <div class="row" style="gap:8px;">
+                        <button type="button" class="btn btn--sm" id="btn-clear">{{ icon('eraser') }} {{ t.clear }}</button>
+                        <button type="button" class="btn btn--sm" id="btn-sleep">{{ icon('moon') }} {{ t.sleep }}</button>
+                        <button type="button" class="btn btn--sm" id="btn-test">{{ icon('grid') }} {{ t.test_pattern }}</button>
+                    </div>
+                    <a class="btn btn--ghost btn--sm btn--block" href="/settings">
+                        {{ icon('settings') }} {{ t.system_settings }}
+                    </a>
+                </div>
             </div>
-            <hr>
-            <a class="btn btn--ghost btn--sm btn--block" href="/settings">
-                {{ icon('settings') }} {{ t.system_settings }}
-            </a>
         </div>
     </section>
 </div>
@@ -243,10 +249,31 @@
 <style>
 .hero { display: grid; gap: 20px; grid-template-columns: 1fr; align-items: start; }
 @media (min-width: 900px) {
-    .hero { grid-template-columns: minmax(0, 1.25fr) minmax(280px, .9fr); gap: 26px; }
+    /* stretch, not start: it is what lets margin-top:auto push the action and
+       the readings down so the column ends level with the panel beside it,
+       instead of stopping halfway and leaving a hole under itself. */
+    .hero { grid-template-columns: minmax(0, 1.25fr) minmax(280px, .9fr); gap: 26px;
+            align-items: stretch; }
 }
 .hero__controls { display: flex; flex-direction: column; gap: 18px; }
-.hero__push { margin-top: auto; }
+/* The readings drop to the foot of the column so they finish level with the
+   panel beside them. The button stays with the page picker it belongs to —
+   pushing that down too only moved the hole into the middle of the column. */
+.hero__controls > .datalist { margin-top: auto; }
+
+/* Readings on one side, actions on the other, with a rule between them so the
+   two halves read as one card rather than two that happen to touch. */
+.device-split { display: grid; gap: 18px; grid-template-columns: 1fr; }
+@media (min-width: 720px) {
+    .device-split {
+        grid-template-columns: minmax(0, 1.35fr) minmax(220px, 1fr);
+        gap: 26px;
+    }
+    .device-split > :last-child {
+        padding-left: 26px;
+        border-left: 1px solid var(--border);
+    }
+}
 </style>
 {% endblock %}
 

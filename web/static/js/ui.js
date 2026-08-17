@@ -261,14 +261,15 @@
 
     var THEME_KEY = 'vignette-theme';
 
+    /* Light is the default, not the operating system's mode. This console is
+       a paper-coloured interface for a paper display, and a phone left on
+       automatic night mode was opening it dark without anyone choosing that.
+       Dark is still one click away and is remembered once chosen. */
     V.applyTheme = function (theme) {
-        var resolved = theme;
-        if (theme === 'auto' || !theme) {
-            resolved = window.matchMedia &&
-                window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
+        var resolved = (theme === 'dark') ? 'dark' : 'light';
         document.documentElement.setAttribute('data-theme', resolved);
-        document.documentElement.setAttribute('data-theme-pref', theme || 'auto');
+        document.documentElement.setAttribute('data-theme-pref', theme || 'light');
+        document.documentElement.style.colorScheme = resolved;
         var meta = $('meta[name="theme-color"]');
         if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0e1014' : '#f4f2ef');
     };
@@ -285,16 +286,33 @@
     function initTabs(root) {
         $$('[data-tabs]', root).forEach(function (group) {
             var buttons = $$('[data-tab]', group);
-            buttons.forEach(function (btn) {
-                btn.addEventListener('click', function () {
-                    buttons.forEach(function (b) {
-                        var on = b === btn;
-                        b.setAttribute('aria-selected', on ? 'true' : 'false');
-                        var panel = document.getElementById(b.getAttribute('data-tab'));
-                        if (panel) panel.hidden = !on;
-                    });
+
+            function select(btn, remember) {
+                buttons.forEach(function (b) {
+                    var on = b === btn;
+                    b.setAttribute('aria-selected', on ? 'true' : 'false');
+                    var panel = document.getElementById(b.getAttribute('data-tab'));
+                    if (panel) panel.hidden = !on;
                 });
+                /* Settings reloads itself after connecting an album, and the
+                   old behaviour dropped the reader back on the first tab every
+                   time. Naming the section in the URL also makes it linkable. */
+                if (remember && group.hasAttribute('data-tabs-hash')) {
+                    history.replaceState(null, '', '#' + btn.getAttribute('data-tab'));
+                }
+            }
+
+            buttons.forEach(function (btn) {
+                btn.addEventListener('click', function () { select(btn, true); });
             });
+
+            if (group.hasAttribute('data-tabs-hash')) {
+                var wanted = decodeURIComponent(location.hash.slice(1));
+                var match = buttons.filter(function (b) {
+                    return b.getAttribute('data-tab') === wanted;
+                })[0];
+                if (match) select(match, false);
+            }
         });
     }
 
@@ -347,18 +365,6 @@
 
         var toggle = $('#theme-toggle');
         if (toggle) toggle.addEventListener('click', V.toggleTheme);
-
-        // Follow the OS while the user has not pinned a preference.
-        if (window.matchMedia) {
-            var mq = window.matchMedia('(prefers-color-scheme: dark)');
-            var onChange = function () {
-                var pref = null;
-                try { pref = localStorage.getItem(THEME_KEY); } catch (e) { /* ignore */ }
-                if (!pref) V.applyTheme('auto');
-            };
-            if (mq.addEventListener) mq.addEventListener('change', onChange);
-            else if (mq.addListener) mq.addListener(onChange);
-        }
     });
 
 })(window, document);

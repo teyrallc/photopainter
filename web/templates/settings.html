@@ -2,6 +2,13 @@
 {% from "_icons.html" import icon %}
 {% block title %}Vignette — {{ t.settings }}{% endblock %}
 
+{#- Nine cards in a two-column masonry is what this page used to be: unrelated
+    decisions at unrelated heights, a ragged column of white down the middle,
+    and on a phone a single scroll long enough that nobody ever reached the
+    bottom of it. The same settings are now five named sections, one at a time,
+    and inside each one every decision is a row — what it is on the left, the
+    one control that changes it on the right. -#}
+
 {% block content %}
 <div class="page-head">
     <div class="page-head__text">
@@ -10,43 +17,176 @@
     </div>
 </div>
 
-<div class="grid grid-2">
+<div class="tabs tabs--scroll" role="tablist" data-tabs data-tabs-hash>
+    <button type="button" class="tabs__btn" role="tab" data-tab="tab-account"
+            aria-selected="false">{{ icon('shield') }}{{ t.set_account }}</button>
+    <button type="button" class="tabs__btn" role="tab" data-tab="tab-display"
+            aria-selected="true">{{ icon('display') }}{{ t.set_display }}</button>
+    <button type="button" class="tabs__btn" role="tab" data-tab="tab-photos"
+            aria-selected="false">{{ icon('image') }}{{ t.set_sources }}</button>
+    <button type="button" class="tabs__btn" role="tab" data-tab="tab-network"
+            aria-selected="false">{{ icon('globe') }}{{ t.set_network }}</button>
+    <button type="button" class="tabs__btn" role="tab" data-tab="tab-system"
+            aria-selected="false">{{ icon('sliders') }}{{ t.set_device }}</button>
+</div>
 
-    <!-- ══ Weather ════════════════════════════════════════════════════════ -->
+<!-- ══ Account ════════════════════════════════════════════════════════════ -->
+<div class="tabpanel stack" id="tab-account" role="tabpanel" hidden>
     <section class="card">
-        <div class="card__head">{{ icon('weather') }}<h2>{{ t.weather_settings }}</h2></div>
         <div class="card__body">
-            <div class="field">
-                <label class="label" for="s-weather-key">{{ t.api_key }}</label>
-                {# Secrets are never rendered back into the page. Leaving the
-                   field blank keeps the stored key; typing replaces it. #}
-                <input type="text" class="input" id="s-weather-key" value=""
-                       placeholder="{{ '••••••••  (leave blank to keep)' if config.weather_api_key_configured else '' }}"
-                       autocomplete="off" spellcheck="false">
-                <p class="hint"><a href="https://openweathermap.org/api" target="_blank" rel="noopener">openweathermap.org</a></p>
+            <div class="section-head">
+                {{ icon('shield', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.set_account }}</h2>
+                    <p class="section-head__sub">{{ t.account_sub }}</p>
+                </div>
             </div>
-            <div class="field">
-                <label class="label" for="s-weather-city">{{ t.city }}</label>
-                <input type="text" class="input" id="s-weather-city"
-                       value="{{ config.weather_city }}" placeholder="{{ t.city_placeholder }}">
-                <p class="hint">{{ t.city_hint }}</p>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ icon('mail') }}{{ t.account_email }}</div>
+                    <p class="setting__desc">{{ t.account_email_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <input type="text" class="input" id="s-account-email" readonly
+                           value="{{ config.admin_email }}">
+                </div>
             </div>
-            <div class="field">
-                <label class="label" for="s-weather-units">{{ t.units }}</label>
-                <select class="select" id="s-weather-units">
-                    <option value="metric"   {% if config.weather_units != 'imperial' %}selected{% endif %}>{{ t.celsius }}</option>
-                    <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
-                </select>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ icon('key') }}{{ t.account_password }}</div>
+                    <p class="setting__desc">{{ t.account_password_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <span class="mono dim">••••••••</span>
+                </div>
             </div>
-            <div class="field">
-                {# Stored all along, but until now there was no way to change
-                   it — so every panel read its conditions in English. #}
-                <label class="label" for="s-weather-lang">{{ t.weather_desc_lang }}</label>
-                <select class="select" id="s-weather-lang">
-                    <option value="en"    {% if config.weather_lang != 'zh_tw' %}selected{% endif %}>English</option>
-                    <option value="zh_tw" {% if config.weather_lang == 'zh_tw' %}selected{% endif %}>中文</option>
-                </select>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.account_change }}</div>
+                    <p class="setting__desc">{{ t.account_change_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <button type="button" class="btn btn--primary" data-modal-open="account-modal">
+                        {{ icon('key') }} {{ t.account_change }}
+                    </button>
+                </div>
             </div>
+        </div>
+    </section>
+</div>
+
+<!-- ══ Display ════════════════════════════════════════════════════════════ -->
+<div class="tabpanel stack" id="tab-display" role="tabpanel">
+
+    <section class="card">
+        <div class="card__body">
+            <div class="section-head">
+                {{ icon('camera', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.photo_settings }}</h2>
+                    <p class="section-head__sub">{{ t.photo_settings_sub }}</p>
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.default_rotation }}</div>
+                    <p class="setting__desc">{{ t.rotation_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <select class="select" id="s-rotation">
+                        <option value="0"   {% if config.photo_rotation == 0 %}selected{% endif %}>0° ({{ t.normal }})</option>
+                        <option value="90"  {% if config.photo_rotation == 90 %}selected{% endif %}>90° CW</option>
+                        <option value="180" {% if config.photo_rotation == 180 %}selected{% endif %}>180°</option>
+                        <option value="270" {% if config.photo_rotation == 270 %}selected{% endif %}>270° CW</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.fit_mode }}</div>
+                    <p class="setting__desc">{{ t.fit_mode_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <select class="select" id="s-fit-mode">
+                        <option value="fit"     {% if config.photo_fit_mode != 'stretch' %}selected{% endif %}>{{ t.fit_letterbox }}</option>
+                        <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>{{ t.stretch_fill }}</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="save-photo">{{ icon('save') }} {{ t.save }}</button>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card__body">
+            <div class="section-head">
+                {{ icon('weather', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.weather_settings }}</h2>
+                    <p class="section-head__sub">{{ t.weather_settings_sub }}</p>
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.api_key }}</div>
+                    <p class="setting__desc">
+                        <a href="https://openweathermap.org/api" target="_blank" rel="noopener">openweathermap.org</a>
+                    </p>
+                </div>
+                <div class="setting__control">
+                    {# Secrets are never rendered back into the page. Leaving the
+                       field blank keeps the stored key; typing replaces it. #}
+                    <input type="text" class="input" id="s-weather-key" value=""
+                           placeholder="{{ '••••••••  (leave blank to keep)' if config.weather_api_key_configured else '' }}"
+                           autocomplete="off" spellcheck="false">
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.city }}</div>
+                    <p class="setting__desc">{{ t.city_hint }}</p>
+                </div>
+                <div class="setting__control">
+                    <input type="text" class="input" id="s-weather-city"
+                           value="{{ config.weather_city }}" placeholder="{{ t.city_placeholder }}">
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.units }}</div>
+                </div>
+                <div class="setting__control">
+                    <select class="select" id="s-weather-units">
+                        <option value="metric"   {% if config.weather_units != 'imperial' %}selected{% endif %}>{{ t.celsius }}</option>
+                        <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    {# Stored all along, but until now there was no way to change
+                       it — so every panel read its conditions in English. #}
+                    <div class="setting__title">{{ t.weather_desc_lang }}</div>
+                </div>
+                <div class="setting__control">
+                    <select class="select" id="s-weather-lang">
+                        <option value="en"    {% if config.weather_lang != 'zh_tw' %}selected{% endif %}>English</option>
+                        <option value="zh_tw" {% if config.weather_lang == 'zh_tw' %}selected{% endif %}>中文</option>
+                    </select>
+                </div>
+            </div>
+
             {# Left empty (and marginless) until a test actually runs. #}
             <div id="weather-test-result"></div>
         </div>
@@ -56,16 +196,27 @@
         </div>
     </section>
 
-    <!-- ══ Calendar ═══════════════════════════════════════════════════════ -->
     <section class="card">
-        <div class="card__head">{{ icon('calendar') }}<h2>{{ t.calendar_settings }}</h2></div>
         <div class="card__body">
-            <div class="field">
-                <label class="label" for="s-cal-url">{{ t.ical_url }}</label>
-                <input type="url" class="input" id="s-cal-url" value="{{ config.calendar_ical_url }}"
-                       placeholder="{{ t.ical_placeholder }}" spellcheck="false">
-                <p class="hint">{{ t.ical_hint }}</p>
+            <div class="section-head">
+                {{ icon('calendar', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.calendar_settings }}</h2>
+                    <p class="section-head__sub">{{ t.calendar_settings_sub }}</p>
+                </div>
             </div>
+
+            <div class="setting setting--top">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.ical_url }}</div>
+                    <p class="setting__desc">{{ t.ical_hint }}</p>
+                </div>
+                <div class="setting__control">
+                    <input type="url" class="input" id="s-cal-url" value="{{ config.calendar_ical_url }}"
+                           placeholder="{{ t.ical_placeholder }}" spellcheck="false">
+                </div>
+            </div>
+
             <div id="cal-test-result"></div>
         </div>
         <div class="card__foot">
@@ -73,133 +224,85 @@
             <button type="button" class="btn" id="test-calendar">{{ icon('calendar') }} {{ t.test }}</button>
         </div>
     </section>
+</div>
 
-    <!-- ══ Photo defaults ═════════════════════════════════════════════════ -->
-    <section class="card">
-        <div class="card__head">{{ icon('camera') }}<h2>{{ t.photo_settings }}</h2></div>
-        <div class="card__body">
-            <div class="field">
-                <label class="label" for="s-rotation">{{ t.default_rotation }}</label>
-                <select class="select" id="s-rotation">
-                    <option value="0"   {% if config.photo_rotation == 0 %}selected{% endif %}>0° ({{ t.normal }})</option>
-                    <option value="90"  {% if config.photo_rotation == 90 %}selected{% endif %}>90° CW</option>
-                    <option value="180" {% if config.photo_rotation == 180 %}selected{% endif %}>180°</option>
-                    <option value="270" {% if config.photo_rotation == 270 %}selected{% endif %}>270° CW</option>
-                </select>
-            </div>
-            <div class="field mb-0">
-                <label class="label" for="s-fit-mode">{{ t.fit_mode }}</label>
-                <select class="select" id="s-fit-mode">
-                    <option value="fit"     {% if config.photo_fit_mode != 'stretch' %}selected{% endif %}>{{ t.fit_letterbox }}</option>
-                    <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>{{ t.stretch_fill }}</option>
-                </select>
-            </div>
-        </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="save-photo">{{ icon('save') }} {{ t.save }}</button>
-        </div>
-    </section>
+<!-- ══ Photo sources ══════════════════════════════════════════════════════ -->
+<div class="tabpanel stack" id="tab-photos" role="tabpanel" hidden>
 
-    <!-- ══ Google Drive ═══════════════════════════════════════════════════ -->
-    <section class="card">
-        <div class="card__head">
-            {{ icon('drive') }}<h2>Google Drive</h2>
-            <span class="spacer"></span>
-            {% if config.gdrive_connected %}
-            <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
-            {% endif %}
-        </div>
-        <div class="card__body">
-            <div class="field">
-                <label class="label" for="s-gdrive-id">Client ID</label>
-                <input type="text" class="input" id="s-gdrive-id" value="{{ config.gdrive_client_id }}"
-                       placeholder="xxxxxxxx.apps.googleusercontent.com" spellcheck="false" autocomplete="off">
-            </div>
-            <div class="field">
-                <label class="label" for="s-gdrive-secret">Client Secret</label>
-                <input type="password" class="input" id="s-gdrive-secret" value=""
-                       placeholder="{{ '••••••••  (leave blank to keep)' if config.gdrive_client_secret_configured else '' }}"
-                       autocomplete="off">
-            </div>
-
-            <div class="accordion">
-                <div class="accordion__item">
-                    <button type="button" class="accordion__trigger" data-accordion-trigger="gdrive-steps"
-                            aria-expanded="false">
-                        {{ icon('info') }} {{ t.gdrive_steps_title }} {{ icon('chevron-down') }}
-                    </button>
-                    <div class="accordion__panel" id="gdrive-steps" hidden>
-                        <ol style="padding-left:18px;margin:0;">
-                            <li>{{ t.gdrive_step1 }}</li>
-                            <li>{{ t.gdrive_step2 }}</li>
-                            <li>{{ t.gdrive_step3 }}</li>
-                            <li>{{ t.gdrive_step4 }}</li>
-                        </ol>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="save-gdrive">{{ icon('save') }} {{ t.save }}</button>
-            {% if config.gdrive_client_id and not config.gdrive_connected %}
-            <button type="button" class="btn btn--success" id="connect-gdrive">{{ icon('drive') }} {{ t.gdrive_connect }}</button>
-            {% endif %}
-        </div>
-    </section>
-
-    <!-- ══ iCloud Shared Album ════════════════════════════════════════════
-         No account to sign in to: an album with "Public Website" turned on is
+    <!-- No account to sign in to: an album with "Public Website" turned on is
          readable from its link alone, which is the only kind of credential
          worth typing on a device with no keyboard. -->
     <section class="card">
-        <div class="card__head">
-            {{ icon('cloud') }}<h2>{{ t.icloud }}</h2>
-            <span class="spacer"></span>
-            {% if config.icloud_connected %}
-            <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
-            {% endif %}
-        </div>
-        <div class="card__body stack">
-            <div class="field">
-                <label class="label" for="s-icloud-url">{{ t.icloud_link }}</label>
-                <input type="url" class="input" id="s-icloud-url"
-                       value="{{ config.icloud_album_url }}"
-                       placeholder="https://www.icloud.com/sharedalbum/#B0…"
-                       spellcheck="false" autocomplete="off">
-                <p class="hint">{{ t.icloud_link_hint }}</p>
+        <div class="card__body">
+            <div class="section-head">
+                {{ icon('cloud', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.icloud }}</h2>
+                    <p class="section-head__sub">{{ t.icloud_sub }}</p>
+                </div>
+                <span class="spacer"></span>
+                {% if config.icloud_connected %}
+                <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+                {% endif %}
             </div>
 
-            <label class="field field--inline" for="s-icloud-auto">
-                <input type="checkbox" id="s-icloud-auto"
-                       {% if config.icloud_auto_sync %}checked{% endif %}>
-                <span>{{ t.icloud_auto_sync }}</span>
-            </label>
-
-            <div class="field">
-                <label class="label" for="s-icloud-interval">{{ t.icloud_sync_interval }}</label>
-                <select class="select" id="s-icloud-interval">
-                    <option value="900"   {% if config.icloud_sync_interval == 900 %}selected{% endif %}>15 {{ t.minutes }}</option>
-                    <option value="3600"  {% if config.icloud_sync_interval == 3600 or not config.icloud_sync_interval %}selected{% endif %}>1 {{ t.hour }}</option>
-                    <option value="21600" {% if config.icloud_sync_interval == 21600 %}selected{% endif %}>6 {{ t.hour }}</option>
-                    <option value="86400" {% if config.icloud_sync_interval == 86400 %}selected{% endif %}>24 {{ t.hour }}</option>
-                </select>
+            <div class="setting setting--top">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.icloud_link }}</div>
+                    <p class="setting__desc">{{ t.icloud_link_hint }}</p>
+                </div>
+                <div class="setting__control">
+                    <input type="url" class="input" id="s-icloud-url"
+                           value="{{ config.icloud_album_url }}"
+                           placeholder="https://www.icloud.com/sharedalbum/#B0…"
+                           spellcheck="false" autocomplete="off">
+                </div>
             </div>
 
-            <div class="alert" id="icloud-state">{{ t.loading }}</div>
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.icloud_auto_sync }}</div>
+                    <p class="setting__desc">{{ t.icloud_auto_sync_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <label class="check" for="s-icloud-auto">
+                        <input type="checkbox" id="s-icloud-auto"
+                               {% if config.icloud_auto_sync %}checked{% endif %}>
+                        <span>{{ t.toggle_on }}</span>
+                    </label>
+                </div>
+            </div>
 
-            <div class="accordion">
-                <div class="accordion__item">
-                    <button type="button" class="accordion__trigger" data-accordion-trigger="icloud-steps"
-                            aria-expanded="false">
-                        {{ icon('info') }} {{ t.icloud_steps_title }} {{ icon('chevron-down') }}
-                    </button>
-                    <div class="accordion__panel" id="icloud-steps" hidden>
-                        <ol style="padding-left:18px;margin:0;">
-                            <li>{{ t.icloud_step1 }}</li>
-                            <li>{{ t.icloud_step2 }}</li>
-                            <li>{{ t.icloud_step3 }}</li>
-                            <li>{{ t.icloud_step4 }}</li>
-                        </ol>
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.icloud_sync_interval }}</div>
+                </div>
+                <div class="setting__control">
+                    <select class="select" id="s-icloud-interval">
+                        <option value="900"   {% if config.icloud_sync_interval == 900 %}selected{% endif %}>15 {{ t.minutes }}</option>
+                        <option value="3600"  {% if config.icloud_sync_interval == 3600 or not config.icloud_sync_interval %}selected{% endif %}>1 {{ t.hour }}</option>
+                        <option value="21600" {% if config.icloud_sync_interval == 21600 %}selected{% endif %}>6 {{ t.hour }}</option>
+                        <option value="86400" {% if config.icloud_sync_interval == 86400 %}selected{% endif %}>24 {{ t.hour }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="setting setting--wide">
+                <div class="alert" id="icloud-state">{{ t.loading }}</div>
+                <div class="accordion mt-1">
+                    <div class="accordion__item">
+                        <button type="button" class="accordion__trigger" data-accordion-trigger="icloud-steps"
+                                aria-expanded="false">
+                            {{ icon('info') }} {{ t.icloud_steps_title }} {{ icon('chevron-down') }}
+                        </button>
+                        <div class="accordion__panel" id="icloud-steps" hidden>
+                            <ol style="padding-left:18px;margin:0;">
+                                <li>{{ t.icloud_step1 }}</li>
+                                <li>{{ t.icloud_step2 }}</li>
+                                <li>{{ t.icloud_step3 }}</li>
+                                <li>{{ t.icloud_step4 }}</li>
+                            </ol>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -217,65 +320,81 @@
         </div>
     </section>
 
-    <!-- ══ iPhone Shortcut ════════════════════════════════════════════════
-         The other direction: instead of the frame reaching into an account,
+    <!-- The other direction: instead of the frame reaching into an account,
          the phone sends photos out to it. Nothing about anyone's iCloud has
          to be made public, and no Apple credential lands on this device. -->
     <section class="card">
-        <div class="card__head">
-            {{ icon('send') }}<h2>{{ t.shortcut }}</h2>
-            <span class="spacer"></span>
-            {% if config.upload_token_hash_configured %}
-            <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
-            {% endif %}
-        </div>
-        <div class="card__body stack">
-            <p class="small muted">{{ t.shortcut_hint }}</p>
+        <div class="card__body">
+            <div class="section-head">
+                {{ icon('send', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.shortcut }}</h2>
+                    <p class="section-head__sub">{{ t.shortcut_hint }}</p>
+                </div>
+                <span class="spacer"></span>
+                {% if config.upload_token_hash_configured %}
+                <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+                {% endif %}
+            </div>
 
-            <div class="field">
-                <label class="label" for="s-shortcut-url">{{ t.shortcut_url }}</label>
-                <div class="row" style="gap:8px;">
-                    <input type="text" class="input" id="s-shortcut-url" readonly
-                           value="" spellcheck="false">
-                    <button type="button" class="btn btn--sm" data-copy="s-shortcut-url">
-                        {{ icon('copy') }} {{ t.shortcut_copy }}
-                    </button>
+            <div class="setting setting--top">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.shortcut_url }}</div>
+                    <p class="setting__desc">{{ t.shortcut_url_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    {# The copy button sits inside the field: a sibling button
+                       pushed the input past the column and off the card. #}
+                    <div class="input-group">
+                        <input type="text" class="input" id="s-shortcut-url" readonly
+                               value="" spellcheck="false">
+                        <button type="button" class="input-group__btn" data-copy="s-shortcut-url"
+                                aria-label="{{ t.shortcut_copy }}" title="{{ t.shortcut_copy }}">
+                            {{ icon('copy') }}
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {# Only ever populated by the mint response — never rendered from
                storage, because storage only holds a hash. #}
-            <div class="field hidden" id="shortcut-token-field">
-                <label class="label" for="s-shortcut-token">{{ t.shortcut_token }}</label>
-                <div class="row" style="gap:8px;">
-                    <input type="text" class="input" id="s-shortcut-token" readonly
-                           value="" spellcheck="false">
-                    <button type="button" class="btn btn--sm" data-copy="s-shortcut-token">
-                        {{ icon('copy') }} {{ t.shortcut_copy }}
-                    </button>
+            <div class="setting setting--top hidden" id="shortcut-token-field">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.shortcut_token }}</div>
+                    <p class="setting__desc">{{ t.shortcut_once }}</p>
                 </div>
-                <div class="alert alert--warning mt-1">
-                    {{ icon('alert') }}<span>{{ t.shortcut_once }}</span>
+                <div class="setting__control">
+                    {# The copy button sits inside the field: a sibling button
+                       pushed the input past the column and off the card. #}
+                    <div class="input-group">
+                        <input type="text" class="input" id="s-shortcut-token" readonly
+                               value="" spellcheck="false">
+                        <button type="button" class="input-group__btn" data-copy="s-shortcut-token"
+                                aria-label="{{ t.shortcut_copy }}" title="{{ t.shortcut_copy }}">
+                            {{ icon('copy') }}
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <div class="alert" id="shortcut-state">{{ t.loading }}</div>
-
-            <div class="accordion">
-                <div class="accordion__item">
-                    <button type="button" class="accordion__trigger" data-accordion-trigger="shortcut-steps"
-                            aria-expanded="false">
-                        {{ icon('info') }} {{ t.shortcut_steps_title }} {{ icon('chevron-down') }}
-                    </button>
-                    <div class="accordion__panel" id="shortcut-steps" hidden>
-                        <ol style="padding-left:18px;margin:0;">
-                            <li>{{ t.shortcut_step1 }}</li>
-                            <li>{{ t.shortcut_step2 }}</li>
-                            <li>{{ t.shortcut_step3 }}</li>
-                            <li>{{ t.shortcut_step4 }}</li>
-                            <li>{{ t.shortcut_step5 }}</li>
-                            <li>{{ t.shortcut_step6 }}</li>
-                        </ol>
+            <div class="setting setting--wide">
+                <div class="alert" id="shortcut-state">{{ t.loading }}</div>
+                <div class="accordion mt-1">
+                    <div class="accordion__item">
+                        <button type="button" class="accordion__trigger" data-accordion-trigger="shortcut-steps"
+                                aria-expanded="false">
+                            {{ icon('info') }} {{ t.shortcut_steps_title }} {{ icon('chevron-down') }}
+                        </button>
+                        <div class="accordion__panel" id="shortcut-steps" hidden>
+                            <ol style="padding-left:18px;margin:0;">
+                                <li>{{ t.shortcut_step1 }}</li>
+                                <li>{{ t.shortcut_step2 }}</li>
+                                <li>{{ t.shortcut_step3 }}</li>
+                                <li>{{ t.shortcut_step4 }}</li>
+                                <li>{{ t.shortcut_step5 }}</li>
+                                <li>{{ t.shortcut_step6 }}</li>
+                            </ol>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -290,61 +409,167 @@
         </div>
     </section>
 
-    <!-- ══ Network ════════════════════════════════════════════════════════ -->
     <section class="card">
-        <div class="card__head">{{ icon('wifi') }}<h2>{{ t.wifi_config }}</h2></div>
         <div class="card__body">
-            <p class="small muted">{{ t.wifi_settings_hint }}</p>
-            <a class="btn btn--block" href="/wifi">{{ icon('wifi') }} {{ t.manage_wifi }}</a>
+            <div class="section-head">
+                {{ icon('drive', 'icon-lg') }}
+                <div>
+                    <h2>Google Drive</h2>
+                    <p class="section-head__sub">{{ t.gdrive_sub }}</p>
+                </div>
+                <span class="spacer"></span>
+                {% if config.gdrive_connected %}
+                <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+                {% endif %}
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">Client ID</div>
+                </div>
+                <div class="setting__control">
+                    <input type="text" class="input" id="s-gdrive-id" value="{{ config.gdrive_client_id }}"
+                           placeholder="xxxxxxxx.apps.googleusercontent.com" spellcheck="false" autocomplete="off">
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">Client Secret</div>
+                </div>
+                <div class="setting__control">
+                    <input type="password" class="input" id="s-gdrive-secret" value=""
+                           placeholder="{{ '••••••••  (leave blank to keep)' if config.gdrive_client_secret_configured else '' }}"
+                           autocomplete="off">
+                </div>
+            </div>
+
+            <div class="setting setting--wide">
+                <div class="accordion">
+                    <div class="accordion__item">
+                        <button type="button" class="accordion__trigger" data-accordion-trigger="gdrive-steps"
+                                aria-expanded="false">
+                            {{ icon('info') }} {{ t.gdrive_steps_title }} {{ icon('chevron-down') }}
+                        </button>
+                        <div class="accordion__panel" id="gdrive-steps" hidden>
+                            <ol style="padding-left:18px;margin:0;">
+                                <li>{{ t.gdrive_step1 }}</li>
+                                <li>{{ t.gdrive_step2 }}</li>
+                                <li>{{ t.gdrive_step3 }}</li>
+                                <li>{{ t.gdrive_step4 }}</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card__foot">
+            <button type="button" class="btn btn--primary" id="save-gdrive">{{ icon('save') }} {{ t.save }}</button>
+            {% if config.gdrive_client_id and not config.gdrive_connected %}
+            <button type="button" class="btn btn--success" id="connect-gdrive">{{ icon('drive') }} {{ t.gdrive_connect }}</button>
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+<!-- ══ Network ════════════════════════════════════════════════════════════ -->
+<div class="tabpanel stack" id="tab-network" role="tabpanel" hidden>
+
+    <section class="card">
+        <div class="card__body">
+            <div class="section-head">
+                {{ icon('wifi', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.wifi_config }}</h2>
+                    <p class="section-head__sub">{{ t.wifi_settings_hint }}</p>
+                </div>
+            </div>
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.manage_wifi }}</div>
+                    <p class="setting__desc">{{ t.wifi_manage_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <a class="btn" href="/wifi">{{ icon('wifi') }} {{ t.manage_wifi }}</a>
+                </div>
+            </div>
         </div>
     </section>
 
-    <!-- ══ Remote access ══════════════════════════════════════════════════
-         Without a tunnel the console only answers on the local network, which
+    <!-- Without a tunnel the console only answers on the local network, which
          is not how a photo frame given as a gift actually gets used. -->
     <section class="card">
-        <div class="card__head">{{ icon('globe') }}<h2>{{ t.remote_access }}</h2></div>
-        <div class="card__body stack">
-            <p class="small muted">{{ t.remote_access_hint }}</p>
+        <div class="card__body">
+            <div class="section-head">
+                {{ icon('globe', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.remote_access }}</h2>
+                    <p class="section-head__sub">{{ t.remote_access_hint }}</p>
+                </div>
+            </div>
 
-            <div class="alert" id="remote-state">{{ t.loading }}</div>
+            <div class="setting setting--wide">
+                <div class="alert" id="remote-state">{{ t.loading }}</div>
+            </div>
 
-            <label class="field field--inline" for="s-remote-enabled">
-                <input type="checkbox" id="s-remote-enabled"
-                       {% if config.remote_access_enabled %}checked{% endif %}>
-                <span>{{ t.remote_access_enable }}</span>
-            </label>
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.remote_access_enable }}</div>
+                    <p class="setting__desc">{{ t.remote_enable_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <label class="check" for="s-remote-enabled">
+                        <input type="checkbox" id="s-remote-enabled"
+                               {% if config.remote_access_enabled %}checked{% endif %}>
+                        <span>{{ t.toggle_on }}</span>
+                    </label>
+                </div>
+            </div>
 
-            <div class="field">
-                <label class="label" for="s-remote-provider">{{ t.remote_provider }}</label>
-                <select class="input" id="s-remote-provider">
-                    <option value="cloudflare" {% if config.remote_access_provider == 'cloudflare' %}selected{% endif %}>
-                        {{ t.remote_provider_cf }}</option>
-                    <option value="ngrok" {% if config.remote_access_provider == 'ngrok' %}selected{% endif %}>
-                        {{ t.remote_provider_ngrok }}</option>
-                    <option value="none" {% if config.remote_access_provider == 'none' %}selected{% endif %}>
-                        {{ t.remote_provider_none }}</option>
-                </select>
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.remote_provider }}</div>
+                </div>
+                <div class="setting__control">
+                    <select class="select" id="s-remote-provider">
+                        <option value="cloudflare" {% if config.remote_access_provider == 'cloudflare' %}selected{% endif %}>
+                            {{ t.remote_provider_cf }}</option>
+                        <option value="ngrok" {% if config.remote_access_provider == 'ngrok' %}selected{% endif %}>
+                            {{ t.remote_provider_ngrok }}</option>
+                        <option value="none" {% if config.remote_access_provider == 'none' %}selected{% endif %}>
+                            {{ t.remote_provider_none }}</option>
+                    </select>
+                </div>
             </div>
 
             {# Cloudflare: a fixed address the owner already owns. #}
-            <div class="field" id="field-remote-url">
-                <label class="label" for="s-remote-url">{{ t.remote_public_url }}</label>
-                <input type="url" class="input" id="s-remote-url"
-                       value="{{ config.remote_public_url }}"
-                       placeholder="https://yilin.example.com" spellcheck="false" autocomplete="off">
-                <p class="hint">{{ t.remote_public_url_hint }}</p>
+            <div class="setting setting--top" id="field-remote-url">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.remote_public_url }}</div>
+                    <p class="setting__desc">{{ t.remote_public_url_hint }}</p>
+                </div>
+                <div class="setting__control">
+                    <input type="url" class="input" id="s-remote-url"
+                           value="{{ config.remote_public_url }}"
+                           placeholder="https://yilin.example.com" spellcheck="false" autocomplete="off">
+                </div>
             </div>
 
             {# ngrok: a token, and an address that changes on every reconnect. #}
-            <div class="field" id="field-ngrok-token">
-                <label class="label" for="s-ngrok-token">{{ t.remote_token }}</label>
-                {# Never rendered back out; blank keeps whatever is stored. #}
-                <input type="password" class="input" id="s-ngrok-token" value=""
-                       placeholder="{{ '••••••••  (leave blank to keep)' if config.ngrok_authtoken_configured else '' }}"
-                       autocomplete="off" spellcheck="false">
-                <p class="hint"><a href="https://dashboard.ngrok.com/get-started/your-authtoken"
-                                   target="_blank" rel="noopener">dashboard.ngrok.com</a></p>
+            <div class="setting setting--top" id="field-ngrok-token">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.remote_token }}</div>
+                    <p class="setting__desc">
+                        <a href="https://dashboard.ngrok.com/get-started/your-authtoken"
+                           target="_blank" rel="noopener">dashboard.ngrok.com</a>
+                    </p>
+                </div>
+                <div class="setting__control">
+                    {# Never rendered back out; blank keeps whatever is stored. #}
+                    <input type="password" class="input" id="s-ngrok-token" value=""
+                           placeholder="{{ '••••••••  (leave blank to keep)' if config.ngrok_authtoken_configured else '' }}"
+                           autocomplete="off" spellcheck="false">
+                </div>
             </div>
         </div>
         <div class="card__foot">
@@ -352,38 +577,159 @@
             <button type="button" class="btn" id="remote-reconnect">{{ icon('refresh') }} {{ t.remote_reconnect }}</button>
         </div>
     </section>
+</div>
 
-    <!-- ══ System ═════════════════════════════════════════════════════════
-         Power actions moved off the dashboard: they belong with the other
-         device-level settings, not next to the daily display controls. -->
+<!-- ══ Device ═════════════════════════════════════════════════════════════ -->
+<div class="tabpanel stack" id="tab-system" role="tabpanel" hidden>
+
     <section class="card">
-        <div class="card__head">{{ icon('sliders') }}<h2>{{ t.system_settings }}</h2></div>
-        <div class="card__body stack">
-            <button type="button" class="btn btn--block" id="show-qr">{{ icon('qr') }} {{ t.show_qr }}</button>
-            <button type="button" class="btn btn--block" id="system-update">{{ icon('download') }} {{ t.update_software }}</button>
-            <button type="button" class="btn btn--block" id="system-reboot">{{ icon('refresh') }} {{ t.reboot }}</button>
-            <button type="button" class="btn btn--quiet-danger btn--block" id="system-shutdown">{{ icon('power') }} {{ t.shutdown }}</button>
+        <div class="card__body">
+            <div class="section-head">
+                {{ icon('sliders', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.system_settings }}</h2>
+                    <p class="section-head__sub">{{ t.system_settings_sub }}</p>
+                </div>
+            </div>
 
-            <div class="hidden" id="update-output">
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.show_qr }}</div>
+                    <p class="setting__desc">{{ t.show_qr_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <button type="button" class="btn" id="show-qr">{{ icon('qr') }} {{ t.show_qr_short }}</button>
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.update_software }}</div>
+                    <p class="setting__desc">{{ t.update_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <button type="button" class="btn" id="system-update">{{ icon('download') }} {{ t.update_software }}</button>
+                </div>
+            </div>
+
+            <div class="setting setting--wide hidden" id="update-output">
                 <pre class="console"></pre>
             </div>
 
-            <hr>
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.reboot }}</div>
+                    <p class="setting__desc">{{ t.reboot_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <button type="button" class="btn" id="system-reboot">{{ icon('refresh') }} {{ t.reboot }}</button>
+                </div>
+            </div>
 
-            <label class="field field--inline" for="reset-delete-photos">
-                <input type="checkbox" id="reset-delete-photos" checked>
-                <span>{{ t.reset_delete_photos }}</span>
-            </label>
-            <p class="hint">{{ t.reset_delete_photos_hint }}</p>
-
-            <button type="button" class="btn btn--quiet-danger btn--block" id="factory-reset">
-                {{ icon('rotate') }} {{ t.factory_reset }}
-            </button>
-            <div class="alert alert--warning">
-                {{ icon('alert') }}<span>{{ t.factory_reset_warn }}</span>
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.shutdown }}</div>
+                    <p class="setting__desc">{{ t.shutdown_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <button type="button" class="btn btn--quiet-danger" id="system-shutdown">{{ icon('power') }} {{ t.shutdown }}</button>
+                </div>
             </div>
         </div>
     </section>
+
+    <section class="card">
+        <div class="card__body">
+            <div class="section-head">
+                {{ icon('alert', 'icon-lg') }}
+                <div>
+                    <h2>{{ t.factory_reset }}</h2>
+                    <p class="section-head__sub">{{ t.factory_reset_warn }}</p>
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.reset_delete_photos }}</div>
+                    <p class="setting__desc">{{ t.reset_delete_photos_hint }}</p>
+                </div>
+                <div class="setting__control">
+                    <label class="check" for="reset-delete-photos">
+                        <input type="checkbox" id="reset-delete-photos" checked>
+                        <span>{{ t.toggle_on }}</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="setting">
+                <div class="setting__text">
+                    <div class="setting__title">{{ t.factory_reset }}</div>
+                    <p class="setting__desc">{{ t.factory_reset_desc }}</p>
+                </div>
+                <div class="setting__control">
+                    <button type="button" class="btn btn--quiet-danger" id="factory-reset">
+                        {{ icon('rotate') }} {{ t.factory_reset }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+{#- Changing the sign-in address is a credential change, so it is proved the
+    same way a password reset is: with a code shown on the panel itself. -#}
+<div class="modal" id="account-modal" hidden>
+    <div class="modal__backdrop"></div>
+    <div class="modal__panel modal__panel--sm" role="dialog" aria-modal="true"
+         aria-labelledby="account-modal-title">
+        <div class="modal__head">
+            <h3 id="account-modal-title">{{ t.account_change }}</h3>
+            <button type="button" class="btn btn--ghost btn--icon" data-modal-close
+                    aria-label="{{ t.cancel }}">{{ icon('x') }}</button>
+        </div>
+
+        <div class="modal__body stack" id="account-step-details">
+            <div class="field">
+                <label class="label" for="s-account-new-email">{{ t.account_email }}</label>
+                <input type="email" class="input" id="s-account-new-email"
+                       value="{{ config.admin_email }}" autocomplete="username" spellcheck="false">
+            </div>
+            <div class="field">
+                <label class="label" for="s-account-current">{{ t.account_current_password }}</label>
+                <input type="password" class="input" id="s-account-current"
+                       autocomplete="current-password">
+                <p class="hint">{{ t.account_current_password_hint }}</p>
+            </div>
+            <div class="field mb-0">
+                <label class="label" for="s-account-new-password">{{ t.account_new_password }}</label>
+                <input type="password" class="input" id="s-account-new-password"
+                       autocomplete="new-password" placeholder="{{ t.account_new_password_hint }}">
+            </div>
+            <div class="hidden" id="account-error"></div>
+        </div>
+
+        <div class="modal__body stack hidden" id="account-step-otp">
+            <div class="alert alert--info">
+                {{ icon('display') }}<span>{{ t.account_otp_hint }}</span>
+            </div>
+            <div class="field mb-0">
+                <label class="label" for="s-account-otp">{{ t.otp_code }}</label>
+                <input type="text" class="input mono" id="s-account-otp" inputmode="numeric"
+                       maxlength="6" autocomplete="one-time-code" placeholder="000000">
+            </div>
+            <div class="hidden" id="account-otp-error"></div>
+        </div>
+
+        <div class="modal__foot">
+            <button type="button" class="btn" data-modal-close>{{ t.cancel }}</button>
+            <button type="button" class="btn btn--primary" id="account-continue">
+                {{ icon('arrow-right') }} {{ t.continue_ }}
+            </button>
+            <button type="button" class="btn btn--primary hidden" id="account-confirm">
+                {{ icon('check') }} {{ t.confirm }}
+            </button>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -399,6 +745,56 @@
             .catch(V.fail)
             .then(restore);
     }
+
+    /* ── Account ────────────────────────────────────────────────────────── */
+
+    var acctDetails = document.getElementById('account-step-details');
+    var acctOtp     = document.getElementById('account-step-otp');
+    var acctNext    = document.getElementById('account-continue');
+    var acctConfirm = document.getElementById('account-confirm');
+
+    function acctError(box, message) {
+        box.className = message ? 'alert alert--danger' : 'hidden';
+        box.textContent = message || '';
+    }
+
+    acctNext.addEventListener('click', function () {
+        var restore = V.busy(this);
+        var errBox = document.getElementById('account-error');
+        acctError(errBox, '');
+        V.api('/auth/account', { method: 'POST', body: {
+            email: document.getElementById('s-account-new-email').value.trim(),
+            password: document.getElementById('s-account-current').value,
+            new_password: document.getElementById('s-account-new-password').value
+        } })
+            .then(function () {
+                // The code is on the panel now, so the dialog moves to asking
+                // for it rather than closing and losing what was typed.
+                acctDetails.classList.add('hidden');
+                acctOtp.classList.remove('hidden');
+                acctNext.classList.add('hidden');
+                acctConfirm.classList.remove('hidden');
+                document.getElementById('s-account-otp').focus();
+            })
+            .catch(function (err) { acctError(errBox, err.message); })
+            .then(restore);
+    });
+
+    acctConfirm.addEventListener('click', function () {
+        var restore = V.busy(this);
+        var errBox = document.getElementById('account-otp-error');
+        acctError(errBox, '');
+        V.api('/auth/account-verify', { method: 'POST', body: {
+            code: document.getElementById('s-account-otp').value.trim()
+        } })
+            .then(function (d) {
+                document.getElementById('s-account-email').value = d.email;
+                V.closeModal(document.getElementById('account-modal'));
+                V.toast(V.t('saved'), 'success');
+            })
+            .catch(function (err) { acctError(errBox, err.message); })
+            .then(restore);
+    });
 
     /* ── Weather ────────────────────────────────────────────────────────── */
 
@@ -440,18 +836,18 @@
     document.getElementById('test-calendar').addEventListener('click', function () {
         var out = document.getElementById('cal-test-result');
         var restore = V.busy(this);
-        out.className = 'alert';
+        out.className = 'alert mt-2';
         out.textContent = V.t('loading');
         V.api('/api/calendar')
             .then(function (d) {
                 var count = (d.events || []).length;
                 var today = d.today || {};
-                out.className = 'alert alert--success';
+                out.className = 'alert alert--success mt-2';
                 out.textContent = (today.date_str || '') + ' (' + (today.weekday || '') + ') — ' +
                                   count + ' ' + V.t('events');
             })
             .catch(function (err) {
-                out.className = 'alert alert--danger';
+                out.className = 'alert alert--danger mt-2';
                 out.textContent = err.message;
             })
             .then(restore);
