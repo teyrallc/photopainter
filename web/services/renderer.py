@@ -97,8 +97,14 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
         img.paste(photo, (photo_box.x + (photo_box.w - photo.width) // 2,
                           photo_box.y + (photo_box.h - photo.height) // 2))
     else:
-        _draw_logo(draw, photo_box.cx, photo_box.cy - 16, 76, BLACK)
-        draw.text((photo_box.cx, photo_box.cy + 46), "Smart Display",
+        # The wordmark is a script face, so its drawn height has little to do
+        # with its nominal size — the caption is placed under the ink itself,
+        # measured, rather than at a guessed offset that used to overlap it.
+        logo_font = _get_logo_font(68)
+        _, top, _, bottom = draw.textbbox((photo_box.cx, photo_box.cy - 14),
+                                          "Vignette", font=logo_font, anchor="mm")
+        _draw_logo(draw, photo_box.cx, photo_box.cy - 14, 68, BLACK)
+        draw.text((photo_box.cx, bottom + 14), "Smart Display",
                   fill=BLACK, font=ui.font(14), anchor="mt")
 
     return img
@@ -117,31 +123,32 @@ def _draw_home_column(img, draw, box, weather, events):
     inner = box.inset(18, 20)
 
     # ── The date, given the room to be the headline ──
-    date_box, rest = inner.cut_top(112, gap=14)
-    day_font = ui.font(92)
-    draw.text((date_box.x - 4, date_box.y - 12), str(now.day),
-              fill=BLACK, font=day_font, anchor="lt")
-    draw.text((date_box.x, date_box.y + 78),
-              ui.weekday_label(now.weekday(), short=False),
-              fill=RED if now.weekday() >= 5 else BLUE,
-              font=ui.font(24), anchor="lt")
-    draw.text((date_box.right, date_box.y + 84), ui.month_label(now),
-              fill=BLACK, font=ui.font(15), anchor="rt")
+    date_box, rest = inner.cut_top(104, gap=14)
+    _, text_axis = _draw_date_block(draw, date_box, now, 86, 22, 15, gap=13)
 
     # ── Weather: an icon, a number, and one line of detail ──
     if weather:
         ui.rule(draw, ui.Box(inner.x, rest.y - 7, inner.w, 1))
-        now_box, rest = rest.cut_top(104, gap=14)
-        icon_box, reading = now_box.cut_left(96, gap=8)
-        ui.weather_icon(img, ui.Box(icon_box.x, icon_box.y + 6, icon_box.w, 84),
-                        weather.get("icon"))
+        now_box, rest = rest.cut_top(118, gap=14)
 
-        draw.text((reading.x, reading.y), _temp(weather.get("temp")),
-                  fill=BLACK, font=ui.font(58), anchor="lt")
-        draw.text((reading.x, reading.y + 62),
-                  ui.fit(_describe(weather), ui.font(16), reading.w),
+        # The temperature's baseline is this row's axis. The icon is centred on
+        # the numeral's own midline — not on its text box, which is taller than
+        # the digits and was leaving the icon sitting low beside them. Its
+        # reading starts on the same axis the weekday above it does, so the
+        # column has one secondary edge instead of one per row.
+        reading_x = text_axis
+        icon_side = min(82, reading_x - now_box.x - 12)
+        baseline = now_box.y + 56
+        draw.text((reading_x, baseline), _temp(weather.get("temp")),
+                  fill=BLACK, font=ui.font(58), anchor="ls")
+        ui.weather_icon(img, ui.Box((now_box.x + reading_x - icon_side) / 2,
+                                    baseline - 21 - icon_side / 2,
+                                    icon_side, icon_side), weather.get("icon"))
+
+        draw.text((reading_x, baseline + 20),
+                  ui.fit(_describe(weather), ui.font(16), now_box.right - reading_x),
                   fill=BLACK, font=ui.font(16), anchor="lt")
-        draw.text((reading.x, reading.y + 83),
+        draw.text((reading_x, baseline + 41),
                   f"{_temp(weather.get('temp_max'))} / {_temp(weather.get('temp_min'))}",
                   fill=BLUE, font=ui.font(15), anchor="lt")
 
@@ -189,15 +196,7 @@ def _draw_split_page(img, draw, weather, events):
 
     rest = rest.inset(14, 12)
     today_box, below = rest.cut_top(72, gap=8)
-    day_font = ui.font(60)
-    draw.text((today_box.x, today_box.y - 6), str(now.day),
-              fill=BLACK, font=day_font, anchor="lt")
-    offset = ui.text_width(str(now.day), day_font) + 12
-    draw.text((today_box.x + offset, today_box.y + 8),
-              ui.weekday_label(now.weekday(), short=False),
-              fill=RED if now.weekday() >= 5 else BLUE, font=ui.font(20), anchor="lt")
-    draw.text((today_box.x + offset, today_box.y + 36),
-              ui.date_label(now), fill=BLACK, font=ui.font(15), anchor="lt")
+    _draw_date_block(draw, today_box, now, 60, 20, 15, gap=12)
 
     grid_box, agenda_box = below.cut_top(int(below.h * 0.52), gap=10)
     _draw_month_grid(draw, grid_box, now, events)
@@ -591,6 +590,36 @@ def _draw_agenda(draw, box, events, limit=3, compact=False):
                   fill=BLACK, font=title_font, anchor="lt")
 
 
+def _draw_date_block(draw, box, now, day_size, label_size, sub_size, gap=14):
+    """The day number, its weekday and its date — on two shared axes.
+
+    Everything here is placed against something else rather than at a chosen
+    offset: the numeral and the date line share one baseline, and the weekday
+    and the date share one left edge. Before this the three pieces each had
+    their own y, which is what made the block look scattered next to a numeral
+    that large.
+
+    Returns (baseline, text_x) so a caller can hang a rule off the baseline and
+    line a later row up on the same secondary axis the weekday sits on.
+    """
+    day_font, label_font, sub_font = (ui.font(day_size), ui.font(label_size),
+                                      ui.font(sub_size))
+    # Baseline anchors ("ls") place text by its baseline rather than its box,
+    # which is the only way two different sizes can be made to sit on one line.
+    baseline = box.y + day_size * 0.76
+    draw.text((box.x, baseline), str(now.day),
+              fill=BLACK, font=day_font, anchor="ls")
+
+    text_x = box.x + ui.text_width(str(now.day), day_font) + gap
+    draw.text((text_x, baseline), ui.date_label(now),
+              fill=BLACK, font=sub_font, anchor="ls")
+    draw.text((text_x, baseline - ui.text_height(sub_font) - label_size * 0.42),
+              ui.weekday_label(now.weekday(), short=False),
+              fill=RED if now.weekday() >= 5 else BLUE,
+              font=label_font, anchor="ls")
+    return baseline, text_x
+
+
 def _describe(weather_or_day):
     """OpenWeatherMap sends "scattered clouds"; the panel wants a label.
 
@@ -661,34 +690,39 @@ def _draw_weather_fullscreen(img, draw, weather):
     body = body.inset(18, 14)
     hero, lower = body.cut_top(int(body.h * 0.52), gap=12)
 
-    # ── Hero: the icon and the temperature, side by side and large ──
-    icon_box, reading = hero.cut_left(int(hero.w * 0.32), gap=8)
-    ui.weather_icon(img, icon_box, weather.get("icon"))
+    # The two blocks underneath set the page's vertical axes, so they are
+    # measured first and the hero is hung off them. Splitting the hero on its
+    # own fraction is what left the icon and the tiles beneath it on different
+    # centres, and the temperature aligned to nothing at all.
+    stats_box, forecast_box = lower.cut_left(int(lower.w * 0.42), gap=16)
 
-    # The temperature is the one thing read from across the room, so it sets
-    # the baseline and everything else hangs off it.
+    # ── Hero, on those axes: icon centred over the tiles, text over the days ──
+    icon_side = min(hero.h, stats_box.w * 0.62)
+    ui.weather_icon(img, ui.Box(stats_box.cx - icon_side / 2,
+                                hero.cy - icon_side / 2, icon_side, icon_side),
+                    weather.get("icon"))
+
     temp_font = ui.font(104)
     temp_text = _temp(weather.get("temp"))
     temp_w = ui.text_width(temp_text, temp_font)
-    draw.text((reading.x, reading.cy), temp_text, fill=BLACK,
-              font=temp_font, anchor="lm")
+    # Same horizontal centre line as the icon it sits beside.
+    draw.text((forecast_box.x, hero.cy), temp_text,
+              fill=BLACK, font=temp_font, anchor="lm")
 
-    side = reading.x + temp_w + 16
-    side_w = max(0, reading.right - side)
-    draw.text((side, reading.cy - 26),
+    side = forecast_box.x + temp_w + 18
+    side_w = max(0, hero.right - side)
+    draw.text((side, hero.cy - 26),
               ui.fit(_describe(weather), ui.font(24), side_w),
               fill=BLACK, font=ui.font(24), anchor="lm")
-    draw.text((side, reading.cy + 4),
+    draw.text((side, hero.cy + 4),
               f"Feels like {_temp(weather.get('feels_like'))}",
               fill=BLUE, font=ui.font(18), anchor="lm")
-    draw.text((side, reading.cy + 30),
+    draw.text((side, hero.cy + 30),
               f"{_temp(weather.get('temp_max'))} / {_temp(weather.get('temp_min'))}"
               f"  today",
               fill=BLACK, font=ui.font(18), anchor="lm")
 
-    # ── Figures and forecast, side by side underneath ──
-    stats_box, forecast_box = lower.cut_left(int(lower.w * 0.42), gap=16)
-
+    # ── The figures themselves ──
     speed_unit = "mph" if weather.get("units") == "imperial" else "m/s"
     top_row, bottom_row = stats_box.rows(2, gap=8)
     figures = [
@@ -730,16 +764,7 @@ def _draw_calendar_fullscreen(draw, events):
 
     # ── Today, stated once and large ──
     today_box, agenda_box = side.cut_top(118, gap=10)
-    day_font = ui.font(86)
-    draw.text((today_box.x, today_box.y - 8), str(now.day),
-              fill=BLACK, font=day_font, anchor="lt")
-    offset = ui.text_width(str(now.day), day_font) + 14
-    draw.text((today_box.x + offset, today_box.y + 16),
-              ui.weekday_label(now.weekday(), short=False),
-              fill=RED if now.weekday() >= 5 else BLUE,
-              font=ui.font(24), anchor="lt")
-    draw.text((today_box.x + offset, today_box.y + 48),
-              ui.date_label(now), fill=BLACK, font=ui.font(17), anchor="lt")
+    _draw_date_block(draw, today_box, now, 86, 24, 17)
 
     label_box, list_box = agenda_box.cut_top(22, gap=4)
     draw.text((label_box.x, label_box.y),
