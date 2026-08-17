@@ -2,351 +2,228 @@
 {% from "_icons.html" import icon %}
 {% block title %}Vignette — {{ t.settings }}{% endblock %}
 
-{#- Nine cards in a two-column masonry is what this page used to be: unrelated
-    decisions at unrelated heights, a ragged column of white down the middle,
-    and on a phone a single scroll long enough that nobody ever reached the
-    bottom of it. The same settings are now five named sections, one at a time,
-    and inside each one every decision is a row — what it is on the left, the
-    one control that changes it on the right. -#}
+{#- A rail and a pane. The horizontal tab row this replaces made the reader
+    guess which of five words held the thing they were after and gave no sense
+    of where they were; a list down the side shows the whole map at once and
+    can carry the open section's subsections under it. Below 900px there is no
+    room for a column, so the same markup becomes a scrolling row.
+
+    There are no Save buttons: a change is saved when it settles, and the pane
+    says so. The exceptions are the three that reach out to something — an
+    album, a Drive account, a tunnel — because those can fail for reasons that
+    have nothing to do with what was typed. -#}
+
+{% block head %}
+{# This page carries its own heading inside the pane. #}
+<style>.content > .page-head { display: none; }</style>
+{% endblock %}
 
 {% block content %}
-<div class="page-head">
-    <div class="page-head__text">
-        <h1>{{ t.settings }}</h1>
-        <p>{{ t.settings_sub }}</p>
-    </div>
-</div>
+<div class="settings">
 
-<div class="tabs tabs--scroll" role="tablist" data-tabs data-tabs-hash>
-    <button type="button" class="tabs__btn" role="tab" data-tab="tab-account"
-            aria-selected="false">{{ icon('shield') }}{{ t.set_account }}</button>
-    <button type="button" class="tabs__btn" role="tab" data-tab="tab-display"
-            aria-selected="true">{{ icon('display') }}{{ t.set_display }}</button>
-    <button type="button" class="tabs__btn" role="tab" data-tab="tab-photos"
-            aria-selected="false">{{ icon('image') }}{{ t.set_sources }}</button>
-    <button type="button" class="tabs__btn" role="tab" data-tab="tab-network"
-            aria-selected="false">{{ icon('globe') }}{{ t.set_network }}</button>
-    <button type="button" class="tabs__btn" role="tab" data-tab="tab-system"
-            aria-selected="false">{{ icon('sliders') }}{{ t.set_device }}</button>
-</div>
+    <nav class="settings__nav" role="tablist" data-tabs data-tabs-hash
+         aria-label="{{ t.settings }}">
+        <button type="button" class="settings__link" role="tab" data-tab="tab-account"
+                aria-selected="false">{{ icon('shield') }}{{ t.set_account }}</button>
 
-<!-- ══ Account ════════════════════════════════════════════════════════════ -->
-<div class="tabpanel stack" id="tab-account" role="tabpanel" hidden>
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('shield', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.set_account }}</h2>
-                    <p class="section-head__sub">{{ t.account_sub }}</p>
-                </div>
+        <button type="button" class="settings__link" role="tab" data-tab="tab-display"
+                aria-selected="true">{{ icon('display') }}{{ t.set_display }}</button>
+        <div class="settings__sub" data-sub-for="tab-display">
+            <a href="#sec-photo">{{ t.photo_settings }}</a>
+            <a href="#sec-weather">{{ t.weather_settings }}</a>
+            <a href="#sec-calendar">{{ t.calendar_settings }}</a>
+        </div>
+
+        <button type="button" class="settings__link" role="tab" data-tab="tab-photos"
+                aria-selected="false">{{ icon('image') }}{{ t.set_sources }}</button>
+        <div class="settings__sub" data-sub-for="tab-photos" hidden>
+            <a href="#sec-phone">{{ t.shortcut }}</a>
+            <a href="#sec-icloud">{{ t.icloud }}</a>
+            <a href="#sec-gdrive">Google Drive</a>
+        </div>
+
+        <button type="button" class="settings__link" role="tab" data-tab="tab-network"
+                aria-selected="false">{{ icon('globe') }}{{ t.set_network }}</button>
+        <div class="settings__sub" data-sub-for="tab-network" hidden>
+            <a href="#sec-wifi">{{ t.wifi_config }}</a>
+            <a href="#sec-remote">{{ t.remote_access }}</a>
+        </div>
+
+        <button type="button" class="settings__link" role="tab" data-tab="tab-system"
+                aria-selected="false">{{ icon('sliders') }}{{ t.set_device }}</button>
+        <div class="settings__sub" data-sub-for="tab-system" hidden>
+            <a href="#sec-system">{{ t.system_settings }}</a>
+            <a href="#sec-reset">{{ t.factory_reset }}</a>
+        </div>
+
+        <div class="settings__foot">Vignette &middot; &copy; 2026</div>
+    </nav>
+
+    <div class="settings__pane">
+
+        <!-- ══ Account ════════════════════════════════════════════════════ -->
+        <div class="tabpanel" id="tab-account" role="tabpanel" hidden>
+            <div class="pane-head">
+                <h1>{{ t.set_account }}</h1>
+                <p>{{ t.pane_account_sub }}</p>
             </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ icon('mail') }}{{ t.account_email }}</div>
-                    <p class="setting__desc">{{ t.account_email_desc }}</p>
+            <section class="subsection" id="sec-signin">
+                <div class="subsection__head">
+                    {{ icon('shield') }}<h2>{{ t.account_sub }}</h2>
                 </div>
-                <div class="setting__control">
+
+                <div class="field">
+                    <label class="label" for="s-account-email">{{ t.account_email }}</label>
                     <input type="text" class="input" id="s-account-email" readonly
                            value="{{ config.admin_email }}">
+                    <p class="hint">{{ t.account_email_desc }}</p>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ icon('key') }}{{ t.account_password }}</div>
-                    <p class="setting__desc">{{ t.account_password_desc }}</p>
+                <div class="field">
+                    <span class="label">{{ t.account_password }}</span>
+                    <div class="secret__state">
+                        <span class="badge badge--success">{{ icon('check') }}{{ t.secret_set }}</span>
+                    </div>
+                    <p class="hint">{{ t.account_password_desc }}</p>
                 </div>
-                <div class="setting__control">
-                    <span class="mono dim">••••••••</span>
-                </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.account_change }}</div>
-                    <p class="setting__desc">{{ t.account_change_desc }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field mb-0">
                     <button type="button" class="btn btn--primary" data-modal-open="account-modal">
                         {{ icon('key') }} {{ t.account_change }}
                     </button>
+                    <p class="hint">{{ t.account_change_desc }}</p>
                 </div>
-            </div>
+            </section>
         </div>
-    </section>
-</div>
 
-<!-- ══ Display ════════════════════════════════════════════════════════════ -->
-<div class="tabpanel stack" id="tab-display" role="tabpanel">
-
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('camera', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.photo_settings }}</h2>
-                    <p class="section-head__sub">{{ t.photo_settings_sub }}</p>
-                </div>
+        <!-- ══ On the screen ══════════════════════════════════════════════ -->
+        <div class="tabpanel" id="tab-display" role="tabpanel">
+            <div class="pane-head">
+                <h1>{{ t.set_display }}</h1>
+                <p>{{ t.pane_display_sub }}</p>
             </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.default_rotation }}</div>
-                    <p class="setting__desc">{{ t.rotation_desc }}</p>
+            <section class="subsection" id="sec-photo">
+                <div class="subsection__head">
+                    {{ icon('camera') }}<h2>{{ t.photo_settings }}</h2>
                 </div>
-                <div class="setting__control">
+
+                <div class="field">
+                    <label class="label" for="s-rotation">{{ t.default_rotation }}</label>
                     <select class="select" id="s-rotation">
                         <option value="0"   {% if config.photo_rotation == 0 %}selected{% endif %}>0° ({{ t.normal }})</option>
                         <option value="90"  {% if config.photo_rotation == 90 %}selected{% endif %}>90° CW</option>
                         <option value="180" {% if config.photo_rotation == 180 %}selected{% endif %}>180°</option>
                         <option value="270" {% if config.photo_rotation == 270 %}selected{% endif %}>270° CW</option>
                     </select>
+                    <p class="hint">{{ t.rotation_desc }}</p>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.fit_mode }}</div>
-                    <p class="setting__desc">{{ t.fit_mode_desc }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field mb-0">
+                    <label class="label" for="s-fit-mode">{{ t.fit_mode }}</label>
                     <select class="select" id="s-fit-mode">
                         <option value="fit"     {% if config.photo_fit_mode != 'stretch' %}selected{% endif %}>{{ t.fit_letterbox }}</option>
                         <option value="stretch" {% if config.photo_fit_mode == 'stretch' %}selected{% endif %}>{{ t.stretch_fill }}</option>
                     </select>
+                    <p class="hint">{{ t.fit_mode_desc }}</p>
                 </div>
-            </div>
-        </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="save-photo">{{ icon('save') }} {{ t.save }}</button>
-        </div>
-    </section>
+            </section>
 
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('weather', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.weather_settings }}</h2>
-                    <p class="section-head__sub">{{ t.weather_settings_sub }}</p>
+            <section class="subsection" id="sec-weather">
+                <div class="subsection__head">
+                    {{ icon('weather') }}<h2>{{ t.weather_settings }}</h2>
+                    <span class="spacer"></span>
+                    <button type="button" class="btn btn--sm" id="test-weather">{{ t.test }}</button>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.api_key }}</div>
-                    <p class="setting__desc">
+                {# Write-only: the stored key can be replaced but never read
+                   back, so it is stated rather than rendered into a box that
+                   makes a configured key look like a missing one. #}
+                <div class="field" data-secret>
+                    <span class="label">{{ t.api_key }}</span>
+                    <div class="secret__state">
+                        {% if config.weather_api_key_configured %}
+                        <span class="badge badge--success">{{ icon('check') }}{{ t.secret_set }}</span>
+                        {% else %}
+                        <span class="badge">{{ t.secret_unset }}</span>
+                        {% endif %}
+                        <button type="button" class="btn btn--sm" data-secret-replace>{{ t.secret_replace }}</button>
+                    </div>
+                    <input type="text" class="input secret__input" id="s-weather-key" value=""
+                           autocomplete="off" spellcheck="false" hidden>
+                    <p class="hint">
                         <a href="https://openweathermap.org/api" target="_blank" rel="noopener">openweathermap.org</a>
                     </p>
                 </div>
-                <div class="setting__control">
-                    {# Secrets are never rendered back into the page. Leaving the
-                       field blank keeps the stored key; typing replaces it. #}
-                    <input type="text" class="input" id="s-weather-key" value=""
-                           placeholder="{{ '••••••••  (leave blank to keep)' if config.weather_api_key_configured else '' }}"
-                           autocomplete="off" spellcheck="false">
-                </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.city }}</div>
-                    <p class="setting__desc">{{ t.city_hint }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field">
+                    <label class="label" for="s-weather-city">{{ t.city }}</label>
                     <input type="text" class="input" id="s-weather-city"
                            value="{{ config.weather_city }}" placeholder="{{ t.city_placeholder }}">
+                    <p class="hint">{{ t.city_hint }}</p>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.units }}</div>
-                </div>
-                <div class="setting__control">
+                <div class="field">
+                    <label class="label" for="s-weather-units">{{ t.units }}</label>
                     <select class="select" id="s-weather-units">
                         <option value="metric"   {% if config.weather_units != 'imperial' %}selected{% endif %}>{{ t.celsius }}</option>
                         <option value="imperial" {% if config.weather_units == 'imperial' %}selected{% endif %}>{{ t.fahrenheit }}</option>
                     </select>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    {# Stored all along, but until now there was no way to change
-                       it — so every panel read its conditions in English. #}
-                    <div class="setting__title">{{ t.weather_desc_lang }}</div>
-                </div>
-                <div class="setting__control">
+                <div class="field">
+                    <label class="label" for="s-weather-lang">{{ t.weather_desc_lang }}</label>
                     <select class="select" id="s-weather-lang">
                         <option value="en"    {% if config.weather_lang != 'zh_tw' %}selected{% endif %}>English</option>
                         <option value="zh_tw" {% if config.weather_lang == 'zh_tw' %}selected{% endif %}>中文</option>
                     </select>
                 </div>
-            </div>
 
-            {# Left empty (and marginless) until a test actually runs. #}
-            <div id="weather-test-result"></div>
-        </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="save-weather">{{ icon('save') }} {{ t.save }}</button>
-            <button type="button" class="btn" id="test-weather">{{ icon('weather') }} {{ t.test }}</button>
-        </div>
-    </section>
+                <div id="weather-test-result"></div>
+            </section>
 
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('calendar', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.calendar_settings }}</h2>
-                    <p class="section-head__sub">{{ t.calendar_settings_sub }}</p>
+            <section class="subsection" id="sec-calendar">
+                <div class="subsection__head">
+                    {{ icon('calendar') }}<h2>{{ t.calendar_settings }}</h2>
+                    <span class="spacer"></span>
+                    <button type="button" class="btn btn--sm" id="test-calendar">{{ t.test }}</button>
                 </div>
-            </div>
 
-            <div class="setting setting--top">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.ical_url }}</div>
-                    <p class="setting__desc">{{ t.ical_hint }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field">
+                    <label class="label" for="s-cal-url">{{ t.ical_url }}</label>
                     <input type="url" class="input" id="s-cal-url" value="{{ config.calendar_ical_url }}"
                            placeholder="{{ t.ical_placeholder }}" spellcheck="false">
+                    <p class="hint">{{ t.ical_hint }}</p>
                 </div>
-            </div>
 
-            <div id="cal-test-result"></div>
+                <div id="cal-test-result"></div>
+            </section>
         </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="save-calendar">{{ icon('save') }} {{ t.save }}</button>
-            <button type="button" class="btn" id="test-calendar">{{ icon('calendar') }} {{ t.test }}</button>
-        </div>
-    </section>
-</div>
 
-<!-- ══ Photo sources ══════════════════════════════════════════════════════ -->
-<div class="tabpanel stack" id="tab-photos" role="tabpanel" hidden>
-
-    <!-- No account to sign in to: an album with "Public Website" turned on is
-         readable from its link alone, which is the only kind of credential
-         worth typing on a device with no keyboard. -->
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('cloud', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.icloud }}</h2>
-                    <p class="section-head__sub">{{ t.icloud_sub }}</p>
-                </div>
-                <span class="spacer"></span>
-                {% if config.icloud_connected %}
-                <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
-                {% endif %}
+        <!-- ══ Where photos come from ═════════════════════════════════════ -->
+        <div class="tabpanel" id="tab-photos" role="tabpanel" hidden>
+            <div class="pane-head">
+                <h1>{{ t.set_sources }}</h1>
+                <p>{{ t.pane_photos_sub }}</p>
             </div>
 
-            <div class="setting setting--top">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.icloud_link }}</div>
-                    <p class="setting__desc">{{ t.icloud_link_hint }}</p>
+            <section class="subsection" id="sec-phone">
+                <div class="subsection__head">
+                    {{ icon('send') }}<h2>{{ t.shortcut }}</h2>
+                    <span class="spacer"></span>
+                    {% if config.upload_token_hash_configured %}
+                    <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+                    {% endif %}
                 </div>
-                <div class="setting__control">
-                    <input type="url" class="input" id="s-icloud-url"
-                           value="{{ config.icloud_album_url }}"
-                           placeholder="https://www.icloud.com/sharedalbum/#B0…"
-                           spellcheck="false" autocomplete="off">
-                </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.icloud_auto_sync }}</div>
-                    <p class="setting__desc">{{ t.icloud_auto_sync_desc }}</p>
-                </div>
-                <div class="setting__control">
-                    <label class="check" for="s-icloud-auto">
-                        <input type="checkbox" id="s-icloud-auto"
-                               {% if config.icloud_auto_sync %}checked{% endif %}>
-                        <span>{{ t.toggle_on }}</span>
-                    </label>
-                </div>
-            </div>
+                <p class="small muted mb-2">{{ t.shortcut_hint }}</p>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.icloud_sync_interval }}</div>
-                </div>
-                <div class="setting__control">
-                    <select class="select" id="s-icloud-interval">
-                        <option value="900"   {% if config.icloud_sync_interval == 900 %}selected{% endif %}>15 {{ t.minutes }}</option>
-                        <option value="3600"  {% if config.icloud_sync_interval == 3600 or not config.icloud_sync_interval %}selected{% endif %}>1 {{ t.hour }}</option>
-                        <option value="21600" {% if config.icloud_sync_interval == 21600 %}selected{% endif %}>6 {{ t.hour }}</option>
-                        <option value="86400" {% if config.icloud_sync_interval == 86400 %}selected{% endif %}>24 {{ t.hour }}</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="setting setting--wide">
-                <div class="alert" id="icloud-state">{{ t.loading }}</div>
-                <div class="accordion mt-1">
-                    <div class="accordion__item">
-                        <button type="button" class="accordion__trigger" data-accordion-trigger="icloud-steps"
-                                aria-expanded="false">
-                            {{ icon('info') }} {{ t.icloud_steps_title }} {{ icon('chevron-down') }}
-                        </button>
-                        <div class="accordion__panel" id="icloud-steps" hidden>
-                            <ol style="padding-left:18px;margin:0;">
-                                <li>{{ t.icloud_step1 }}</li>
-                                <li>{{ t.icloud_step2 }}</li>
-                                <li>{{ t.icloud_step3 }}</li>
-                                <li>{{ t.icloud_step4 }}</li>
-                            </ol>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="save-icloud">
-                {{ icon('cloud') }} {{ t.icloud_connect }}
-            </button>
-            <button type="button" class="btn" id="sync-icloud">{{ icon('refresh') }} {{ t.icloud_sync_now }}</button>
-            {% if config.icloud_connected %}
-            <button type="button" class="btn btn--quiet-danger" id="disconnect-icloud">
-                {{ icon('x') }} {{ t.icloud_disconnect }}
-            </button>
-            {% endif %}
-        </div>
-    </section>
-
-    <!-- The other direction: instead of the frame reaching into an account,
-         the phone sends photos out to it. Nothing about anyone's iCloud has
-         to be made public, and no Apple credential lands on this device. -->
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('send', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.shortcut }}</h2>
-                    <p class="section-head__sub">{{ t.shortcut_hint }}</p>
-                </div>
-                <span class="spacer"></span>
-                {% if config.upload_token_hash_configured %}
-                <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
-                {% endif %}
-            </div>
-
-            {# The address carries the token, so it exists exactly once: in the
-               reply to the mint. Nothing here can render it from storage —
-               storage holds only a hash — which is why this stays hidden until
-               that moment, and says so plainly when it appears. #}
-            <div class="setting setting--top hidden" id="shortcut-token-field">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.shortcut_token }}</div>
-                    <p class="setting__desc">{{ t.shortcut_url_desc }}</p>
-                </div>
-                <div class="setting__control stack-sm">
+                {# The address carries the token, so it exists exactly once: in
+                   the reply to the mint. Storage holds a hash, so nothing here
+                   can render it later. #}
+                <div class="field hidden" id="shortcut-token-field">
+                    <label class="label" for="s-shortcut-token">{{ t.shortcut_token }}</label>
                     <div class="input-group">
                         <input type="text" class="input mono" id="s-shortcut-token" readonly
                                value="" spellcheck="false">
@@ -355,93 +232,150 @@
                             {{ icon('copy') }}
                         </button>
                     </div>
-                    {# Typing a seventy-character URL into a phone is not a
-                       plan. Scanning it off the screen is. #}
-                    <img id="shortcut-qr" alt="" class="qr-code hidden" width="148" height="148">
+                    <p class="hint">{{ t.shortcut_url_desc }}</p>
+                    {# Nobody types seventy characters into a phone. #}
+                    <img id="shortcut-qr" alt="" class="qr-code hidden mt-1"
+                         width="148" height="148">
                     <p class="hint">{{ t.shortcut_scan }}</p>
                 </div>
-            </div>
 
-            <div class="setting setting--wide hidden" id="shortcut-once">
-                <div class="alert alert--warning">
+                <div class="alert alert--warning mb-2 hidden" id="shortcut-once">
                     {{ icon('alert') }}<span>{{ t.shortcut_once }}</span>
                 </div>
-            </div>
 
-            <div class="setting setting--wide">
-                <div class="alert" id="shortcut-state">{{ t.loading }}</div>
-            </div>
+                <div class="alert mb-2" id="shortcut-state">{{ t.loading }}</div>
 
-            <div class="setting setting--wide">
-                <p class="label">{{ t.shortcut_steps_title }}</p>
-                <ol class="steps">
-                    <li>{{ t.shortcut_step1 }}</li>
-                    <li>{{ t.shortcut_step2 }}</li>
-                    <li>{{ t.shortcut_step3 }}</li>
-                    <li>{{ t.shortcut_step4 }}</li>
-                </ol>
-                <p class="small muted mt-2">{{ t.shortcut_step5 }}</p>
-                <p class="small muted">{{ t.shortcut_step6 }}</p>
-            </div>
-
-            {# The header form still works and is what a script would use; the
-               phone no longer needs it. #}
-            <input type="hidden" id="s-shortcut-url" value="">
-        </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="mint-shortcut-token">
-                {{ icon('key') }} <span id="mint-shortcut-label">{{ t.shortcut_new }}</span>
-            </button>
-            <button type="button" class="btn btn--quiet-danger hidden" id="revoke-shortcut-token">
-                {{ icon('x') }} {{ t.shortcut_revoke }}
-            </button>
-        </div>
-    </section>
-
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('drive', 'icon-lg') }}
-                <div>
-                    <h2>Google Drive</h2>
-                    <p class="section-head__sub">{{ t.gdrive_sub }}</p>
+                <div class="field">
+                    <span class="label">{{ t.shortcut_steps_title }}</span>
+                    <ol class="steps">
+                        <li>{{ t.shortcut_step1 }}</li>
+                        <li>{{ t.shortcut_step2 }}</li>
+                        <li>{{ t.shortcut_step3 }}</li>
+                        <li>{{ t.shortcut_step4 }}</li>
+                    </ol>
+                    <p class="hint mt-2">{{ t.shortcut_step5 }}</p>
+                    <p class="hint">{{ t.shortcut_step6 }}</p>
                 </div>
-                <span class="spacer"></span>
-                {% if config.gdrive_connected %}
-                <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
-                {% endif %}
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">Client ID</div>
+                <div class="row mb-0">
+                    <button type="button" class="btn btn--primary" id="mint-shortcut-token">
+                        {{ icon('key') }} <span id="mint-shortcut-label">{{ t.shortcut_new }}</span>
+                    </button>
+                    <button type="button" class="btn btn--quiet-danger hidden" id="revoke-shortcut-token">
+                        {{ icon('x') }} {{ t.shortcut_revoke }}
+                    </button>
                 </div>
-                <div class="setting__control">
+                <input type="hidden" id="s-shortcut-url" value="">
+            </section>
+
+            <section class="subsection" id="sec-icloud">
+                <div class="subsection__head">
+                    {{ icon('cloud') }}<h2>{{ t.icloud }}</h2>
+                    <span class="spacer"></span>
+                    {% if config.icloud_connected %}
+                    <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="field">
+                    <label class="label" for="s-icloud-url">{{ t.icloud_link }}</label>
+                    <input type="url" class="input" id="s-icloud-url"
+                           value="{{ config.icloud_album_url }}"
+                           placeholder="https://www.icloud.com/sharedalbum/#B0…"
+                           spellcheck="false" autocomplete="off">
+                    <p class="hint">{{ t.icloud_link_hint }}</p>
+                </div>
+
+                <div class="field">
+                    <label class="check" for="s-icloud-auto">
+                        <input type="checkbox" id="s-icloud-auto"
+                               {% if config.icloud_auto_sync %}checked{% endif %}>
+                        <span>{{ t.icloud_auto_sync }}</span>
+                    </label>
+                    <p class="hint">{{ t.icloud_auto_sync_desc }}</p>
+                </div>
+
+                <div class="field">
+                    <label class="label" for="s-icloud-interval">{{ t.icloud_sync_interval }}</label>
+                    <select class="select" id="s-icloud-interval">
+                        <option value="900"   {% if config.icloud_sync_interval == 900 %}selected{% endif %}>15 {{ t.minutes }}</option>
+                        <option value="3600"  {% if config.icloud_sync_interval == 3600 or not config.icloud_sync_interval %}selected{% endif %}>1 {{ t.hour }}</option>
+                        <option value="21600" {% if config.icloud_sync_interval == 21600 %}selected{% endif %}>6 {{ t.hour }}</option>
+                        <option value="86400" {% if config.icloud_sync_interval == 86400 %}selected{% endif %}>24 {{ t.hour }}</option>
+                    </select>
+                </div>
+
+                <div class="alert mb-2" id="icloud-state">{{ t.loading }}</div>
+
+                <div class="accordion mb-2">
+                    <div class="accordion__item">
+                        <button type="button" class="accordion__trigger" data-accordion-trigger="icloud-steps"
+                                aria-expanded="false">
+                            {{ icon('info') }} {{ t.icloud_steps_title }} {{ icon('chevron-down') }}
+                        </button>
+                        <div class="accordion__panel" id="icloud-steps" hidden>
+                            <ol class="steps">
+                                <li>{{ t.icloud_step1 }}</li>
+                                <li>{{ t.icloud_step2 }}</li>
+                                <li>{{ t.icloud_step3 }}</li>
+                                <li>{{ t.icloud_step4 }}</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+                {# Connecting reaches out to Apple and can fail for reasons
+                   nothing on this page controls, so it stays a button. #}
+                <div class="row mb-0">
+                    <button type="button" class="btn btn--primary" id="save-icloud">
+                        {{ icon('cloud') }} {{ t.icloud_connect }}
+                    </button>
+                    <button type="button" class="btn" id="sync-icloud">{{ icon('refresh') }} {{ t.icloud_sync_now }}</button>
+                    {% if config.icloud_connected %}
+                    <button type="button" class="btn btn--quiet-danger" id="disconnect-icloud">
+                        {{ icon('x') }} {{ t.icloud_disconnect }}
+                    </button>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="subsection" id="sec-gdrive">
+                <div class="subsection__head">
+                    {{ icon('drive') }}<h2>Google Drive</h2>
+                    <span class="spacer"></span>
+                    {% if config.gdrive_connected %}
+                    <span class="badge badge--success">{{ icon('check') }}{{ t.connected }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="field">
+                    <label class="label" for="s-gdrive-id">Client ID</label>
                     <input type="text" class="input" id="s-gdrive-id" value="{{ config.gdrive_client_id }}"
                            placeholder="xxxxxxxx.apps.googleusercontent.com" spellcheck="false" autocomplete="off">
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">Client Secret</div>
+                <div class="field" data-secret>
+                    <span class="label">Client Secret</span>
+                    <div class="secret__state">
+                        {% if config.gdrive_client_secret_configured %}
+                        <span class="badge badge--success">{{ icon('check') }}{{ t.secret_set }}</span>
+                        {% else %}
+                        <span class="badge">{{ t.secret_unset }}</span>
+                        {% endif %}
+                        <button type="button" class="btn btn--sm" data-secret-replace>{{ t.secret_replace }}</button>
+                    </div>
+                    <input type="password" class="input secret__input" id="s-gdrive-secret" value=""
+                           autocomplete="off" hidden>
                 </div>
-                <div class="setting__control">
-                    <input type="password" class="input" id="s-gdrive-secret" value=""
-                           placeholder="{{ '••••••••  (leave blank to keep)' if config.gdrive_client_secret_configured else '' }}"
-                           autocomplete="off">
-                </div>
-            </div>
 
-            <div class="setting setting--wide">
-                <div class="accordion">
+                <div class="accordion mb-2">
                     <div class="accordion__item">
                         <button type="button" class="accordion__trigger" data-accordion-trigger="gdrive-steps"
                                 aria-expanded="false">
                             {{ icon('info') }} {{ t.gdrive_steps_title }} {{ icon('chevron-down') }}
                         </button>
                         <div class="accordion__panel" id="gdrive-steps" hidden>
-                            <ol style="padding-left:18px;margin:0;">
+                            <ol class="steps">
                                 <li>{{ t.gdrive_step1 }}</li>
                                 <li>{{ t.gdrive_step2 }}</li>
                                 <li>{{ t.gdrive_step3 }}</li>
@@ -450,76 +384,52 @@
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="save-gdrive">{{ icon('save') }} {{ t.save }}</button>
-            {% if config.gdrive_client_id and not config.gdrive_connected %}
-            <button type="button" class="btn btn--success" id="connect-gdrive">{{ icon('drive') }} {{ t.gdrive_connect }}</button>
-            {% endif %}
-        </div>
-    </section>
-</div>
 
-<!-- ══ Network ════════════════════════════════════════════════════════════ -->
-<div class="tabpanel stack" id="tab-network" role="tabpanel" hidden>
+                <div class="row mb-0">
+                    <button type="button" class="btn btn--primary" id="save-gdrive">{{ icon('save') }} {{ t.save }}</button>
+                    {% if config.gdrive_client_id and not config.gdrive_connected %}
+                    <button type="button" class="btn btn--success" id="connect-gdrive">{{ icon('drive') }} {{ t.gdrive_connect }}</button>
+                    {% endif %}
+                </div>
+            </section>
+        </div>
 
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('wifi', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.wifi_config }}</h2>
-                    <p class="section-head__sub">{{ t.wifi_settings_hint }}</p>
-                </div>
+        <!-- ══ Getting online ═════════════════════════════════════════════ -->
+        <div class="tabpanel" id="tab-network" role="tabpanel" hidden>
+            <div class="pane-head">
+                <h1>{{ t.set_network }}</h1>
+                <p>{{ t.pane_network_sub }}</p>
             </div>
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.manage_wifi }}</div>
-                    <p class="setting__desc">{{ t.wifi_manage_desc }}</p>
+
+            <section class="subsection" id="sec-wifi">
+                <div class="subsection__head">
+                    {{ icon('wifi') }}<h2>{{ t.wifi_config }}</h2>
                 </div>
-                <div class="setting__control">
+                <div class="field mb-0">
                     <a class="btn" href="/wifi">{{ icon('wifi') }} {{ t.manage_wifi }}</a>
+                    <p class="hint">{{ t.wifi_manage_desc }}</p>
                 </div>
-            </div>
-        </div>
-    </section>
+            </section>
 
-    <!-- Without a tunnel the console only answers on the local network, which
-         is not how a photo frame given as a gift actually gets used. -->
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('globe', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.remote_access }}</h2>
-                    <p class="section-head__sub">{{ t.remote_access_hint }}</p>
+            <section class="subsection" id="sec-remote">
+                <div class="subsection__head">
+                    {{ icon('globe') }}<h2>{{ t.remote_access }}</h2>
                 </div>
-            </div>
 
-            <div class="setting setting--wide">
-                <div class="alert" id="remote-state">{{ t.loading }}</div>
-            </div>
+                <p class="small muted mb-2">{{ t.remote_access_hint }}</p>
+                <div class="alert mb-2" id="remote-state">{{ t.loading }}</div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.remote_access_enable }}</div>
-                    <p class="setting__desc">{{ t.remote_enable_desc }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field">
                     <label class="check" for="s-remote-enabled">
                         <input type="checkbox" id="s-remote-enabled"
                                {% if config.remote_access_enabled %}checked{% endif %}>
-                        <span>{{ t.toggle_on }}</span>
+                        <span>{{ t.remote_access_enable }}</span>
                     </label>
+                    <p class="hint">{{ t.remote_enable_desc }}</p>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.remote_provider }}</div>
-                </div>
-                <div class="setting__control">
+                <div class="field">
+                    <label class="label" for="s-remote-provider">{{ t.remote_provider }}</label>
                     <select class="select" id="s-remote-provider">
                         <option value="cloudflare" {% if config.remote_access_provider == 'cloudflare' %}selected{% endif %}>
                             {{ t.remote_provider_cf }}</option>
@@ -529,140 +439,110 @@
                             {{ t.remote_provider_none }}</option>
                     </select>
                 </div>
-            </div>
 
-            {# Cloudflare: a fixed address the owner already owns. #}
-            <div class="setting setting--top" id="field-remote-url">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.remote_public_url }}</div>
-                    <p class="setting__desc">{{ t.remote_public_url_hint }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field" id="field-remote-url">
+                    <label class="label" for="s-remote-url">{{ t.remote_public_url }}</label>
                     <input type="url" class="input" id="s-remote-url"
                            value="{{ config.remote_public_url }}"
                            placeholder="https://yilin.example.com" spellcheck="false" autocomplete="off">
+                    <p class="hint">{{ t.remote_public_url_hint }}</p>
                 </div>
-            </div>
 
-            {# ngrok: a token, and an address that changes on every reconnect. #}
-            <div class="setting setting--top" id="field-ngrok-token">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.remote_token }}</div>
-                    <p class="setting__desc">
-                        <a href="https://dashboard.ngrok.com/get-started/your-authtoken"
-                           target="_blank" rel="noopener">dashboard.ngrok.com</a>
-                    </p>
+                <div class="field" id="field-ngrok-token" data-secret>
+                    <span class="label">{{ t.remote_token }}</span>
+                    <div class="secret__state">
+                        {% if config.ngrok_authtoken_configured %}
+                        <span class="badge badge--success">{{ icon('check') }}{{ t.secret_set }}</span>
+                        {% else %}
+                        <span class="badge">{{ t.secret_unset }}</span>
+                        {% endif %}
+                        <button type="button" class="btn btn--sm" data-secret-replace>{{ t.secret_replace }}</button>
+                    </div>
+                    <input type="password" class="input secret__input" id="s-ngrok-token" value=""
+                           autocomplete="off" spellcheck="false" hidden>
+                    <p class="hint"><a href="https://dashboard.ngrok.com/get-started/your-authtoken"
+                                       target="_blank" rel="noopener">dashboard.ngrok.com</a></p>
                 </div>
-                <div class="setting__control">
-                    {# Never rendered back out; blank keeps whatever is stored. #}
-                    <input type="password" class="input" id="s-ngrok-token" value=""
-                           placeholder="{{ '••••••••  (leave blank to keep)' if config.ngrok_authtoken_configured else '' }}"
-                           autocomplete="off" spellcheck="false">
+
+                {# Saving here tears down a tunnel and builds another, which is
+                   not a thing to do on every keystroke. #}
+                <div class="row mb-0">
+                    <button type="button" class="btn btn--primary" id="save-remote">{{ icon('save') }} {{ t.save }}</button>
+                    <button type="button" class="btn" id="remote-reconnect">{{ icon('refresh') }} {{ t.remote_reconnect }}</button>
                 </div>
-            </div>
+            </section>
         </div>
-        <div class="card__foot">
-            <button type="button" class="btn btn--primary" id="save-remote">{{ icon('save') }} {{ t.save }}</button>
-            <button type="button" class="btn" id="remote-reconnect">{{ icon('refresh') }} {{ t.remote_reconnect }}</button>
-        </div>
-    </section>
-</div>
 
-<!-- ══ Device ═════════════════════════════════════════════════════════════ -->
-<div class="tabpanel stack" id="tab-system" role="tabpanel" hidden>
-
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('sliders', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.system_settings }}</h2>
-                    <p class="section-head__sub">{{ t.system_settings_sub }}</p>
-                </div>
+        <!-- ══ The frame itself ═══════════════════════════════════════════ -->
+        <div class="tabpanel" id="tab-system" role="tabpanel" hidden>
+            <div class="pane-head">
+                <h1>{{ t.set_device }}</h1>
+                <p>{{ t.pane_frame_sub }}</p>
             </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.show_qr }}</div>
-                    <p class="setting__desc">{{ t.show_qr_desc }}</p>
+            <section class="subsection" id="sec-system">
+                <div class="subsection__head">
+                    {{ icon('sliders') }}<h2>{{ t.system_settings }}</h2>
                 </div>
-                <div class="setting__control">
+
+                <div class="field">
                     <button type="button" class="btn" id="show-qr">{{ icon('qr') }} {{ t.show_qr_short }}</button>
+                    <p class="hint">{{ t.show_qr_desc }}</p>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.update_software }}</div>
-                    <p class="setting__desc">{{ t.update_desc }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field">
                     <button type="button" class="btn" id="system-update">{{ icon('download') }} {{ t.update_software }}</button>
+                    <p class="hint">{{ t.update_desc }}</p>
                 </div>
-            </div>
 
-            <div class="setting setting--wide hidden" id="update-output">
-                <pre class="console"></pre>
-            </div>
-
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.reboot }}</div>
-                    <p class="setting__desc">{{ t.reboot_desc }}</p>
+                <div class="field hidden" id="update-output">
+                    <pre class="console"></pre>
                 </div>
-                <div class="setting__control">
+
+                <div class="field">
                     <button type="button" class="btn" id="system-reboot">{{ icon('refresh') }} {{ t.reboot }}</button>
+                    <p class="hint">{{ t.reboot_desc }}</p>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.shutdown }}</div>
-                    <p class="setting__desc">{{ t.shutdown_desc }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field mb-0">
                     <button type="button" class="btn btn--quiet-danger" id="system-shutdown">{{ icon('power') }} {{ t.shutdown }}</button>
+                    <p class="hint">{{ t.shutdown_desc }}</p>
                 </div>
-            </div>
-        </div>
-    </section>
+            </section>
 
-    <section class="card">
-        <div class="card__body">
-            <div class="section-head">
-                {{ icon('alert', 'icon-lg') }}
-                <div>
-                    <h2>{{ t.factory_reset }}</h2>
-                    <p class="section-head__sub">{{ t.factory_reset_warn }}</p>
+            <section class="subsection" id="sec-reset">
+                <div class="subsection__head">
+                    {{ icon('alert') }}<h2>{{ t.factory_reset }}</h2>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.reset_delete_photos }}</div>
-                    <p class="setting__desc">{{ t.reset_delete_photos_hint }}</p>
+                <div class="alert alert--warning mb-2">
+                    {{ icon('alert') }}<span>{{ t.factory_reset_warn }}</span>
                 </div>
-                <div class="setting__control">
+
+                <div class="field">
                     <label class="check" for="reset-delete-photos">
                         <input type="checkbox" id="reset-delete-photos" checked>
-                        <span>{{ t.toggle_on }}</span>
+                        <span>{{ t.reset_delete_photos }}</span>
                     </label>
+                    <p class="hint">{{ t.reset_delete_photos_hint }}</p>
                 </div>
-            </div>
 
-            <div class="setting">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.factory_reset }}</div>
-                    <p class="setting__desc">{{ t.factory_reset_desc }}</p>
-                </div>
-                <div class="setting__control">
+                <div class="field mb-0">
                     <button type="button" class="btn btn--quiet-danger" id="factory-reset">
                         {{ icon('rotate') }} {{ t.factory_reset }}
                     </button>
+                    <p class="hint">{{ t.factory_reset_desc }}</p>
                 </div>
-            </div>
+            </section>
         </div>
-    </section>
+
+        {#- With no Save button the page has to say what it has done, and say it
+            somewhere still on screen after a long scroll. -#}
+        <div class="save-status save-status--idle" id="save-status" role="status" aria-live="polite">
+            <span id="save-status-icon"></span>
+            <span id="save-status-text">{{ t.save_saved }}</span>
+        </div>
+    </div>
 </div>
 
 {#- Changing the sign-in address is a credential change, so it is proved the
@@ -727,13 +607,160 @@
 (function () {
     'use strict';
 
-    function saveConfig(btn, body) {
-        var restore = V.busy(btn);
-        return V.api('/api/config', { method: 'POST', body: body })
-            .then(function () { V.toast(V.t('saved'), 'success'); })
-            .catch(V.fail)
-            .then(restore);
+    /* ── Saving, without a Save button ───────────────────────────────────────
+       A change is committed when it settles: a select or a checkbox the moment
+       it moves, a text field once typing has stopped. The status line is the
+       only feedback there is, so it has to be honest — a refused save puts the
+       field back to the value the device actually holds, rather than leaving
+       the page showing something that was never stored. */
+
+    var statusBox  = document.getElementById('save-status');
+    var statusIcon = document.getElementById('save-status-icon');
+    var statusText = document.getElementById('save-status-text');
+    var inFlight = 0;
+    var idleTimer = null;
+    var SETTLE_MS = 800;
+
+    function setStatus(state, message) {
+        clearTimeout(idleTimer);
+        statusBox.className = 'save-status save-status--' + state;
+        statusText.textContent = message;
+        statusIcon.innerHTML = '';
+        if (state === 'saving') {
+            var spin = document.createElement('span');
+            spin.className = 'save-status__spinner';
+            statusIcon.appendChild(spin);
+        } else if (state === 'saved') {
+            statusIcon.appendChild(V.svg('check-circle'));
+            idleTimer = setTimeout(function () {
+                statusBox.className = 'save-status save-status--idle';
+            }, 2600);
+        } else if (state === 'error') {
+            statusIcon.appendChild(V.svg('alert'));
+        }
     }
+
+    function commit(promise) {
+        inFlight++;
+        setStatus('saving', V.t('save_saving'));
+        return promise.then(function (data) {
+            if (--inFlight === 0) setStatus('saved', V.t('save_saved'));
+            return data;
+        }, function (err) {
+            inFlight--;
+            setStatus('error', V.t('save_failed') + ' — ' + (err.message || err));
+            throw err;
+        });
+    }
+
+    /** Save this field when it settles; put it back if the device refuses. */
+    function autosave(el, send) {
+        if (!el) return;
+        var last = el.type === 'checkbox' ? el.checked : el.value;
+        var timer = null;
+
+        function push() {
+            var now = el.type === 'checkbox' ? el.checked : el.value;
+            if (now === last) return;
+            var previous = last;
+            last = now;
+            commit(send(now)).catch(function () {
+                if (el.type === 'checkbox') el.checked = previous;
+                else el.value = previous;
+                last = previous;
+            });
+        }
+
+        if (el.tagName === 'SELECT' || el.type === 'checkbox') {
+            el.addEventListener('change', push);
+            return;
+        }
+        el.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(push, SETTLE_MS);
+        });
+        // Leaving the field is a settle too: waiting out the timer after
+        // somebody has already moved on reads as the change being ignored.
+        el.addEventListener('blur', function () { clearTimeout(timer); push(); });
+    }
+
+    function saveConfigKey(key) {
+        return function (value) {
+            var body = {};
+            body[key] = value;
+            return V.api('/api/config', { method: 'POST', body: body });
+        };
+    }
+
+    /* ── Stored secrets ─────────────────────────────────────────────────────
+       Write-only values: replaceable, never readable. The field states what
+       the device has instead of showing an empty box, which is what made a
+       configured key look like a missing one. */
+
+    V.$$('[data-secret]').forEach(function (field) {
+        var state  = field.querySelector('.secret__state');
+        var input  = field.querySelector('.secret__input');
+        var button = field.querySelector('[data-secret-replace]');
+        var badge  = state ? state.querySelector('.badge') : null;
+        if (!input || !button || !badge) return;
+
+        button.addEventListener('click', function () {
+            state.hidden = true;
+            input.hidden = false;
+            input.value = '';
+            input.focus();
+        });
+
+        input.addEventListener('secret:stored', function () {
+            input.hidden = true;
+            input.value = '';
+            state.hidden = false;
+            badge.className = 'badge badge--success';
+            badge.textContent = V.t('secret_set');
+        });
+    });
+
+    function autosaveSecret(el, send) {
+        if (!el) return;
+        var timer = null;
+        function push() {
+            var value = el.value;
+            if (!value) return;              // an empty box means "leave it"
+            commit(send(value))
+                .then(function () { el.dispatchEvent(new CustomEvent('secret:stored')); })
+                .catch(function () {});
+        }
+        el.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(push, SETTLE_MS);
+        });
+        el.addEventListener('blur', function () { clearTimeout(timer); push(); });
+    }
+
+    /* ── What saves itself ──────────────────────────────────────────────── */
+
+    autosave(document.getElementById('s-rotation'), function (value) {
+        return V.api('/api/photo/rotation', {
+            method: 'POST', body: { rotation: parseInt(value, 10) } });
+    });
+    autosave(document.getElementById('s-fit-mode'), function (value) {
+        return V.api('/api/photo/fit_mode', { method: 'POST', body: { fit_mode: value } });
+    });
+
+    autosave(document.getElementById('s-weather-city'), saveConfigKey('weather_city'));
+    autosave(document.getElementById('s-weather-units'), saveConfigKey('weather_units'));
+    autosave(document.getElementById('s-weather-lang'), saveConfigKey('weather_lang'));
+    autosaveSecret(document.getElementById('s-weather-key'), saveConfigKey('weather_api_key'));
+
+    autosave(document.getElementById('s-cal-url'), saveConfigKey('calendar_ical_url'));
+
+    // The album link is not here: storing it means reaching Apple first, so it
+    // waits for the button in that section.
+    autosave(document.getElementById('s-icloud-auto'), saveConfigKey('icloud_auto_sync'));
+    autosave(document.getElementById('s-icloud-interval'), function (value) {
+        return V.api('/api/config', {
+            method: 'POST', body: { icloud_sync_interval: parseInt(value, 10) } });
+    });
 
     /* ── Account ────────────────────────────────────────────────────────── */
 
@@ -785,16 +812,7 @@
             .then(restore);
     });
 
-    /* ── Weather ────────────────────────────────────────────────────────── */
-
-    document.getElementById('save-weather').addEventListener('click', function () {
-        saveConfig(this, {
-            weather_api_key: document.getElementById('s-weather-key').value,
-            weather_city: document.getElementById('s-weather-city').value,
-            weather_units: document.getElementById('s-weather-units').value,
-            weather_lang: document.getElementById('s-weather-lang').value
-        });
-    });
+    /* ── Tests ──────────────────────────────────────────────────────────── */
 
     document.getElementById('test-weather').addEventListener('click', function () {
         var out = document.getElementById('weather-test-result');
@@ -814,12 +832,6 @@
                 out.textContent = err.message;
             })
             .then(restore);
-    });
-
-    /* ── Calendar ───────────────────────────────────────────────────────── */
-
-    document.getElementById('save-calendar').addEventListener('click', function () {
-        saveConfig(this, { calendar_ical_url: document.getElementById('s-cal-url').value });
     });
 
     document.getElementById('test-calendar').addEventListener('click', function () {
@@ -842,32 +854,20 @@
             .then(restore);
     });
 
-    /* ── Photo defaults ─────────────────────────────────────────────────── */
-
-    document.getElementById('save-photo').addEventListener('click', function () {
-        var restore = V.busy(this);
-        Promise.all([
-            V.api('/api/photo/rotation', {
-                method: 'POST',
-                body: { rotation: parseInt(document.getElementById('s-rotation').value, 10) }
-            }),
-            V.api('/api/photo/fit_mode', {
-                method: 'POST',
-                body: { fit_mode: document.getElementById('s-fit-mode').value }
-            })
-        ])
-            .then(function () { V.toast(V.t('saved'), 'success'); })
-            .catch(V.fail)
-            .then(restore);
-    });
-
     /* ── Google Drive ───────────────────────────────────────────────────── */
 
     document.getElementById('save-gdrive').addEventListener('click', function () {
-        saveConfig(this, {
+        var restore = V.busy(this);
+        var secret = document.getElementById('s-gdrive-secret');
+        commit(V.api('/api/config', { method: 'POST', body: {
             gdrive_client_id: document.getElementById('s-gdrive-id').value,
-            gdrive_client_secret: document.getElementById('s-gdrive-secret').value
-        });
+            gdrive_client_secret: secret.value
+        } }))
+            .then(function () {
+                if (secret.value) secret.dispatchEvent(new CustomEvent('secret:stored'));
+            })
+            .catch(function () {})
+            .then(restore);
     });
 
     var connectGdrive = document.getElementById('connect-gdrive');
@@ -908,7 +908,7 @@
 
     function renderIcloudState(s) {
         if (!s || !s.connected) {
-            icloudState.className = 'alert';
+            icloudState.className = 'alert mb-2';
             icloudState.textContent = s && s.last_error
                 ? s.last_error : V.t('icloud_not_connected');
             return;
@@ -916,7 +916,8 @@
         var parts = [V.t('icloud_connected_to') + ' ' + (s.album_name || '—'),
                      s.imported + ' ' + V.t('icloud_imported')];
         if (s.last_sync) parts.push(V.t('icloud_last_sync') + ': ' + s.last_sync.replace('T', ' '));
-        icloudState.className = s.last_error ? 'alert alert--warning' : 'alert alert--success';
+        icloudState.className = s.last_error
+            ? 'alert alert--warning mb-2' : 'alert alert--success mb-2';
         icloudState.textContent = parts.join(' · ') + (s.last_error ? ' — ' + s.last_error : '');
     }
 
@@ -928,24 +929,16 @@
     document.getElementById('save-icloud').addEventListener('click', function () {
         var url = document.getElementById('s-icloud-url').value.trim();
         var restore = V.busy(this);
-        // The schedule is an ordinary setting; the link is not — it is only
-        // stored once the album has actually answered.
-        V.api('/api/config', { method: 'POST', body: {
-            icloud_auto_sync: document.getElementById('s-icloud-auto').checked,
-            icloud_sync_interval: parseInt(document.getElementById('s-icloud-interval').value, 10)
-        } })
-            .then(function () {
-                if (!url) { V.toast(V.t('saved'), 'success'); return null; }
-                return V.api('/api/icloud/connect', { method: 'POST', body: { url: url } })
-                    .then(function (d) {
-                        V.toast(d.album + ' — ' + d.photos + ' ' + V.t('images_count'), 'success');
-                        renderIcloudState(d.status);
-                        setTimeout(function () { window.location.reload(); }, 1200);
-                    });
+        if (!url) { V.toast(V.t('icloud_not_connected'), 'warning'); restore(); return; }
+        V.api('/api/icloud/connect', { method: 'POST', body: { url: url } })
+            .then(function (d) {
+                V.toast(d.album + ' — ' + d.photos + ' ' + V.t('images_count'), 'success');
+                renderIcloudState(d.status);
+                setTimeout(function () { window.location.reload(); }, 1200);
             })
             .catch(function (err) {
                 V.fail(err);
-                icloudState.className = 'alert alert--danger';
+                icloudState.className = 'alert alert--danger mb-2';
                 icloudState.textContent = err.message;
             })
             .then(restore);
@@ -978,7 +971,7 @@
         });
     }
 
-    /* ── iPhone Shortcut token ──────────────────────────────────────────── */
+    /* ── iPhone photo sync ──────────────────────────────────────────────── */
 
     var shortcutState = document.getElementById('shortcut-state');
     var mintBtn       = document.getElementById('mint-shortcut-token');
@@ -988,7 +981,7 @@
     /* navigator.clipboard needs a secure context: it works over the tunnel
        (HTTPS) and refuses on a plain-HTTP LAN address, which is exactly where
        somebody is most likely to be standing. Fall back to selecting the text
-       so there is always a way to get the token off the screen. */
+       so there is always a way to get the address off the screen. */
     function copyField(input) {
         input.focus();
         input.select();
@@ -998,7 +991,7 @@
             navigator.clipboard.writeText(input.value).then(done, function () {});
             return;
         }
-        try { if (document.execCommand('copy')) done(); } catch (e) { /* select-and-copy by hand */ }
+        try { if (document.execCommand('copy')) done(); } catch (e) { /* select by hand */ }
     }
 
     V.$$('[data-copy]').forEach(function (btn) {
@@ -1010,7 +1003,7 @@
     function renderShortcutState(s) {
         document.getElementById('s-shortcut-url').value = s.upload_url || '';
         var has = !!s.configured;
-        shortcutState.className = has ? 'alert alert--success' : 'alert';
+        shortcutState.className = has ? 'alert alert--success mb-2' : 'alert mb-2';
         shortcutState.textContent = has
             ? V.t('shortcut_token') + ' · ' + V.t('shortcut_created') + ': ' +
               (s.created || '').replace('T', ' ')
@@ -1018,7 +1011,7 @@
         // The label lives inside the mint button, and V.busy() replaces that
         // button's contents while a request is in flight — so it can genuinely
         // be absent here. Skip it rather than throwing halfway through and
-        // leaving the rest of the card un-rendered.
+        // leaving the rest of the section un-rendered.
         var label = document.getElementById('mint-shortcut-label');
         if (label) label.textContent = has ? V.t('shortcut_replace') : V.t('shortcut_new');
         revokeBtn.classList.toggle('hidden', !has);
@@ -1055,8 +1048,8 @@
                 .catch(V.fail)
                 .then(function () {
                     // Put the button back first — restore() rewrites its
-                    // contents — then re-render the card from the device, so
-                    // there is one source of truth for what it says.
+                    // contents — then re-render from the device, so there is
+                    // one source of truth for what it says.
                     restore();
                     refreshShortcut();
                 });
@@ -1081,7 +1074,7 @@
         });
     });
 
-    /* ── System ─────────────────────────────────────────────────────────── */
+    /* ── The frame itself ───────────────────────────────────────────────── */
 
     document.getElementById('show-qr').addEventListener('click', function () {
         var restore = V.busy(this);
@@ -1176,12 +1169,12 @@
     function renderRemoteState(s) {
         var box = document.getElementById('remote-state');
         if (!s.enabled || s.provider === 'none') {
-            box.className = 'alert';
+            box.className = 'alert mb-2';
             box.textContent = V.t('remote_off');
             return;
         }
         if (s.status === 'online' && s.url) {
-            box.className = 'alert alert--success';
+            box.className = 'alert alert--success mb-2';
             box.innerHTML = '';
             var label = document.createElement('div');
             label.className = 'small';
@@ -1204,12 +1197,12 @@
             return;
         }
         if (!s.configured) {
-            box.className = 'alert alert--warning';
+            box.className = 'alert alert--warning mb-2';
             box.textContent = s.provider === 'cloudflare'
                 ? V.t('remote_no_url') : V.t('remote_no_token');
             return;
         }
-        box.className = s.status === 'error' ? 'alert alert--warning' : 'alert';
+        box.className = s.status === 'error' ? 'alert alert--warning mb-2' : 'alert mb-2';
         box.textContent = s.status === 'error'
             ? V.t('remote_error') + (s.error ? ' — ' + s.error : '')
             : V.t('remote_connecting');
@@ -1221,15 +1214,20 @@
     refreshRemote();
 
     document.getElementById('save-remote').addEventListener('click', function () {
-        saveConfig(this, {
+        var restore = V.busy(this);
+        var ngrok = document.getElementById('s-ngrok-token');
+        commit(V.api('/api/config', { method: 'POST', body: {
             remote_access_enabled: document.getElementById('s-remote-enabled').checked,
             remote_access_provider: document.getElementById('s-remote-provider').value,
             remote_public_url: document.getElementById('s-remote-url').value,
-            ngrok_authtoken: document.getElementById('s-ngrok-token').value
-        }).then(function () {
-            document.getElementById('s-ngrok-token').value = '';
-            setTimeout(refreshRemote, 1500);
-        });
+            ngrok_authtoken: ngrok.value
+        } }))
+            .then(function () {
+                if (ngrok.value) ngrok.dispatchEvent(new CustomEvent('secret:stored'));
+                setTimeout(refreshRemote, 1500);
+            })
+            .catch(function () {})
+            .then(restore);
     });
 
     document.getElementById('remote-reconnect').addEventListener('click', function () {

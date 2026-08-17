@@ -290,9 +290,15 @@
             function select(btn, remember) {
                 buttons.forEach(function (b) {
                     var on = b === btn;
+                    var id = b.getAttribute('data-tab');
                     b.setAttribute('aria-selected', on ? 'true' : 'false');
-                    var panel = document.getElementById(b.getAttribute('data-tab'));
+                    var panel = document.getElementById(id);
                     if (panel) panel.hidden = !on;
+                    /* A section's own subsection list travels with it, so the
+                       rail only ever offers links that go somewhere visible. */
+                    $$('[data-sub-for="' + id + '"]').forEach(function (sub) {
+                        sub.hidden = !on;
+                    });
                 });
                 /* Settings reloads itself after connecting an album, and the
                    old behaviour dropped the reader back on the first tab every

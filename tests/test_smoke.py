@@ -1583,6 +1583,35 @@ def test_update_hands_over_when_it_rewrites_itself():
         assert output.count("continuing with the new version") == 1, output
 
 
+def test_settings_saves_itself_except_where_it_must_not():
+    """Which controls save on their own, and which keep a button.
+
+    A setting that is only written to config.json can be committed the moment
+    it settles. One that reaches out — connecting an album, a Drive account, a
+    tunnel — cannot: it can fail for reasons that have nothing to do with what
+    was typed, and tearing down a tunnel on every keystroke is not a feature.
+    """
+    html = _paired_client().get("/settings").get_data(as_text=True)
+
+    # These commit themselves, so their buttons are gone.
+    for gone in ('id="save-weather"', 'id="save-calendar"', 'id="save-photo"'):
+        assert gone not in html, f"{gone} is back; that field autosaves now"
+
+    # These reach out, so they keep theirs.
+    for kept in ('id="save-icloud"', 'id="save-gdrive"', 'id="save-remote"'):
+        assert kept in html, f"{kept} is missing; that one must not autosave"
+
+    # Every field the autosave wiring names has to exist, or a setting silently
+    # stops saving with nothing on screen to say so.
+    for field in ("s-rotation", "s-fit-mode", "s-weather-city", "s-weather-units",
+                  "s-weather-lang", "s-weather-key", "s-cal-url",
+                  "s-icloud-auto", "s-icloud-interval"):
+        assert f'id="{field}"' in html, field
+
+    # And the page has somewhere to say what it did.
+    assert 'id="save-status"' in html
+
+
 def test_static_assets_change_address_when_they_change():
     """An update must not leave the console rendering against its old CSS.
 

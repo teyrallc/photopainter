@@ -1365,3 +1365,198 @@ body.is-locked { overflow: hidden; }
     border-radius: var(--r-md);
     image-rendering: pixelated;
 }
+
+/* ── Settings: a rail and a pane ─────────────────────────────────────────────
+   One list of sections down the side, one section's contents beside it. The
+   horizontal tab row this replaces made the reader guess which of five words
+   held the thing they wanted and gave no sense of where they were; a rail
+   shows the whole map at once and can carry the current section's subsections
+   under it. Below 900px there is no room for a column, so the same markup
+   becomes the scrolling row it used to be. */
+
+.settings { display: block; }
+
+.settings__nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 18px;
+    padding: 4px;
+    background: var(--surface-3);
+    border-radius: var(--r-md);
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    position: sticky;
+    top: calc(var(--header-h) + 8px);
+    z-index: 20;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+.settings__nav::-webkit-scrollbar { display: none; }
+
+.settings__link {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 13px;
+    font: inherit;
+    font-size: .92rem;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--text-dim);
+    background: transparent;
+    border: 0;
+    border-radius: 9px;
+    cursor: pointer;
+    text-align: left;
+}
+.settings__link:hover { color: var(--text); }
+.settings__link .icon { width: 17px; height: 17px; }
+.settings__link[aria-selected="true"] {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+}
+
+/* The subsections of the open section. No room for them on a phone. */
+.settings__sub { display: none; }
+
+.settings__foot { display: none; }
+
+@media (min-width: 900px) {
+    .settings {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        gap: 36px;
+        align-items: start;
+    }
+    .settings__nav {
+        position: sticky;
+        top: calc(var(--header-h) + 24px);
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        margin: 0;
+        padding: 0;
+        overflow: visible;
+        background: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        min-height: 420px;
+    }
+    .settings__link {
+        width: 100%;
+        min-height: 36px;
+        border-radius: var(--r-sm);
+        padding: 0 10px;
+    }
+    .settings__link[aria-selected="true"] {
+        background: var(--accent-soft);
+        color: var(--accent-text);
+        box-shadow: none;
+    }
+    .settings__sub {
+        display: block;
+        margin: 2px 0 10px;
+        padding-left: 10px;
+    }
+    .settings__sub[hidden] { display: none; }
+    .settings__sub a {
+        display: block;
+        padding: 5px 0 5px 16px;
+        border-left: 2px solid var(--border);
+        font-size: .86rem;
+        color: var(--text-mute);
+    }
+    .settings__sub a:hover {
+        color: var(--text);
+        border-left-color: var(--border-strong);
+        text-decoration: none;
+    }
+    .settings__foot {
+        display: block;
+        margin-top: auto;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+        font-size: .74rem;
+        color: var(--text-mute);
+    }
+}
+
+/* ── A section, and the subsections inside it ───────────────────────────── */
+
+.pane-head { margin-bottom: 26px; }
+.pane-head h1 { font-size: 1.42rem; }
+.pane-head p { margin: 6px 0 0; color: var(--text-dim); font-size: .92rem; }
+
+.subsection { margin-bottom: 34px; scroll-margin-top: calc(var(--header-h) + 90px); }
+.subsection:last-child { margin-bottom: 0; }
+.subsection__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 9px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+}
+.subsection__head h2 { font-size: 1rem; font-weight: 650; }
+.subsection__head .icon { color: var(--text-mute); width: 17px; height: 17px; }
+.subsection__head .spacer { flex: 1; }
+.subsection > .field:last-child { margin-bottom: 0; }
+
+/* Controls stop at a readable measure rather than running the pane's width —
+   a city name in a 700px box looks like the page is missing something. */
+.settings__pane .input,
+.settings__pane .select,
+.settings__pane .input-group { max-width: 420px; }
+.settings__pane .field .btn { margin-top: 2px; }
+
+/* ── A stored secret ────────────────────────────────────────────────────────
+   An API key is write-only: it can be replaced but never read back. Rendering
+   that as a permanently empty box with "leave blank to keep" in the
+   placeholder makes a configured key look like a missing one. */
+
+.secret__state {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.secret__input[hidden] { display: none; }
+
+/* ── Save status ────────────────────────────────────────────────────────────
+   With no Save button the page has to say what it has done, and say it
+   somewhere still on screen after a long scroll. */
+
+.save-status {
+    position: sticky;
+    bottom: calc(var(--tabbar-h) + 12px);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 30px;
+    padding: 9px 14px;
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+    font-size: .85rem;
+    font-weight: 550;
+    color: var(--text-dim);
+    width: fit-content;
+    transition: opacity .3s var(--ease);
+}
+@media (min-width: 900px) { .save-status { bottom: 20px; } }
+.save-status .icon { width: 16px; height: 16px; }
+.save-status--idle { opacity: 0; pointer-events: none; }
+.save-status--saved { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
+.save-status--error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 34%, transparent); }
+.save-status__spinner {
+    width: 14px; height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: v-spin .65s linear infinite;
+}

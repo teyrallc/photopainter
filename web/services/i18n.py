@@ -193,6 +193,21 @@ TRANSLATIONS = {
         "shortcut_step6": "Want it in the share sheet too? Make the same \u201cGet Contents of URL\u201d step as a plain shortcut with file set to Shortcut Input, and turn on \u201cShow in Share Sheet\u201d.",
 
         # Settings — the five sections the page is divided into
+        "settings_page_sub": "Manage your Vignette frame.",
+        "pane_account_sub": "The address and password you sign in with.",
+        "pane_display_sub": "Control what appears on your frame.",
+        "pane_photos_sub": "Where the frame gets its pictures from.",
+        "pane_network_sub": "How the frame connects, and who can reach it.",
+        "pane_frame_sub": "The device itself \u2014 updates, power, and starting over.",
+        # Auto-save status. There is no Save button, so the page has to say.
+        "save_saving": "Saving\u2026",
+        "save_saved": "All changes saved",
+        "save_failed": "Not saved",
+        # A stored secret is write-only: replaceable, never readable.
+        "secret_set": "Configured",
+        "secret_unset": "Not set",
+        "secret_replace": "Replace",
+        "secret_cancel": "Cancel",
         "settings_sub": "Everything this frame can be told to do",
         "set_account": "My account",
         "set_display": "On the screen",
@@ -556,6 +571,21 @@ TRANSLATIONS = {
         "shortcut_step6": "也想從「分享」選單送？用同樣的「取得 URL 內容」做成一般捷徑，file 設成「捷徑輸入」，再打開「顯示於共享表單」。",
 
         # Settings — the five sections the page is divided into
+        "settings_page_sub": "管理你的 Vignette 相框。",
+        "pane_account_sub": "登入用的信箱與密碼。",
+        "pane_display_sub": "控制相框上顯示什麼。",
+        "pane_photos_sub": "相框的照片從哪裡來。",
+        "pane_network_sub": "相框怎麼連線,以及誰連得到它。",
+        "pane_frame_sub": "裝置本身 —— 更新、電源,以及重新開始。",
+        # Auto-save status. There is no Save button, so the page has to say.
+        "save_saving": "儲存中\u2026",
+        "save_saved": "已全部儲存",
+        "save_failed": "沒有存到",
+        # A stored secret is write-only: replaceable, never readable.
+        "secret_set": "已設定",
+        "secret_unset": "未設定",
+        "secret_replace": "更換",
+        "secret_cancel": "取消",
         "settings_sub": "這台相框能做的所有設定",
         "set_account": "我的帳號",
         "set_display": "螢幕上顯示",
