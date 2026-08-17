@@ -45,6 +45,19 @@ if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
 fi
 
+# sudo must never stop at a password prompt here. From the web console there is
+# no terminal to type into; run by hand as the service account there is no
+# password to type either, because it is a --system account with none set. So
+# every sudo is non-interactive: "ask" becomes "fail immediately", and the
+# caller says what to do about it.
+sudo_n() {
+    if [ -n "$SUDO" ]; then
+        sudo -n "$@"
+    else
+        "$@"
+    fi
+}
+
 # Nothing here may ever wait for a human. From the web console this script is
 # a child of vignette.service with no terminal attached, so git's credential
 # prompt and SSH's "continue connecting (yes/no)?" do not ask anybody
@@ -288,22 +301,42 @@ restart_detached() {
     # A transient unit lives outside vignette.service's cgroup, so the restart
     # cannot take this script (or the web request) down with it. The delay
     # gives the HTTP response time to reach the browser first.
+    #
+    # This exact shape is what /etc/sudoers.d/vignette allows the service
+    # account to run without a password — see scripts/install.sh. Changing the
+    # flags here means changing that rule too, or the restart starts asking for
+    # a password nobody can supply.
     if command -v systemd-run >/dev/null 2>&1; then
-        $SUDO systemd-run --collect --quiet \
+        sudo_n systemd-run --collect --quiet \
             --unit="vignette-restart-$$" \
             --description="Restart Vignette after an update" \
             /bin/sh -c 'sleep 3; systemctl restart vignette' && return 0
     fi
-    # Fallback for systems without systemd-run: a new session detaches the
-    # child from this process group.
+    # Fallback for systems without systemd-run, or where the transient unit was
+    # refused: a new session detaches the child from this process group.
+    # Backgrounding hides sudo's exit status, so ask first whether it will run
+    # at all — otherwise a refusal reads as a scheduled restart that never came.
+    if [ -n "$SUDO" ] && ! sudo -n true 2>/dev/null; then
+        return 1
+    fi
     $SUDO setsid nohup /bin/sh -c 'sleep 3; systemctl restart vignette' \
         >/dev/null 2>&1 &
+    return 0
 }
 
-if $SUDO systemctl is-enabled --quiet vignette 2>/dev/null || \
-   $SUDO systemctl is-active --quiet vignette 2>/dev/null; then
-    restart_detached
-    echo "Restart scheduled — the service comes back in a few seconds."
+# No sudo on these two: they are read-only queries any account may make, and
+# they are not in the service account's sudoers allowlist — so asking for root
+# turned "is the service running?" into a password prompt with no password
+# behind it, right after the update had already been applied.
+if systemctl is-enabled --quiet vignette 2>/dev/null || \
+   systemctl is-active --quiet vignette 2>/dev/null; then
+    if restart_detached; then
+        echo "Restart scheduled — the service comes back in a few seconds."
+    else
+        echo "WARNING: the new code is installed, but this account may not"
+        echo "         restart the service without a password. Finish with:"
+        echo "             sudo systemctl restart vignette"
+    fi
 else
     echo "vignette.service is not installed or running."
     echo "Start it with: sudo systemctl start vignette"

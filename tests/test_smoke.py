@@ -1313,6 +1313,94 @@ def test_update_diagnoses_a_local_ref_with_no_commit_behind_it():
         assert healthy.returncode == 0, healthy.stdout + healthy.stderr
 
 
+def test_update_never_stops_at_a_password_prompt():
+    """The restart step has no password available to it, ever.
+
+    From the web console there is no terminal to type into. Run by hand as the
+    service account there is nothing to type either — it is a --system account
+    created with no password. So a sudo that asks is a sudo that hangs or
+    fails, after the update has already been applied.
+
+    This happened: `sudo systemctl is-enabled vignette` is not in the service
+    account's sudoers allowlist, so a read-only "is it running?" check turned
+    into an unanswerable prompt. The stand-in sudo below fails loudly if the
+    script ever calls it interactively.
+    """
+    import shutil
+
+    script = os.path.join(REPO, "scripts", "update.sh")
+    with tempfile.TemporaryDirectory() as tmp:
+        binf = os.path.join(tmp, "bin")
+        os.makedirs(binf)
+
+        def stub(name, body):
+            path = os.path.join(binf, name)
+            with open(path, "w") as handle:
+                handle.write("#!/bin/sh\n" + body)
+            os.chmod(path, 0o755)
+
+        # Force the sudo branch even when the tests run as root.
+        stub("id", 'case "$1" in -u) echo 1000 ;; *) echo vignette ;; esac\n')
+        stub("systemctl", 'exit 0\n')
+        stub("systemd-run", 'exit 0\n')
+        stub("sudo", 'if [ "$1" = "-n" ]; then shift; echo "SUDO-N: $*"; exit 0; fi\n'
+                     'echo "INTERACTIVE-SUDO: $*"; exit 1\n')
+
+        env = {**os.environ, "GIT_CONFIG_COUNT": "0",
+               "PATH": binf + os.pathsep + os.environ["PATH"]}
+        upstream = os.path.join(tmp, "origin.git")
+        work = os.path.join(tmp, "work")
+
+        def git(*args, cwd=work):
+            return run_real(["git", "-C", cwd, *args], capture_output=True,
+                            text=True, timeout=30, env=env)
+
+        run_real(["git", "init", "-q", "--bare", "-b", "main", upstream],
+                 capture_output=True, text=True, timeout=30, env=env)
+        run_real(["git", "clone", "-q", upstream, work],
+                 capture_output=True, text=True, timeout=30, env=env)
+        os.makedirs(os.path.join(work, "scripts"), exist_ok=True)
+        shutil.copy(script, os.path.join(work, "scripts", "update.sh"))
+        git("config", "user.email", "test@example.com")
+        git("config", "user.name", "Test")
+        git("add", "-A")
+        git("commit", "-qm", "base")
+        git("branch", "-M", "main")
+        git("push", "-q", "-u", "origin", "main")
+
+        # Something to actually update to, so the restart step is reached.
+        with open(os.path.join(work, "app.py"), "w") as handle:
+            handle.write("v2\n")
+        git("add", "-A")
+        git("commit", "-qm", "next")
+        git("push", "-q", "origin", "main")
+        git("reset", "-q", "--hard", "HEAD~1")
+
+        result = run_real(["bash", os.path.join(work, "scripts", "update.sh")],
+                          cwd=work, capture_output=True, text=True,
+                          timeout=120, env=env, stdin=subprocess.DEVNULL)
+        output = result.stdout + result.stderr
+
+        assert "INTERACTIVE-SUDO" not in output, output
+        assert result.returncode == 0, output
+        assert "Restart scheduled" in output, output
+
+        # The restart is only passwordless because it matches the rule
+        # install.sh writes into /etc/sudoers.d/vignette. Tie the two together:
+        # changing the flags on one side has to fail here rather than in the
+        # field, months later, as a prompt nobody can answer.
+        restart = [line for line in output.splitlines() if line.startswith("SUDO-N:")]
+        assert restart, output
+        assert restart[0].startswith(
+            "SUDO-N: systemd-run --collect --quiet --unit=vignette-restart-"), restart
+        assert "--description=" in restart[0], restart
+        assert restart[0].endswith("/bin/sh -c sleep 3; systemctl restart vignette"), restart
+
+        installer = open(os.path.join(REPO, "scripts", "install.sh")).read()
+        assert ("NOPASSWD: /usr/bin/systemd-run --collect --quiet "
+                "--unit=vignette-restart-* --description=* /bin/sh -c *") in installer
+
+
 def test_config_survives_a_reload():
     """Round-trip through the atomic save path."""
     from services.config import Config
