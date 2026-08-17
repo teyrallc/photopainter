@@ -18,6 +18,9 @@ usage() {
 Vignette — update to the latest code.
 
   bash scripts/update.sh          Fetch, fast-forward, install deps, restart
+  bash scripts/update.sh --repair-refs
+                                  Delete local branch refs whose commits are
+                                  missing, then update as usual
   bash scripts/update.sh --help   This message
 
 Also reachable from Settings → Update Software. Driven that way it runs as the
@@ -26,8 +29,10 @@ an address that needs neither.
 EOF
 }
 
+REPAIR_REFS=""
 case "${1:-}" in
     -h|--help) usage; exit 0 ;;
+    --repair-refs) REPAIR_REFS="yes" ;;
     "") ;;
     *) echo "Unknown option: $1" >&2; echo >&2; usage >&2; exit 2 ;;
 esac
@@ -148,6 +153,13 @@ explain_remote_failure() {
     fi
 
     case "$FETCH_OUTPUT" in
+        *"bad object refs/"*|*"did not send all necessary objects"*)
+            # Reached only if a ref broke between the check above and here.
+            echo "       Despite the message, origin answered: a local ref names a"
+            echo "       commit this checkout no longer has, and git fails the"
+            echo "       fetch over it. Clear them with:"
+            echo "           bash scripts/update.sh --repair-refs"
+            ;;
         *"Could not resolve host"*|*"Network is unreachable"*|*"unable to access"*|*"Connection timed out"*|*"timed out"*)
             echo "       The device cannot reach the network at the moment. Check"
             echo "       the WiFi connection and try again."
@@ -157,6 +169,50 @@ explain_remote_failure() {
             ;;
     esac
 }
+
+# ── A local ref git cannot resolve stops every fetch ────────────────────
+#
+# git checks all local refs while fetching, so one branch pointing at a commit
+# that is no longer in the object database fails the whole update — with
+# "fatal: bad object refs/heads/<name>" and "did not send all necessary
+# objects", which reads like a network fault and is not one. A branch left over
+# from work that has since been merged is the way this happens: the branch is
+# deleted upstream, the local ref survives, and eventually the commit behind it
+# is pruned. There is nothing to recover from such a ref — its commit is gone —
+# but deleting a branch is still the owner's call, so this reports and offers
+# --repair-refs rather than doing it unasked.
+BROKEN_REFS=""
+while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    git rev-parse --verify --quiet "$ref^{object}" >/dev/null 2>&1 && continue
+    BROKEN_REFS="${BROKEN_REFS}${ref}"$'\n'
+done <<EOF
+$(git for-each-ref --format='%(refname)' refs/heads refs/remotes refs/tags 2>/dev/null || true)
+EOF
+
+if [ -n "$BROKEN_REFS" ]; then
+    if [ -n "$REPAIR_REFS" ]; then
+        echo "[0/3] Removing local refs whose commits are missing..."
+        printf '%s' "$BROKEN_REFS" | while IFS= read -r ref; do
+            [ -n "$ref" ] || continue
+            echo "      $ref"
+            git update-ref -d "$ref" || true
+        done
+        echo
+    else
+        OWNER="$(stat -c '%U' "$INSTALL_DIR" 2>/dev/null || id -un)"
+        echo
+        echo "ERROR: this checkout has refs pointing at commits it no longer has:"
+        printf '%s' "$BROKEN_REFS" | sed 's/^/           /'
+        echo
+        echo "       git checks every ref while fetching, so these block the"
+        echo "       update even though origin is reachable and '$BRANCH' itself"
+        echo "       is fine. Nothing can be recovered from them — the commits"
+        echo "       they name are already gone. To delete them and update:"
+        echo "           sudo -u $OWNER bash scripts/update.sh --repair-refs"
+        exit 1
+    fi
+fi
 
 echo "[1/3] Fetching from origin..."
 if ! FETCH_OUTPUT="$(git fetch --prune origin 2>&1)"; then

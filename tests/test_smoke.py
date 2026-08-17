@@ -1247,6 +1247,72 @@ def test_update_diagnoses_an_ssh_remote_it_cannot_use():
             "git@github.invalid:owner/repo.git"
 
 
+def test_update_diagnoses_a_local_ref_with_no_commit_behind_it():
+    """A dead branch ref blocks every fetch, and does not look like one.
+
+    Git checks all local refs while fetching, so one branch pointing at a
+    commit the object database no longer has fails the whole update with
+    "fatal: bad object refs/heads/<name>" and "did not send all necessary
+    objects". Both read like a network fault; neither is. This happened on a
+    real device to a branch whose work had already been merged, and the script
+    reported "could not reach origin" when origin was perfectly reachable.
+    """
+    import shutil
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {**os.environ, "GIT_CONFIG_COUNT": "0", "HOME": "/nonexistent"}
+        upstream = os.path.join(tmp, "origin.git")
+        work = os.path.join(tmp, "work")
+
+        def git(*args, cwd=work):
+            return run_real(["git", "-C", cwd, *args], capture_output=True,
+                            text=True, timeout=30, env=env)
+
+        run_real(["git", "init", "-q", "--bare", "-b", "main", upstream],
+                 capture_output=True, text=True, timeout=30, env=env)
+        run_real(["git", "clone", "-q", upstream, work],
+                 capture_output=True, text=True, timeout=30, env=env)
+        os.makedirs(os.path.join(work, "scripts"), exist_ok=True)
+        shutil.copy(os.path.join(REPO, "scripts", "update.sh"),
+                    os.path.join(work, "scripts", "update.sh"))
+        git("config", "user.email", "test@example.com")
+        git("config", "user.name", "Test")
+        git("add", "-A")
+        git("commit", "-qm", "base")
+        git("branch", "-M", "main")
+        git("push", "-q", "-u", "origin", "main")
+
+        # A branch ref naming a commit that was never here.
+        dead = os.path.join(work, ".git", "refs", "heads", "merged-and-gone")
+        with open(dead, "w") as handle:
+            handle.write("0" * 39 + "1\n")
+
+        script = os.path.join(work, "scripts", "update.sh")
+        blocked = run_real(["bash", script], cwd=work, capture_output=True,
+                           text=True, timeout=120, env=env)
+        output = blocked.stdout + blocked.stderr
+        assert blocked.returncode == 1, output
+        assert "merged-and-gone" in output, output
+        assert "--repair-refs" in output, output
+        # The old message blamed the network for this. It must not any more.
+        assert "could not reach origin" not in output, output
+        assert "WiFi" not in output, output
+
+        repaired = run_real(["bash", script, "--repair-refs"], cwd=work,
+                            capture_output=True, text=True, timeout=120, env=env)
+        output = repaired.stdout + repaired.stderr
+        assert repaired.returncode == 0, output
+        assert "Fetching from origin" in output, output
+        refs = git("for-each-ref", "--format=%(refname)").stdout
+        assert "merged-and-gone" not in refs, refs
+        assert "refs/heads/main" in refs, refs
+
+        # And a healthy checkout is unaffected by the new check.
+        healthy = run_real(["bash", script], cwd=work, capture_output=True,
+                           text=True, timeout=120, env=env)
+        assert healthy.returncode == 0, healthy.stdout + healthy.stderr
+
+
 def test_config_survives_a_reload():
     """Round-trip through the atomic save path."""
     from services.config import Config
