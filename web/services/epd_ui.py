@@ -59,8 +59,36 @@ FONT_PATHS = [
 # The subset of the above that can actually draw Chinese.
 _CJK_FONTS = ("wqy-zenhei", "NotoSansCJK")
 
+# ── The display face ─────────────────────────────────────────────────────
+# One face cannot do both jobs. The stack above is chosen for coverage — it has
+# to draw Chinese — and WenQuanYi's Latin numerals are its weakest part: uneven
+# widths and a thin, papery stroke that the panel's hard threshold breaks up.
+# At 86 and 104 pixels those numerals *are* the page, so they get a face chosen
+# for exactly that: Inter, at a weight heavy enough to survive thresholding and
+# to read from across a room.
+#
+# It is Latin-only, so `face()` below picks it only for strings that have no
+# CJK in them, and everything falls back to the body stack when Inter is not
+# installed. Nothing here is required — the panel just looks plainer without it.
+_DISPLAY_PATHS = {
+    "regular": [
+        "/usr/share/fonts/opentype/inter/Inter-Regular.otf",
+        "/usr/share/fonts/truetype/inter/Inter-Regular.ttf",
+    ],
+    "medium": [
+        "/usr/share/fonts/opentype/inter/Inter-Medium.otf",
+        "/usr/share/fonts/truetype/inter/Inter-Medium.ttf",
+    ],
+    "semibold": [
+        "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf",
+        "/usr/share/fonts/truetype/inter/Inter-SemiBold.ttf",
+    ],
+}
+
 _font_cache = {}
+_display_cache = {}
 _resolved_path = None
+_display_logged = False
 
 
 def font(size):
@@ -91,6 +119,55 @@ def font(size):
     fallback = ImageFont.load_default()
     _font_cache[size] = fallback
     return fallback
+
+
+def display(size, weight="medium"):
+    """The Latin display face at `size`, or the body face if it is missing.
+
+    Never called directly for anything that might be Chinese — use `face()`,
+    which decides. This is here for text that is digits by construction.
+    """
+    global _display_logged
+    key = (size, weight)
+    if key in _display_cache:
+        return _display_cache[key]
+
+    for path in _DISPLAY_PATHS.get(weight, ()):
+        if not os.path.exists(path):
+            continue
+        try:
+            loaded = ImageFont.truetype(path, size)
+        except Exception:  # noqa: BLE001 - a broken font file is just the next one
+            continue
+        if not _display_logged:
+            _display_logged = True
+            logger.info("Panel display face: %s", os.path.dirname(path))
+        _display_cache[key] = loaded
+        return loaded
+
+    if not _display_logged:
+        _display_logged = True
+        logger.info("No display face found; headline type falls back to the "
+                    "body font. Install fonts-inter for the intended look.")
+    fallback = font(size)
+    _display_cache[key] = fallback
+    return fallback
+
+
+# Everything from CJK Radicals up. Anything below it, Inter covers — including
+# the degree sign and the arrows the pages use.
+def _needs_cjk(text):
+    return any(ord(ch) >= 0x2E80 for ch in str(text))
+
+
+def face(text, size, weight="medium"):
+    """The right face for this string.
+
+    The display face unless the string needs Chinese, in which case the body
+    font — which is why a frame set to Chinese still renders its weather
+    description, rather than a row of empty boxes in a prettier typeface.
+    """
+    return font(size) if _needs_cjk(text) else display(size, weight)
 
 
 def has_cjk():
@@ -269,12 +346,13 @@ def header(draw, box, title, right_text=None, accent=BLUE,
     room and it pushed everything else down — the page read as a warning, not
     as a calendar. A rule carries the same structure at a fraction of the ink.
     """
-    title_font = font(title_size)
+    # A city name can be Chinese; "Updated 14:05" never is.
+    title_font = face(title, title_size, "medium")
     baseline = box.bottom - 10
 
     reserved = 0
     if right_text:
-        right_font = font(right_size)
+        right_font = face(right_text, right_size, "regular")
         reserved = text_width(right_text, right_font) + 20
         draw.text((box.right - pad, baseline), right_text,
                   fill=BLACK, font=right_font, anchor="rs")
@@ -305,11 +383,11 @@ def card(draw, box, outline=BLACK, width=1, fill=None, radius=6):
 
 def empty_state(draw, box, message, hint=None):
     """What a panel shows when its data source is not configured yet."""
-    body = font(20)
+    body = face(message, 20, "medium")
     draw.text((box.cx, box.cy - (12 if hint else 0)), fit(message, body, box.w - 24),
               fill=BLACK, font=body, anchor="mm")
     if hint:
-        small = font(14)
+        small = face(hint, 14, "regular")
         draw.text((box.cx, box.cy + 16), fit(hint, small, box.w - 24),
                   fill=BLUE, font=small, anchor="mm")
 

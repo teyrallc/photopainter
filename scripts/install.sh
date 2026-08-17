@@ -27,13 +27,19 @@ sudo apt-get -y install \
     dnsmasq \
     iptables \
     fonts-dejavu-core \
-    fonts-wqy-zenhei
+    fonts-wqy-zenhei \
+    fonts-inter
 
 # The panel draws its own text, so the fonts are not optional decoration —
 # without them Pillow falls back to a bitmap face and the pages come out
 # unreadable. DejaVu covers Latin; WenQuanYi Zen Hei is what renders a Chinese
-# calendar entry or city name as characters instead of empty boxes. Together
-# they are about 15 MB.
+# calendar entry or city name as characters instead of empty boxes.
+#
+# Inter is the display face: the date and the temperature are drawn at 86 and
+# 104 pixels and are the whole page at that size, and WenQuanYi's numerals —
+# uneven widths, a thin stroke the panel's hard threshold breaks up — are its
+# weakest part. The pages still render without it, just plainer. Together the
+# three are about 25 MB.
 
 # dnsmasq is needed for NetworkManager shared mode DNS.
 # Disable the system service so it doesn't conflict with NM's managed instance.

@@ -38,6 +38,9 @@ case "${1:-}" in
 esac
 
 INSTALL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Absolute, because the script hands over to its own new copy after an update
+# and must not depend on how it was invoked or from where.
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$INSTALL_DIR"
 
 SUDO=""
@@ -255,6 +258,12 @@ if ! FETCH_OUTPUT="$(git fetch --prune origin 2>&1)"; then
 fi
 
 BEFORE="$(git rev-parse HEAD)"
+# After a hand-over (see below) the fetch has nothing left to do, so the steps
+# that follow have to measure against where the *first* run started or they
+# would conclude there was nothing to install and skip the restart.
+if [ -n "${VIGNETTE_UPDATE_REEXEC:-}" ]; then
+    BEFORE="$VIGNETTE_UPDATE_REEXEC"
+fi
 
 if ! git merge --ff-only "origin/$BRANCH"; then
     echo
@@ -271,6 +280,25 @@ if [ "$BEFORE" = "$AFTER" ]; then
     echo
     echo "Already up to date — nothing to install, no restart needed."
     exit 0
+fi
+
+# ── This script has just rewritten itself ───────────────────────────────
+#
+# bash reads a script incrementally, by byte offset, while it runs it. The
+# fast-forward above can replace this very file, and bash then carries on
+# reading the *new* bytes from the *old* offset — running whatever fragment
+# happens to land there, or stopping in the middle. So a fix to the steps below
+# never takes effect on the run that installs it; it takes effect on the next
+# one, and what happens in between is undefined.
+#
+# Hand over to the new copy instead, once. VIGNETTE_UPDATE_REEXEC stops that
+# from looping if the file keeps changing.
+if [ -z "${VIGNETTE_UPDATE_REEXEC:-}" ] && \
+   ! git diff --quiet "$BEFORE" "$AFTER" -- "$SELF" 2>/dev/null; then
+    echo
+    echo "The update changed this script; continuing with the new version."
+    export VIGNETTE_UPDATE_REEXEC="$BEFORE"
+    exec bash "$SELF" ${REPAIR_REFS:+--repair-refs}
 fi
 
 echo

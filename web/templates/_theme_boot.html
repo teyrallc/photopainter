@@ -1,0 +1,26 @@
+{#
+  Resolve the theme before first paint, so the page never flashes the wrong one.
+
+  One rule for the whole site — the console and the full-screen pairing and
+  sign-in pages both include this, so the front door can never be a different
+  colour from the rooms behind it.
+
+  Dark is the default. The device's own night-mode setting is deliberately not
+  consulted: the theme is whatever was last chosen here, and nothing else, so
+  the frame's console looks the same on every phone that opens it.
+#}
+<script>
+(function () {
+    var pref = null;
+    try { pref = localStorage.getItem('vignette-theme'); } catch (e) {}
+    var dark = pref !== 'light';
+    var root = document.documentElement;
+    root.setAttribute('data-theme', dark ? 'dark' : 'light');
+    root.setAttribute('data-theme-pref', pref || 'dark');
+    /* Tells the browser which way to paint its own furniture — form controls,
+       scrollbars, the overscroll gutter — so they match the page. */
+    root.style.colorScheme = dark ? 'dark' : 'light';
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', dark ? '#0e1014' : '#f4f2ef');
+})();
+</script>

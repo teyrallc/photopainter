@@ -128,29 +128,39 @@ def _draw_home_column(img, draw, box, weather, events):
 
     # ── Weather: an icon, a number, and one line of detail ──
     if weather:
-        ui.rule(draw, ui.Box(inner.x, rest.y - 7, inner.w, 1))
+        top_rule_y = rest.y - 7
+        ui.rule(draw, ui.Box(inner.x, top_rule_y, inner.w, 1))
         now_box, rest = rest.cut_top(118, gap=14)
+        bottom_rule_y = rest.y - 7
 
-        # The temperature's baseline is this row's axis. The icon is centred on
-        # the numeral's own midline — not on its text box, which is taller than
-        # the digits and was leaving the icon sitting low beside them. Its
-        # reading starts on the same axis the weekday above it does, so the
-        # column has one secondary edge instead of one per row.
+        # The band between the two rules is the unit here, so the icon is
+        # centred in *that* — not hung off the temperature's midline, which put
+        # it visibly high in a band it shares with two lines of text below.
+        band_cy = (top_rule_y + bottom_rule_y) / 2
         reading_x = text_axis
-        icon_side = min(82, reading_x - now_box.x - 12)
-        baseline = now_box.y + 56
-        draw.text((reading_x, baseline), _temp(weather.get("temp")),
-                  fill=BLACK, font=ui.font(58), anchor="ls")
+        icon_side = min(84, reading_x - now_box.x - 12)
         ui.weather_icon(img, ui.Box((now_box.x + reading_x - icon_side) / 2,
-                                    baseline - 21 - icon_side / 2,
+                                    band_cy - icon_side / 2,
                                     icon_side, icon_side), weather.get("icon"))
 
-        draw.text((reading_x, baseline + 20),
-                  ui.fit(_describe(weather), ui.font(16), now_box.right - reading_x),
-                  fill=BLACK, font=ui.font(16), anchor="lt")
-        draw.text((reading_x, baseline + 41),
+        # The reading beside it is a three-line block, centred on the same line
+        # so the two halves of the band balance. Its left edge is the axis the
+        # weekday above sits on, so the column has one secondary edge, not one
+        # per row.
+        temp_font = ui.display(58, "medium")
+        desc_font = ui.face(_describe(weather), 16, "regular")
+        range_font = ui.display(15, "medium")
+        block_h = 58 * 0.72 + 20 + ui.text_height(desc_font)
+        baseline = band_cy - block_h / 2 + 58 * 0.72
+
+        draw.text((reading_x, baseline), _temp(weather.get("temp")),
+                  fill=BLACK, font=temp_font, anchor="ls")
+        draw.text((reading_x, baseline + 12),
+                  ui.fit(_describe(weather), desc_font, now_box.right - reading_x),
+                  fill=BLACK, font=desc_font, anchor="lt")
+        draw.text((reading_x, baseline + 12 + ui.text_height(desc_font) + 4),
                   f"{_temp(weather.get('temp_max'))} / {_temp(weather.get('temp_min'))}",
-                  fill=BLUE, font=ui.font(15), anchor="lt")
+                  fill=BLUE, font=range_font, anchor="lt")
 
     # ── Whatever is on, with all the space that is left ──
     if rest.h < 40:
@@ -158,7 +168,7 @@ def _draw_home_column(img, draw, box, weather, events):
     ui.rule(draw, ui.Box(inner.x, rest.y - 7, inner.w, 1))
     label_box, list_box = rest.cut_top(20, gap=6)
     draw.text((label_box.x, label_box.y), "Coming up",
-              fill=BLUE, font=ui.font(14), anchor="lt")
+              fill=BLUE, font=ui.display(14, "semibold"), anchor="lt")
     _draw_agenda(draw, list_box, events, limit=3)
 
 
@@ -530,8 +540,9 @@ def _draw_month_grid(draw, box, now, events=None, compact=False):
     # Below 18 pixels a cell cannot hold a digit and a marker without the two
     # touching, so the markers are dropped rather than drawn on top.
     show_dots = cell_h >= 22
-    label_font = ui.font(12 if compact else 15)
-    day_font = ui.font(13 if compact else 17)
+    # Weekday initials and day numbers: Latin by construction either way.
+    label_font = ui.display(12 if compact else 15, "medium")
+    day_font = ui.display(13 if compact else 17, "medium")
 
     for index in range(7):
         cx = box.x + index * cell_w + cell_w / 2
@@ -562,8 +573,10 @@ def _draw_month_grid(draw, box, now, events=None, compact=False):
 
 def _draw_agenda(draw, box, events, limit=3, compact=False):
     """The upcoming-events list: day on the left, time and title beside it."""
-    title_font = ui.font(13 if compact else 16)
-    meta_font = ui.font(11 if compact else 13)
+    title_size = 13 if compact else 16
+    # Titles come from somebody's calendar, so they may be Chinese; the times
+    # beside them never are.
+    meta_font = ui.display(11 if compact else 13, "medium")
 
     if not events:
         draw.text((box.x, box.y), "No upcoming events",
@@ -585,8 +598,10 @@ def _draw_agenda(draw, box, events, limit=3, compact=False):
         when = f"{ui.relative_day(start)} {ui.time_label(start)}"
         draw.text((box.x + 10, top + 1), ui.fit(when, meta_font, box.w - 12),
                   fill=BLUE, font=meta_font, anchor="lt")
+        summary = event.get("summary", "?")
+        title_font = ui.face(summary, title_size, "regular")
         draw.text((box.x + 10, top + (14 if compact else 17)),
-                  ui.fit(event.get("summary", "?"), title_font, box.w - 12),
+                  ui.fit(summary, title_font, box.w - 12),
                   fill=BLACK, font=title_font, anchor="lt")
 
 
@@ -602,8 +617,13 @@ def _draw_date_block(draw, box, now, day_size, label_size, sub_size, gap=14):
     Returns (baseline, text_x) so a caller can hang a rule off the baseline and
     line a later row up on the same secondary axis the weekday sits on.
     """
-    day_font, label_font, sub_font = (ui.font(day_size), ui.font(label_size),
-                                      ui.font(sub_size))
+    # The numeral is the largest thing on any of these pages, so it is drawn in
+    # the display face; the weekday and date beside it follow so the block
+    # reads as one piece of typography rather than two.
+    day_font = ui.display(day_size, "medium")
+    label_font = ui.face(ui.weekday_label(now.weekday(), short=False),
+                         label_size, "medium")
+    sub_font = ui.face(ui.date_label(now), sub_size, "regular")
     # Baseline anchors ("ls") place text by its baseline rather than its box,
     # which is the only way two different sizes can be made to sit on one line.
     baseline = box.y + day_size * 0.76
@@ -618,6 +638,18 @@ def _draw_date_block(draw, box, now, day_size, label_size, sub_size, gap=14):
               fill=RED if now.weekday() >= 5 else BLUE,
               font=label_font, anchor="ls")
     return baseline, text_x
+
+
+def _ink_center(draw, text, fnt, x, anchor):
+    """Where the drawn ink of `text` would actually be centred.
+
+    Anchors place text by its advance width, which includes the side bearings —
+    and those grow with the type size. So a 104px reading and a 17px one, both
+    "centred" on the same column, still land several pixels apart. Aligning two
+    sizes to each other means aligning the ink.
+    """
+    left, _, right, _ = draw.textbbox((x, 0), text, font=fnt, anchor=anchor)
+    return (left + right) / 2
 
 
 def _describe(weather_or_day):
@@ -640,8 +672,8 @@ def _draw_forecast_row(img, draw, box, forecast, compact=False):
     days = (forecast or [])[:3]
     if not days:
         return
-    day_font = ui.font(12 if compact else 15)
-    temp_font = ui.font(13 if compact else 17)
+    day_font = ui.display(12 if compact else 15, "regular")
+    temp_font = ui.display(13 if compact else 17, "medium")
 
     # Two text lines sit under the icon, and rain and snow hang below the
     # icon's own centre — so the space is reserved from the bottom up rather
@@ -664,12 +696,14 @@ def _draw_forecast_row(img, draw, box, forecast, compact=False):
 def _draw_stat(draw, box, label, value, accent=BLUE):
     """One labelled figure in a bordered tile."""
     ui.card(draw, box, outline=BLACK, width=1)
+    label_font = ui.display(14, "medium")
+    value_font = ui.display(24, "medium")
     draw.text((box.cx, box.y + box.h * 0.30),
-              ui.fit(label, ui.font(14), box.w - 12),
-              fill=accent, font=ui.font(14), anchor="mm")
+              ui.fit(label, label_font, box.w - 12),
+              fill=accent, font=label_font, anchor="mm")
     draw.text((box.cx, box.y + box.h * 0.66),
-              ui.fit(value, ui.font(24), box.w - 12),
-              fill=BLACK, font=ui.font(24), anchor="mm")
+              ui.fit(value, value_font, box.w - 12),
+              fill=BLACK, font=value_font, anchor="mm")
 
 
 def _draw_weather_fullscreen(img, draw, weather):
@@ -695,6 +729,8 @@ def _draw_weather_fullscreen(img, draw, weather):
     # own fraction is what left the icon and the tiles beneath it on different
     # centres, and the temperature aligned to nothing at all.
     stats_box, forecast_box = lower.cut_left(int(lower.w * 0.42), gap=16)
+    forecast = (weather.get("forecast") or [])[:3]
+    label_box, forecast_days = forecast_box.cut_top(20)
 
     # ── Hero, on those axes: icon centred over the tiles, text over the days ──
     icon_side = min(hero.h, stats_box.w * 0.62)
@@ -702,14 +738,27 @@ def _draw_weather_fullscreen(img, draw, weather):
                                 hero.cy - icon_side / 2, icon_side, icon_side),
                     weather.get("icon"))
 
-    temp_font = ui.font(104)
+    temp_font = ui.display(104, "medium")
     temp_text = _temp(weather.get("temp"))
     temp_w = ui.text_width(temp_text, temp_font)
-    # Same horizontal centre line as the icon it sits beside.
-    draw.text((forecast_box.x, hero.cy), temp_text,
-              fill=BLACK, font=temp_font, anchor="lm")
 
-    side = forecast_box.x + temp_w + 18
+    # Today's reading sits directly above the first day's high/low, on one line
+    # straight down the page — matched on the ink, not on the anchor, because
+    # at 104px against 17px the side bearings alone are worth several pixels.
+    if forecast:
+        column = forecast_days.cols(len(forecast), gap=4)[0]
+        first_range = (f"{_temp(forecast[0].get('temp_max'))} / "
+                       f"{_temp(forecast[0].get('temp_min'))}")
+        target = _ink_center(draw, first_range, ui.display(17, "medium"),
+                             column.cx, "mt")
+        temp_cx = column.cx + (
+            target - _ink_center(draw, temp_text, temp_font, column.cx, "mm"))
+    else:
+        temp_cx = forecast_box.x + temp_w / 2
+    draw.text((temp_cx, hero.cy), temp_text,
+              fill=BLACK, font=temp_font, anchor="mm")
+
+    side = temp_cx + temp_w / 2 + 18
     side_w = max(0, hero.right - side)
     draw.text((side, hero.cy - 26),
               ui.fit(_describe(weather), ui.font(24), side_w),
@@ -735,13 +784,11 @@ def _draw_weather_fullscreen(img, draw, weather):
     for tile, (label, value) in zip(tiles, figures):
         _draw_stat(draw, tile, label, value)
 
-    forecast = weather.get("forecast") or []
     if forecast:
-        label_box, days = forecast_box.cut_top(20)
         draw.text((label_box.x, label_box.y),
                   "Next 3 days",
                   fill=BLUE, font=ui.font(15), anchor="lt")
-        _draw_forecast_row(img, draw, days, forecast)
+        _draw_forecast_row(img, draw, forecast_days, forecast)
 
 
 def _draw_calendar_fullscreen(draw, events):

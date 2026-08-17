@@ -1401,6 +1401,79 @@ def test_update_never_stops_at_a_password_prompt():
                 "--unit=vignette-restart-* --description=* /bin/sh -c *") in installer
 
 
+def test_update_hands_over_when_it_rewrites_itself():
+    """bash reads a script by byte offset while running it.
+
+    The fast-forward can replace this very file, and bash then carries on
+    reading the *new* bytes from the *old* offset — running whatever fragment
+    lands there. So a fix to the steps after the fetch never takes effect on
+    the run that installs it, and what happens instead is undefined. The script
+    hands over to its new copy, and that copy still has to install and restart
+    rather than deciding it is already up to date.
+    """
+    import shutil
+
+    with tempfile.TemporaryDirectory() as tmp:
+        binf = os.path.join(tmp, "bin")
+        os.makedirs(binf)
+
+        def stub(name, body):
+            path = os.path.join(binf, name)
+            with open(path, "w") as handle:
+                handle.write("#!/bin/sh\n" + body)
+            os.chmod(path, 0o755)
+
+        stub("id", 'case "$1" in -u) echo 1000 ;; *) echo vignette ;; esac\n')
+        stub("systemctl", "exit 0\n")
+        stub("systemd-run", "exit 0\n")
+        stub("sudo", 'if [ "$1" = "-n" ]; then shift; echo "SUDO-N: $*"; exit 0; fi\n'
+                     'echo "INTERACTIVE-SUDO"; exit 1\n')
+
+        env = {**os.environ, "GIT_CONFIG_COUNT": "0",
+               "PATH": binf + os.pathsep + os.environ["PATH"]}
+        upstream = os.path.join(tmp, "origin.git")
+        work = os.path.join(tmp, "work")
+        script = os.path.join(work, "scripts", "update.sh")
+
+        def git(*args):
+            return run_real(["git", "-C", work, *args], capture_output=True,
+                            text=True, timeout=30, env=env)
+
+        run_real(["git", "init", "-q", "--bare", "-b", "main", upstream],
+                 capture_output=True, text=True, timeout=30, env=env)
+        run_real(["git", "clone", "-q", upstream, work],
+                 capture_output=True, text=True, timeout=30, env=env)
+        os.makedirs(os.path.join(work, "scripts"), exist_ok=True)
+        shutil.copy(os.path.join(REPO, "scripts", "update.sh"), script)
+        git("config", "user.email", "test@example.com")
+        git("config", "user.name", "Test")
+        git("add", "-A")
+        git("commit", "-qm", "base")
+        git("branch", "-M", "main")
+        git("push", "-q", "-u", "origin", "main")
+
+        # The upstream commit changes update.sh itself — the case that breaks.
+        with open(script, "a") as handle:
+            handle.write("\n# added upstream\n")
+        git("add", "-A")
+        git("commit", "-qm", "rewrites the updater")
+        git("push", "-q", "origin", "main")
+        git("reset", "-q", "--hard", "HEAD~1")
+
+        result = run_real(["bash", script], cwd=work, capture_output=True,
+                          text=True, timeout=120, env=env,
+                          stdin=subprocess.DEVNULL)
+        output = result.stdout + result.stderr
+
+        assert result.returncode == 0, output
+        assert "continuing with the new version" in output, output
+        # The hand-over must not read as "nothing to do" and skip the restart.
+        assert "Already up to date — nothing to install" not in output, output
+        assert "Restart scheduled" in output, output
+        # And exactly one hand-over: no loop.
+        assert output.count("continuing with the new version") == 1, output
+
+
 def test_config_survives_a_reload():
     """Round-trip through the atomic save path."""
     from services.config import Config
@@ -1487,15 +1560,36 @@ def test_account_password_change_takes_effect():
         "email": "test@example.com", "password": "test-password"}).status_code == 401
 
 
-def test_console_opens_light_by_default():
-    """The pre-paint script must not consult the device's night mode."""
-    html = _paired_client().get("/settings").get_data(as_text=True)
-    assert 'data-theme="light"' in html
-    assert "prefers-color-scheme" not in html
+def test_the_whole_site_opens_on_one_theme():
+    """Dark by default, and the same default on every page.
+
+    The sign-in and pairing pages carried their own hardcoded palette, so the
+    front door was a different colour from the rooms behind it and the theme
+    switch had no effect until you were already through it. They share one
+    pre-paint script now. It must not consult the device's night mode either:
+    the theme is what was chosen here and nothing else.
+    """
+    client = _paired_client()
+    for page in ("/settings", "/", "/gallery"):
+        html = client.get(page).get_data(as_text=True)
+        assert 'data-theme="dark"' in html, page
+        assert "prefers-color-scheme" not in html, page
+
+    # Signed out: the kiosk shell, which is a different template entirely.
+    login = app.test_client().get("/auth/login").get_data(as_text=True)
+    assert 'data-theme="dark"' in login
+    assert "vignette-theme" in login, "kiosk pages ignore the stored preference"
+    assert "prefers-color-scheme" not in login
 
     script = os.path.join(REPO, "web", "static", "js", "ui.js")
     with open(script, encoding="utf-8") as handle:
         assert "prefers-color-scheme" not in handle.read()
+
+    # The kiosk stylesheet must be theme-driven, not a fixed palette: every
+    # colour comes from the token set, so light and dark both work.
+    css = open(os.path.join(REPO, "web", "static", "css", "kiosk.css"),
+               encoding="utf-8").read()
+    assert "rgba(255, 255, 255" not in css, "kiosk.css has hardcoded whites again"
 
 
 # ── Standalone runner, so this works without pytest installed ─────────────

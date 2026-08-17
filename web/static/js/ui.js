@@ -261,12 +261,12 @@
 
     var THEME_KEY = 'vignette-theme';
 
-    /* Light is the default, not the operating system's mode. This console is
-       a paper-coloured interface for a paper display, and a phone left on
-       automatic night mode was opening it dark without anyone choosing that.
-       Dark is still one click away and is remembered once chosen. */
+    /* Dark is the default, and the operating system's mode is not consulted:
+       the theme is whatever was last chosen here and nothing else, so the
+       console looks the same on every phone that opens it. Matches the
+       pre-paint script in templates/_theme_boot.html — change both together. */
     V.applyTheme = function (theme) {
-        var resolved = (theme === 'dark') ? 'dark' : 'light';
+        var resolved = (theme === 'light') ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', resolved);
         document.documentElement.setAttribute('data-theme-pref', theme || 'light');
         document.documentElement.style.colorScheme = resolved;

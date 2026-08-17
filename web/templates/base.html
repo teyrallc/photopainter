@@ -11,16 +11,16 @@
 {#- Five thumb-sized targets is the most that fits a phone tab bar. -#}
 {%- set tab_items = nav_items[:5] -%}
 <!DOCTYPE html>
-<html lang="{{ current_lang }}" data-theme="light">
+<html lang="{{ current_lang }}" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#f4f2ef">
-    {# "light dark" told the browser to paint its own furniture — form controls,
-       scrollbars, the overscroll gutter — from the phone's night mode, under a
-       page that is light by default. Light leads, and the page's own switch
-       reorders it. #}
-    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#0e1014">
+    {# The attribute above is the default; _theme_boot rewrites both before the
+       first paint if light was chosen. Naming one mode here rather than
+       "light dark" keeps the browser from painting its own furniture from the
+       phone's night mode under a page that has already decided. #}
+    <meta name="color-scheme" content="dark">
     <title>{% block title %}Vignette{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', filename='img/vignette-logo.svg') }}">
     {# "Add to Home Screen" on a phone. This is the whole point: sending a
@@ -34,21 +34,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
     {% block head %}{% endblock %}
-    <script>
-    // Resolve the theme before first paint so a dark page never flashes light.
-    // Light is the default: it is only dark if somebody chose dark here, which
-    // is why the phone's own night mode is not consulted.
-    (function () {
-        var pref = null;
-        try { pref = localStorage.getItem('vignette-theme'); } catch (e) {}
-        var dark = pref === 'dark';
-        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-        document.documentElement.setAttribute('data-theme-pref', pref || 'light');
-        var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute('content', dark ? '#0e1014' : '#f4f2ef');
-        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
-    })();
-    </script>
+    {% include "_theme_boot.html" %}
 </head>
 <body>
 <div class="shell">
