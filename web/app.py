@@ -58,6 +58,7 @@ from services import renderer
 from services import gdrive
 from services import icloud
 from services import upload_token
+from services.photo_ledger import PhotoLedger, digest_file
 from services import display_mgr
 from services import device_id
 from services import epd as epd_service
@@ -143,14 +144,35 @@ _CONNECT_STATUS_PATH = '/api/wifi/connect/status'
 # gets, so it is written out rather than derived from a prefix.
 _UPLOAD_TOKEN_PATHS = ('/api/upload', '/api/upload/batch')
 
+# The same credential, carried in the path instead of a header. A Shortcuts
+# automation is built by hand on a phone screen, and "add a header, key
+# Authorization, value Bearer <64 characters>" is the step people give up on —
+# a URL they can paste in one action is the difference between a sync that gets
+# set up and one that does not.
+#
+# The trade is real and deliberate: a token in a URL can end up in a proxy log
+# or a Referer header in a way a header does not. It is bounded the same way
+# the header form is — POST only, and it opens the upload endpoints and nothing
+# else — and it is revocable from Settings the moment it leaks.
+_UPLOAD_TOKEN_URL_PREFIX = '/api/upload/t/'
+
 
 def _upload_token_authorised(path):
     """Does this request carry a valid upload token for an endpoint it opens?"""
-    if request.method != 'POST' or path not in _UPLOAD_TOKEN_PATHS:
+    if request.method != 'POST':
+        return False
+    if path.startswith(_UPLOAD_TOKEN_URL_PREFIX):
+        # Only the first segment: anything after it is a different route,
+        # and a token that "matches" with a suffix attached is not a match.
+        presented = path[len(_UPLOAD_TOKEN_URL_PREFIX):].strip('/')
+        if '/' in presented:
+            return False
+    elif path in _UPLOAD_TOKEN_PATHS:
+        presented = upload_token.from_request(request)
+    else:
         return False
     if not upload_token.is_configured(config):
         return False
-    presented = upload_token.from_request(request)
     if not presented:
         return False
     if not upload_token.verify(config, presented):
@@ -586,7 +608,12 @@ def quantize_to_epaper(image_path):
 
 
 def process_upload(file_storage, rotation=0, fit_mode="fit"):
-    """Process an uploaded image: save original, then create display-ready version."""
+    """Store an uploaded image, ready for the panel.
+
+    Returns (filename, was_already_here). The second value is what lets a
+    repeated upload answer "yes, I have that one" instead of quietly making a
+    second copy — see services/photo_ledger.
+    """
     from werkzeug.utils import secure_filename
 
     filename = secure_filename(file_storage.filename)
@@ -613,6 +640,16 @@ def process_upload(file_storage, rotation=0, fit_mode="fit"):
     os.close(fd)
     try:
         file_storage.save(staging)
+
+        # Identity is the bytes, checked before any work is done on them. The
+        # phone automation that watches an album re-offers everything inside
+        # its time window on every run, so without this the gallery fills with
+        # copies of the same photograph.
+        digest = digest_file(staging)
+        already = photo_index.lookup(digest)
+        if already:
+            os.remove(staging)
+            return already, True
 
         # verify() settles what the bytes actually are; it also invalidates the
         # instance, so the real load happens on a second open.
@@ -651,7 +688,8 @@ def process_upload(file_storage, rotation=0, fit_mode="fit"):
         if os.path.exists(staging):
             os.remove(staging)
 
-    return filename
+    photo_index.remember(digest, filename)
+    return filename, False
 
 
 def reserve_output_name(preferred, fallback):
@@ -896,12 +934,44 @@ def api_upload_token_mint():
     stored hashed, so nothing can hand it back later.
     """
     token = upload_token.mint(config)
+    base = remote_access.url or f"http://{_get_ip()}:5000"
     return jsonify({
         "success": True,
         "token": token,
         "created": upload_token.created_at(config),
-        "upload_url": (remote_access.url or f"http://{_get_ip()}:5000") + "/api/upload",
+        "upload_url": base + "/api/upload",
+        # The whole credential in one address. This is what the phone
+        # automation is pointed at, and the only moment it can be shown —
+        # storage keeps a hash, so it cannot be handed back later.
+        "sync_url": f"{base}/api/upload/t/{token}",
     })
+
+
+@app.route('/api/qr')
+def api_qr():
+    """A QR code for a short string, as a PNG.
+
+    Only for getting an address off this screen and onto a phone, which is the
+    difference between a sync somebody sets up and one they give up on halfway
+    through typing. The text is whatever the caller passes and is never stored;
+    the route needs a session like everything else.
+    """
+    text = (request.args.get("text") or "").strip()
+    if not text or len(text) > 512:
+        return jsonify({"error": "Nothing to encode."}), 400
+    try:
+        import qrcode
+    except ImportError:
+        return jsonify({"error": "qrcode is not installed."}), 501
+
+    img = qrcode.make(text)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    # An address with a credential in it has no business in a shared cache.
+    response = send_file(buf, mimetype="image/png")
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route('/api/upload-token', methods=['DELETE'])
@@ -1036,8 +1106,12 @@ def _show_after_upload(filename):
     threading.Thread(target=paint, daemon=True).start()
 
 
+# Same handler, two doors. The token-in-the-path form exists so a Shortcuts
+# automation can be built from one pasted URL instead of a hand-typed
+# Authorization header — see _upload_token_authorised for the boundary.
 @app.route('/api/upload', methods=['POST'])
-def api_upload():
+@app.route('/api/upload/t/<token>', methods=['POST'])
+def api_upload(token=None):
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
     file = request.files['file']
@@ -1051,12 +1125,17 @@ def api_upload():
     show_now = request.form.get('display', '') in ('1', 'true', 'yes')
 
     try:
-        filename = process_upload(file, rotation, fit_mode)
-        if show_now:
+        filename, duplicate = process_upload(file, rotation, fit_mode)
+        # A repeated photo is a success, not an error: the phone automation
+        # re-offers everything in its time window on every run, and answering
+        # 200 is what keeps its log clean.
+        if show_now and not duplicate:
             _show_after_upload(filename)
         return jsonify({"success": True, "filename": filename,
-                        "displaying": show_now,
-                        "message": f"Image uploaded: {filename}"})
+                        "duplicate": duplicate,
+                        "displaying": show_now and not duplicate,
+                        "message": (f"Already on the frame: {filename}" if duplicate
+                                    else f"Image uploaded: {filename}")})
     except UnidentifiedImageError:
         # The extension said PNG but the bytes disagree. That is the caller's
         # mistake, not a server fault.
@@ -1137,8 +1216,9 @@ def api_upload_batch():
                             "error": "Invalid file"})
             continue
         try:
-            filename = process_upload(file, rotation, fit_mode)
-            results.append({"filename": filename, "success": True})
+            filename, duplicate = process_upload(file, rotation, fit_mode)
+            results.append({"filename": filename, "success": True,
+                            "duplicate": duplicate})
         except UnidentifiedImageError:
             results.append({"filename": file.filename, "success": False,
                             "error": "Not a readable image"})
@@ -1147,8 +1227,9 @@ def api_upload_batch():
             results.append({"filename": file.filename, "success": False,
                             "error": "Upload failed"})
 
-    ok = sum(1 for r in results if r["success"])
-    return jsonify({"success": True, "uploaded": ok,
+    ok = sum(1 for r in results if r["success"] and not r.get("duplicate"))
+    skipped = sum(1 for r in results if r.get("duplicate"))
+    return jsonify({"success": True, "uploaded": ok, "duplicates": skipped,
                     "total": len(results), "results": results})
 
 
@@ -1312,6 +1393,11 @@ def api_gdrive_download():
 # a photo added on somebody's phone reaches the frame on its own.
 
 icloud_ledger = icloud.ImportLedger(ICLOUD_LEDGER_PATH)
+
+# Which photographs the frame already holds, keyed by their contents. The
+# phone automation re-offers a whole day's photos on every run, so this is
+# what stops the gallery filling with copies of the same picture.
+photo_index = PhotoLedger(OUTPUT_DIR)
 
 # The album is read on a background thread as well as from requests; one
 # import at a time keeps two of them from writing the same photo twice.

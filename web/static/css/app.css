@@ -1051,6 +1051,8 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
 }
 .tabs--scroll::-webkit-scrollbar { display: none; }
 .tabs--scroll .tabs__btn {
+    font-size: .92rem;
+    min-height: 40px;
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
@@ -1094,14 +1096,17 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: .93rem;
+    font-size: 1rem;
     font-weight: 600;
 }
+/* The explanation is the part that decides whether somebody understands the
+   setting, so it is sized to be read rather than to be skipped: .8rem and
+   --text-mute together were quiet enough to look like fine print. */
 .setting__desc {
-    margin: 3px 0 0;
-    font-size: .8rem;
-    line-height: 1.5;
-    color: var(--text-mute);
+    margin: 4px 0 0;
+    font-size: .87rem;
+    line-height: 1.55;
+    color: var(--text-dim);
 }
 .setting__desc a { color: var(--accent-text); }
 .setting__control { min-width: 0; }
@@ -1123,12 +1128,13 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
     margin-bottom: 14px;
 }
 .section-head .icon { color: var(--text-mute); }
-.section-head h2 { font-size: 1.02rem; }
+.section-head h2 { font-size: 1.14rem; }
 .section-head .spacer { flex: 1; }
 .section-head__sub {
-    margin: 2px 0 0;
-    font-size: .8rem;
-    color: var(--text-mute);
+    margin: 3px 0 0;
+    font-size: .88rem;
+    line-height: 1.5;
+    color: var(--text-dim);
     font-weight: 400;
 }
 
@@ -1313,3 +1319,49 @@ body.is-locked { overflow: hidden; }
 .doc h2 { margin-bottom: 12px; }
 .doc ol, .doc ul { padding-left: 20px; margin: 0 0 14px; }
 .doc li { margin-bottom: 5px; }
+
+/* ── Numbered steps ─────────────────────────────────────────────────────── */
+/* Instructions somebody follows on a phone in their other hand. Numbered,
+   spaced, and full width — the same list inside a collapsed accordion was
+   read by nobody. */
+.steps {
+    counter-reset: step;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.steps li {
+    position: relative;
+    counter-increment: step;
+    padding: 0 0 12px 34px;
+    font-size: .89rem;
+    line-height: 1.6;
+    color: var(--text-dim);
+}
+.steps li:last-child { padding-bottom: 0; }
+.steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 1px;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: .74rem;
+    font-weight: 700;
+}
+
+/* A QR code is artwork the camera has to read: it needs a white quiet zone
+   whatever the page behind it is doing. */
+.qr-code {
+    width: 148px;
+    height: 148px;
+    padding: 8px;
+    background: #fff;
+    border-radius: var(--r-md);
+    image-rendering: pixelated;
+}

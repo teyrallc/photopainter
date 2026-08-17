@@ -337,67 +337,56 @@
                 {% endif %}
             </div>
 
-            <div class="setting setting--top">
-                <div class="setting__text">
-                    <div class="setting__title">{{ t.shortcut_url }}</div>
-                    <p class="setting__desc">{{ t.shortcut_url_desc }}</p>
-                </div>
-                <div class="setting__control">
-                    {# The copy button sits inside the field: a sibling button
-                       pushed the input past the column and off the card. #}
-                    <div class="input-group">
-                        <input type="text" class="input" id="s-shortcut-url" readonly
-                               value="" spellcheck="false">
-                        <button type="button" class="input-group__btn" data-copy="s-shortcut-url"
-                                aria-label="{{ t.shortcut_copy }}" title="{{ t.shortcut_copy }}">
-                            {{ icon('copy') }}
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {# Only ever populated by the mint response — never rendered from
-               storage, because storage only holds a hash. #}
+            {# The address carries the token, so it exists exactly once: in the
+               reply to the mint. Nothing here can render it from storage —
+               storage holds only a hash — which is why this stays hidden until
+               that moment, and says so plainly when it appears. #}
             <div class="setting setting--top hidden" id="shortcut-token-field">
                 <div class="setting__text">
                     <div class="setting__title">{{ t.shortcut_token }}</div>
-                    <p class="setting__desc">{{ t.shortcut_once }}</p>
+                    <p class="setting__desc">{{ t.shortcut_url_desc }}</p>
                 </div>
-                <div class="setting__control">
-                    {# The copy button sits inside the field: a sibling button
-                       pushed the input past the column and off the card. #}
+                <div class="setting__control stack-sm">
                     <div class="input-group">
-                        <input type="text" class="input" id="s-shortcut-token" readonly
+                        <input type="text" class="input mono" id="s-shortcut-token" readonly
                                value="" spellcheck="false">
                         <button type="button" class="input-group__btn" data-copy="s-shortcut-token"
                                 aria-label="{{ t.shortcut_copy }}" title="{{ t.shortcut_copy }}">
                             {{ icon('copy') }}
                         </button>
                     </div>
+                    {# Typing a seventy-character URL into a phone is not a
+                       plan. Scanning it off the screen is. #}
+                    <img id="shortcut-qr" alt="" class="qr-code hidden">
+                    <p class="hint">{{ t.shortcut_scan }}</p>
+                </div>
+            </div>
+
+            <div class="setting setting--wide hidden" id="shortcut-once">
+                <div class="alert alert--warning">
+                    {{ icon('alert') }}<span>{{ t.shortcut_once }}</span>
                 </div>
             </div>
 
             <div class="setting setting--wide">
                 <div class="alert" id="shortcut-state">{{ t.loading }}</div>
-                <div class="accordion mt-1">
-                    <div class="accordion__item">
-                        <button type="button" class="accordion__trigger" data-accordion-trigger="shortcut-steps"
-                                aria-expanded="false">
-                            {{ icon('info') }} {{ t.shortcut_steps_title }} {{ icon('chevron-down') }}
-                        </button>
-                        <div class="accordion__panel" id="shortcut-steps" hidden>
-                            <ol style="padding-left:18px;margin:0;">
-                                <li>{{ t.shortcut_step1 }}</li>
-                                <li>{{ t.shortcut_step2 }}</li>
-                                <li>{{ t.shortcut_step3 }}</li>
-                                <li>{{ t.shortcut_step4 }}</li>
-                                <li>{{ t.shortcut_step5 }}</li>
-                                <li>{{ t.shortcut_step6 }}</li>
-                            </ol>
-                        </div>
-                    </div>
-                </div>
             </div>
+
+            <div class="setting setting--wide">
+                <p class="label">{{ t.shortcut_steps_title }}</p>
+                <ol class="steps">
+                    <li>{{ t.shortcut_step1 }}</li>
+                    <li>{{ t.shortcut_step2 }}</li>
+                    <li>{{ t.shortcut_step3 }}</li>
+                    <li>{{ t.shortcut_step4 }}</li>
+                </ol>
+                <p class="small muted mt-2">{{ t.shortcut_step5 }}</p>
+                <p class="small muted">{{ t.shortcut_step6 }}</p>
+            </div>
+
+            {# The header form still works and is what a script would use; the
+               phone no longer needs it. #}
+            <input type="hidden" id="s-shortcut-url" value="">
         </div>
         <div class="card__foot">
             <button type="button" class="btn btn--primary" id="mint-shortcut-token">
@@ -1052,9 +1041,15 @@
             var restore = V.busy(btn);
             V.api('/api/upload-token', { method: 'POST', body: {} })
                 .then(function (d) {
-                    // The one moment the token exists outside the device.
+                    // The one moment the address exists outside the device: it
+                    // carries the token, and only a hash of that is kept.
+                    var url = d.sync_url || d.upload_url;
                     tokenField.classList.remove('hidden');
-                    document.getElementById('s-shortcut-token').value = d.token;
+                    document.getElementById('shortcut-once').classList.remove('hidden');
+                    document.getElementById('s-shortcut-token').value = url;
+                    var qr = document.getElementById('shortcut-qr');
+                    qr.src = '/api/qr?text=' + encodeURIComponent(url);
+                    qr.classList.remove('hidden');
                     copyField(document.getElementById('s-shortcut-token'));
                 })
                 .catch(V.fail)
@@ -1076,7 +1071,9 @@
             V.api('/api/upload-token', { method: 'DELETE' })
                 .then(function () {
                     tokenField.classList.add('hidden');
+                    document.getElementById('shortcut-once').classList.add('hidden');
                     document.getElementById('s-shortcut-token').value = '';
+                    document.getElementById('shortcut-qr').removeAttribute('src');
                     V.toast(V.t('done'), 'success');
                     return refreshShortcut();
                 })
