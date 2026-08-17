@@ -1,0 +1,16 @@
+{
+  "name": "Vignette",
+  "short_name": "Vignette",
+  "description": "Send photos to the frame, and control what it shows.",
+  "start_url": "/upload",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f2ef",
+  "theme_color": "#4f46e5",
+  "icons": [
+    { "src": "/static/img/app-icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/static/img/app-icon-512.png", "sizes": "512x512", "type": "image/png",
+      "purpose": "any maskable" }
+  ]
+}

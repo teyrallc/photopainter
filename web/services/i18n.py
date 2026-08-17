@@ -92,6 +92,7 @@ TRANSLATIONS = {
         "epaper_preview": "E-paper preview (6 colors)",
         "epaper_preview_hint": "The panel only renders six colours — this is what will actually appear.",
         "display_on_epaper": "Display on E-paper",
+        "upload_show_now": "Show it on the frame straight away",
 
         # Gallery
         "gallery_empty": "Gallery is empty",
@@ -408,6 +409,7 @@ TRANSLATIONS = {
         "epaper_preview": "電子紙效果 (6色)",
         "epaper_preview_hint": "面板僅有 6 色，這是實際顯示的效果。",
         "display_on_epaper": "顯示到電子紙",
+        "upload_show_now": "上傳後直接顯示在相框上",
 
         # Gallery
         "gallery_empty": "圖庫是空的",

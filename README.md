@@ -81,9 +81,21 @@ http://<Pi-IP>:5000
 
 ## Photo sources
 
-Photos reach the frame four ways: dropped onto **Upload**, imported from
-**Google Drive**, pulled from an **iCloud shared album**, or pushed from an
-**iPhone Shortcut**. However they get
+Photos reach the frame four ways. **The simplest by far is the first**, and it
+needs no setup at all:
+
+1. **From your phone's browser.** Open the frame's address, tap **Upload**,
+   pick photos. On iOS that opens the Photos picker directly, several can be
+   ticked at once, and "show it on the frame straight away" puts the picture on
+   the panel as it lands. Use **Share → Add to Home Screen** once and it gets an
+   app icon that opens straight to the upload page — after that it is: tap
+   icon, pick photo, done. No token, no album, no Apple ID.
+2. **Google Drive** — browse and import from a connected account.
+3. **iCloud shared album** — subscribe to an album and let the frame pull new
+   photos on a schedule.
+4. **iPhone Shortcut** — the same thing as (1), moved into the Photos share
+   sheet, plus a daily automation. Worth the setup only if you want those two
+   things. However they get
 there they end up as ordinary files in `output/`, so the slideshow, the photo
 page and the gallery treat them all alike.
 
@@ -111,10 +123,14 @@ Treat the link as a credential: anyone who has it can see the album.
 
 ### iPhone Shortcut
 
-The other direction, and the one to use if you would rather not make any album
-public: instead of the frame reaching into an account, your phone sends photos
-out to it. Nothing about your iCloud changes and no Apple credential is stored
-on the device.
+Optional. The browser upload above already does this; a Shortcut buys exactly
+two things — sending straight from the Photos **share sheet**, and a **daily
+automation** that sweeps an album without anyone opening anything. If neither
+appeals, skip this section.
+
+Either way your phone sends photos out to the frame rather than the frame
+reaching into an account, so nothing about your iCloud changes and no Apple
+credential is stored on the device.
 
 Apple publishes no API for a third party to read your iCloud photo library —
 CloudKit Web Services only reaches an app's own container, and PhotoKit only

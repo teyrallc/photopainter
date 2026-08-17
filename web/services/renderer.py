@@ -13,27 +13,23 @@ import os
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont
 
+from services import epd_ui as ui
+
 logger = logging.getLogger("vignette.renderer")
 
 EPD_W = 800
 EPD_H = 480
 
-# Colors (6-color e-paper: black, white, yellow, red, blue, green)
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-YELLOW = (255, 255, 0)
-BLUE = (0, 0, 255)
-GREEN = (0, 255, 0)
+# The six the panel can render. Kept as names here for the pages written
+# before services/epd_ui.py existed; both refer to the same palette.
+BLACK = ui.BLACK
+WHITE = ui.WHITE
+RED = ui.RED
+YELLOW = ui.YELLOW
+BLUE = ui.BLUE
+GREEN = ui.GREEN
 
-# Font paths to try (CJK fonts first for Chinese support)
-FONT_PATHS = [
-    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-]
+FONT_PATHS = ui.FONT_PATHS
 
 _font_cache = {}
 
@@ -63,35 +59,21 @@ def _draw_logo(draw, cx, cy, size, fill):
 
 
 def _get_font(size):
-    """Get a font at the given size, trying CJK fonts first for Chinese support."""
-    if size in _font_cache:
-        return _font_cache[size]
-
-    for path in FONT_PATHS:
-        if os.path.exists(path):
-            try:
-                # TrueType Collections (.ttc) need font index 0
-                font = ImageFont.truetype(path, size, index=0)
-                _font_cache[size] = font
-                return font
-            except Exception:
-                continue
-
-    font = ImageFont.load_default()
-    _font_cache[size] = font
-    return font
+    """Get a font at the given size. One cache, shared with services/epd_ui."""
+    return ui.font(size)
 
 
 def render_home_page(weather_data, calendar_events, photo_path, config):
     """Render the Home page: Calendar + Weather + Photo."""
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
+    lang = config.get("lang", "en") if config else "en"
 
     # Left: Calendar (top 400x240)
-    _draw_calendar_panel(draw, 0, 0, 400, 240, calendar_events)
+    _draw_calendar_panel(draw, 0, 0, 400, 240, calendar_events, lang)
 
     # Left: Weather (bottom 400x240)
-    _draw_weather_panel(draw, 0, 240, 400, 240, weather_data)
+    _draw_weather_panel(draw, 0, 240, 400, 240, weather_data, lang)
 
     # Divider line
     draw.line([(400, 0), (400, EPD_H)], fill=BLACK, width=2)
@@ -117,22 +99,101 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     return img
 
 
-def render_widget_page(mode, weather_data, calendar_events):
-    """Render full-screen widget: weather, calendar, or split (both).
-    Split mode: left=calendar, right=weather, each 400x480."""
+def render_widget_page(mode, weather_data, calendar_events, lang="en"):
+    """Render full-screen widget: weather, calendar, or split (both)."""
     img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
     draw = ImageDraw.Draw(img)
 
     if mode == "split":
-        _draw_calendar_panel(draw, 0, 0, 400, EPD_H, calendar_events)
-        _draw_weather_panel(draw, 400, 0, 400, EPD_H, weather_data)
-        draw.line([(400, 0), (400, EPD_H)], fill=BLACK, width=2)
+        _draw_split_page(draw, weather_data, calendar_events, lang)
     elif mode == "weather":
-        _draw_weather_fullscreen(draw, weather_data)
+        _draw_weather_fullscreen(draw, weather_data, lang)
     else:
-        _draw_calendar_fullscreen(draw, calendar_events)
+        _draw_calendar_fullscreen(draw, calendar_events, lang)
 
     return img
+
+
+def _draw_split_page(draw, weather, events, lang="en"):
+    """Calendar and weather side by side, each given a full-height column.
+
+    Not the quarter-panel layouts stretched: those are designed for 240 pixels
+    of height, and simply handing them 480 left a band of white through the
+    middle of both halves. Each column is composed for the space it has.
+    """
+    now = datetime.now()
+    chinese = ui.use_chinese(lang)
+    left = ui.Box(0, 0, 400, EPD_H)
+    right = ui.Box(400, 0, 400, EPD_H)
+    draw.line([(400, 0), (400, EPD_H)], fill=BLACK, width=2)
+
+    # ── Left: the month, then what is on ──
+    head, rest = left.cut_top(46)
+    ui.header(draw, head, ui.month_label(now, lang), fill=RED, title_size=21)
+
+    rest = rest.inset(14, 12)
+    today_box, below = rest.cut_top(72, gap=8)
+    day_font = ui.font(60)
+    draw.text((today_box.x, today_box.y - 6), str(now.day),
+              fill=BLACK, font=day_font, anchor="lt")
+    offset = ui.text_width(str(now.day), day_font) + 12
+    draw.text((today_box.x + offset, today_box.y + 8),
+              ui.weekday_label(now.weekday(), lang, short=False),
+              fill=RED if now.weekday() >= 5 else BLUE, font=ui.font(20), anchor="lt")
+    draw.text((today_box.x + offset, today_box.y + 36),
+              ui.date_label(now, lang), fill=BLACK, font=ui.font(15), anchor="lt")
+
+    grid_box, agenda_box = below.cut_top(int(below.h * 0.52), gap=10)
+    _draw_month_grid(draw, grid_box, now, events, lang)
+
+    label_box, list_box = agenda_box.cut_top(20, gap=2)
+    draw.text((label_box.x, label_box.y), "接下來" if chinese else "Coming up",
+              fill=BLUE, font=ui.font(14), anchor="lt")
+    _draw_agenda(draw, list_box, events, lang, limit=3)
+
+    # ── Right: now, then the next three days ──
+    if not weather:
+        head_r, rest_r = right.cut_top(46)
+        ui.header(draw, head_r, "天氣" if chinese else "Weather",
+                  fill=BLUE, title_size=21)
+        ui.empty_state(draw, rest_r,
+                       "尚未設定天氣" if chinese else "No weather data",
+                       "Settings → Weather")
+        return
+
+    head_r, rest_r = right.cut_top(46)
+    ui.header(draw, head_r, weather.get("city", "—"),
+              right_text=weather.get("updated", ""), fill=BLUE,
+              title_size=21, right_size=13)
+
+    rest_r = rest_r.inset(14, 12)
+    hero, lower = rest_r.cut_top(int(rest_r.h * 0.42), gap=8)
+    icon_box, reading = hero.cut_left(int(hero.w * 0.42), gap=4)
+    ui.weather_icon(draw, icon_box, weather.get("icon"))
+
+    temp_font = ui.font(66)
+    draw.text((reading.x, reading.cy - 12), _temp(weather.get("temp")),
+              fill=BLACK, font=temp_font, anchor="lm")
+    draw.text((reading.x, reading.cy + 26),
+              ui.fit(weather.get("description", ""), ui.font(17), reading.w),
+              fill=BLACK, font=ui.font(17), anchor="lt")
+
+    stats, forecast_box = lower.cut_top(58, gap=10)
+    speed_unit = "mph" if weather.get("units") == "imperial" else "m/s"
+    figures = [
+        ("體感" if chinese else "Feels", _temp(weather.get("feels_like"))),
+        ("濕度" if chinese else "Humidity", f"{weather.get('humidity', '—')}%"),
+        ("風速" if chinese else "Wind", f"{weather.get('wind_speed', '—')} {speed_unit}"),
+    ]
+    for tile, (label, value) in zip(stats.cols(3, gap=6), figures):
+        _draw_stat(draw, tile, label, value)
+
+    forecast = weather.get("forecast") or []
+    if forecast:
+        label_box, days = forecast_box.cut_top(20, gap=2)
+        draw.text((label_box.x, label_box.y), "未來三天" if chinese else "Next 3 days",
+                  fill=BLUE, font=ui.font(14), anchor="lt")
+        _draw_forecast_row(draw, days, forecast, lang)
 
 
 def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
@@ -383,230 +444,322 @@ def _lanczos():
     return getattr(Image, 'Resampling', Image).LANCZOS
 
 
-def _draw_calendar_panel(draw, x, y, w, h, events):
-    """Draw calendar in a panel region."""
-    now = datetime.now()
-    weekdays_en = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-    font_date = _get_font(36)
-    font_day = _get_font(18)
-    font_event = _get_font(14)
-
-    # Date header (English)
-    date_str = now.strftime("%b %d")
-    day_str = weekdays_en[now.weekday()]
-    draw.text((x + w // 2, y + 20), date_str, fill=BLACK, font=font_date, anchor="mt")
-    draw.text((x + w // 2, y + 62), day_str, fill=RED if now.weekday() >= 5 else BLUE,
-              font=font_day, anchor="mt")
-
-    # Mini month calendar
-    _draw_mini_calendar(draw, x + 20, y + 90, w - 40, now)
-
-    # Upcoming events (if any)
-    ey = y + h - 10
-    if events:
-        for ev in events[:2]:
-            start = ev.get("start")
-            summary = ev.get("summary", "?")[:20]
-            if start:
-                time_str = start.strftime("%m/%d %H:%M")
-                draw.text((x + 10, ey - 20), f"• {time_str} {summary}",
-                          fill=BLACK, font=font_event, anchor="lb")
-                ey -= 18
+def _event_days(events, now):
+    """Which days of the current month carry an event, for the grid dots."""
+    days = set()
+    for event in events or []:
+        start = event.get("start")
+        if start and start.year == now.year and start.month == now.month:
+            days.add(start.day)
+    return days
 
 
-def _draw_mini_calendar(draw, x, y, w, now):
-    """Draw a small monthly calendar grid."""
-    font = _get_font(12)
+def _draw_month_grid(draw, box, now, events=None, lang="en", compact=False):
+    """A month calendar sized to whatever box it is given.
 
+    Cell geometry is derived from the box rather than fixed, which is what
+    stops the grid running past the bottom of a short panel — the old one used
+    a 16px row height everywhere and overlapped the events beneath it in
+    February and in any month that spans six weeks.
+    """
     import calendar
-    cal = calendar.monthcalendar(now.year, now.month)
-    cell_w = w // 7
-    cell_h = 16
 
-    # Weekday headers
-    headers = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
-    for i, hdr in enumerate(headers):
-        cx = x + i * cell_w + cell_w // 2
-        color = RED if i >= 5 else BLACK
-        draw.text((cx, y), hdr, fill=color, font=font, anchor="mt")
+    weeks = calendar.monthcalendar(now.year, now.month)
+    marked = _event_days(events, now) if events else set()
 
-    # Day numbers
-    for row_idx, week in enumerate(cal):
-        for col_idx, day in enumerate(week):
+    head_h = 18 if compact else 24
+    head, body = box.cut_top(head_h, gap=3 if compact else 5)
+    cell_w = box.w / 7
+    cell_h = body.h / max(len(weeks), 1)
+    radius = min(cell_w * 0.42, cell_h * 0.42)
+
+    # Below 18 pixels a cell cannot hold a digit and a marker without the two
+    # touching, so the markers are dropped rather than drawn on top.
+    show_dots = cell_h >= 22
+    label_font = ui.font(12 if compact else 15)
+    day_font = ui.font(13 if compact else 17)
+
+    for index in range(7):
+        cx = box.x + index * cell_w + cell_w / 2
+        draw.text((cx, head.y), ui.weekday_initial(index, lang),
+                  fill=RED if index >= 5 else BLACK, font=label_font, anchor="mt")
+
+    for row, week in enumerate(weeks):
+        for col, day in enumerate(week):
             if day == 0:
                 continue
-            cx = x + col_idx * cell_w + cell_w // 2
-            cy = y + (row_idx + 1) * cell_h + 4
+            cx = box.x + col * cell_w + cell_w / 2
+            cy = body.y + row * cell_h + cell_h / 2
 
             if day == now.day:
-                # Highlight today
-                r = 8
-                draw.ellipse([cx - r, cy - r + 2, cx + r, cy + r + 2], fill=RED)
-                draw.text((cx, cy + 2), str(day), fill=WHITE, font=font, anchor="mm")
+                draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius],
+                             fill=RED)
+                draw.text((cx, cy), str(day), fill=WHITE, font=day_font, anchor="mm")
             else:
-                color = RED if col_idx >= 5 else BLACK
-                draw.text((cx, cy + 2), str(day), fill=color, font=font, anchor="mm")
+                draw.text((cx, cy), str(day),
+                          fill=RED if col >= 5 else BLACK, font=day_font, anchor="mm")
+                # A day with something on it gets a dot, so the month reads as
+                # a schedule at a glance and not just as numbers.
+                if day in marked and show_dots:
+                    dot = max(1.5, cell_h * 0.065)
+                    dy = cy + cell_h * 0.40
+                    draw.ellipse([cx - dot, dy - dot, cx + dot, dy + dot], fill=BLUE)
 
 
-def _draw_weather_panel(draw, x, y, w, h, weather):
-    """Draw weather in a panel region."""
-    font_temp = _get_font(48)
-    font_desc = _get_font(18)
-    font_detail = _get_font(14)
+def _draw_agenda(draw, box, events, lang="en", limit=3, compact=False):
+    """The upcoming-events list: day on the left, time and title beside it."""
+    title_font = ui.font(13 if compact else 16)
+    meta_font = ui.font(11 if compact else 13)
 
-    if not weather:
-        draw.text((x + w // 2, y + h // 2), "No weather data",
-                  fill=BLACK, font=font_desc, anchor="mm")
-        draw.text((x + w // 2, y + h // 2 + 25), "Configure in Settings",
-                  fill=BLUE, font=font_detail, anchor="mm")
+    if not events:
+        draw.text((box.x, box.y), "沒有行程" if ui.use_chinese(lang) else "No upcoming events",
+                  fill=BLACK, font=meta_font, anchor="lt")
         return
 
-    # Temperature
-    temp_str = f"{weather['temp']}°"
-    draw.text((x + w // 2, y + 20), temp_str, fill=BLACK, font=font_temp, anchor="mt")
+    rows = [e for e in events if e.get("start")][:limit]
+    if not rows:
+        return
+    row_h = min(box.h / len(rows), 46 if not compact else 30)
 
-    # Description
-    desc = weather.get("description", "")
-    draw.text((x + w // 2, y + 80), desc, fill=BLACK, font=font_desc, anchor="mt")
+    for index, event in enumerate(rows):
+        start = event["start"]
+        top = box.y + index * row_h
+        # A coloured tick beside each entry: cheaper to scan than a bullet, and
+        # it survives the six-colour quantiser cleanly.
+        draw.rectangle([box.x, top + 2, box.x + 3, top + row_h - 6], fill=BLUE)
 
-    # Details row
-    details = f"H:{weather['temp_max']}°  L:{weather['temp_min']}°  Hum:{weather['humidity']}%"
-    draw.text((x + w // 2, y + 108), details, fill=BLACK, font=font_detail, anchor="mt")
-
-    # Forecast
-    fy = y + 140
-    font_fc = _get_font(13)
-    for fc in weather.get("forecast", [])[:3]:
-        line = f"{fc['date']}({fc['weekday']}) {fc['description']}  {fc['temp_min']}~{fc['temp_max']}°"
-        draw.text((x + 15, fy), line, fill=BLACK, font=font_fc)
-        fy += 20
-
-    # Updated time
-    draw.text((x + w - 10, y + h - 10),
-              f"Updated: {weather.get('updated', '?')}",
-              fill=BLACK, font=_get_font(11), anchor="rb")
+        when = f"{ui.relative_day(start, lang)} {ui.time_label(start)}"
+        draw.text((box.x + 10, top + 1), ui.fit(when, meta_font, box.w - 12),
+                  fill=BLUE, font=meta_font, anchor="lt")
+        draw.text((box.x + 10, top + (14 if compact else 17)),
+                  ui.fit(event.get("summary", "?"), title_font, box.w - 12),
+                  fill=BLACK, font=title_font, anchor="lt")
 
 
-def _draw_weather_fullscreen(draw, weather):
-    """Draw full-screen weather view."""
-    font_city = _get_font(28)
-    font_temp = _get_font(80)
-    font_desc = _get_font(28)
-    font_detail = _get_font(20)
-    font_fc = _get_font(18)
+def _draw_calendar_panel(draw, x, y, w, h, events, lang="en"):
+    """Calendar for a quarter panel: today, then what is coming up.
+
+    Deliberately no month grid. A six-week month needs about 150 pixels to
+    keep its digits and its event markers apart, and this panel has 240 for
+    everything — cramming one in left the numbers touching their own dots and
+    the agenda squeezed to a single clipped line. The grid lives in the
+    calendar and split pages, which have the room for it.
+    """
+    box = ui.Box(x, y, w, h).inset(14, 12)
+    now = datetime.now()
+    chinese = ui.use_chinese(lang)
+
+    today_box, rest = box.cut_top(84, gap=8)
+
+    # Today, stated once and large enough to read across a room.
+    day_font = ui.font(72)
+    draw.text((today_box.x, today_box.y - 8), str(now.day),
+              fill=BLACK, font=day_font, anchor="lt")
+    offset = ui.text_width(str(now.day), day_font) + 12
+    draw.text((today_box.x + offset, today_box.y + 8),
+              ui.weekday_label(now.weekday(), lang, short=False),
+              fill=RED if now.weekday() >= 5 else BLUE, font=ui.font(22), anchor="lt")
+    draw.text((today_box.x + offset, today_box.y + 38),
+              ui.month_label(now, lang), fill=BLACK, font=ui.font(15), anchor="lt")
+
+    ui.rule(draw, ui.Box(box.x, rest.y - 5, box.w, 1), color=BLACK)
+
+    label_box, list_box = rest.cut_top(18, gap=2)
+    draw.text((label_box.x, label_box.y), "接下來" if chinese else "Coming up",
+              fill=BLUE, font=ui.font(13), anchor="lt")
+    _draw_agenda(draw, list_box, events, lang, limit=3, compact=True)
+
+
+def _temp(value):
+    """A temperature, or an em dash when the reading is missing."""
+    return f"{value}°" if value is not None else "—"
+
+
+# services/weather.py labels forecast days in English; the panel may not be.
+_WEEKDAY_KEYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _localised_weekday(label, lang):
+    if not label:
+        return ""
+    try:
+        return ui.weekday_label(_WEEKDAY_KEYS.index(label), lang, short=True)
+    except ValueError:
+        return label
+
+
+def _draw_forecast_row(draw, box, forecast, lang="en", compact=False):
+    """The three-day strip: one column each, icon over day over high/low."""
+    days = (forecast or [])[:3]
+    if not days:
+        return
+    day_font = ui.font(12 if compact else 15)
+    temp_font = ui.font(13 if compact else 17)
+
+    # Two text lines sit under the icon, and rain and snow hang below the
+    # icon's own centre — so the space is reserved from the bottom up rather
+    # than assumed, which is what had "Sat" printed through the raindrops.
+    text_h = (40 if compact else 42)
+    for column, day in zip(box.cols(len(days), gap=4), days):
+        icon_side = min(column.w * (0.54 if compact else 0.60), max(0, column.h - text_h))
+        icon = ui.Box(column.cx - icon_side / 2, column.y, icon_side, icon_side)
+        ui.weather_icon(draw, icon, day.get("icon"))
+
+        label_y = column.bottom - text_h
+        # The forecast carries English weekday keys; show them in the panel's
+        # own language rather than leaving "Sat" on an otherwise Chinese page.
+        label = _localised_weekday(day.get("weekday"), lang) or day.get("date", "")
+        draw.text((column.cx, label_y), ui.fit(label, day_font, column.w),
+                  fill=BLACK, font=day_font, anchor="mt")
+        draw.text((column.cx, label_y + (14 if compact else 19)),
+                  f"{_temp(day.get('temp_max'))} / {_temp(day.get('temp_min'))}",
+                  fill=BLACK, font=temp_font, anchor="mt")
+
+
+def _draw_weather_panel(draw, x, y, w, h, weather, lang="en"):
+    """Compact weather for a quarter panel: icon, temperature, three days."""
+    box = ui.Box(x, y, w, h).inset(12, 10)
 
     if not weather:
-        draw.text((EPD_W // 2, EPD_H // 2), "No weather data",
-                  fill=BLACK, font=font_desc, anchor="mm")
-        draw.text((EPD_W // 2, EPD_H // 2 + 40), "Please configure in Settings",
-                  fill=BLUE, font=font_detail, anchor="mm")
+        ui.empty_state(draw, box,
+                       "尚未設定天氣" if ui.use_chinese(lang) else "No weather data",
+                       "Settings → Weather")
         return
 
-    # Header bar
-    draw.rectangle([0, 0, EPD_W, 50], fill=BLUE)
-    draw.text((EPD_W // 2, 25), f"Weather - {weather['city']}",
-              fill=WHITE, font=font_city, anchor="mm")
+    # Now: icon on the left, the number that matters next to it.
+    now_box, forecast = box.cut_top(int(box.h * 0.52), gap=4)
+    icon_box, text_box = now_box.cut_left(int(now_box.h * 0.95), gap=6)
+    ui.weather_icon(draw, icon_box, weather.get("icon"))
 
-    # Current temperature (big)
-    draw.text((EPD_W // 2, 120), f"{weather['temp']}°",
-              fill=BLACK, font=font_temp, anchor="mt")
+    temp_font = ui.font(52)
+    draw.text((text_box.x, text_box.y - 4), _temp(weather.get("temp")),
+              fill=BLACK, font=temp_font, anchor="lt")
+    draw.text((text_box.x, text_box.y + 52),
+              ui.fit(weather.get("description", ""), ui.font(15), text_box.w),
+              fill=BLACK, font=ui.font(15), anchor="lt")
+    draw.text((text_box.x, text_box.y + 71),
+              f"{_temp(weather.get('temp_max'))} / {_temp(weather.get('temp_min'))}"
+              f"   {weather.get('humidity', '—')}%",
+              fill=BLUE, font=ui.font(13), anchor="lt")
 
-    # Description
-    draw.text((EPD_W // 2, 210), weather.get("description", ""),
-              fill=BLACK, font=font_desc, anchor="mt")
+    ui.rule(draw, ui.Box(box.x, forecast.y - 4, box.w, 1), color=BLACK)
+    _draw_forecast_row(draw, forecast, weather.get("forecast"), lang, compact=True)
 
-    # Details
-    detail_y = 255
-    details = [
-        f"Feels like: {weather['feels_like']}°",
-        f"H: {weather['temp_max']}°  L: {weather['temp_min']}°",
-        f"Humidity: {weather['humidity']}%",
-        f"Wind: {weather['wind_speed']} m/s",
+
+def _draw_stat(draw, box, label, value, accent=BLUE):
+    """One labelled figure in a bordered tile."""
+    ui.card(draw, box, outline=BLACK, width=1)
+    draw.text((box.cx, box.y + box.h * 0.30),
+              ui.fit(label, ui.font(14), box.w - 12),
+              fill=accent, font=ui.font(14), anchor="mm")
+    draw.text((box.cx, box.y + box.h * 0.66),
+              ui.fit(value, ui.font(24), box.w - 12),
+              fill=BLACK, font=ui.font(24), anchor="mm")
+
+
+def _draw_weather_fullscreen(draw, weather, lang="en"):
+    """Full-screen weather: header, hero reading, four figures, three days."""
+    page = ui.Box(0, 0, EPD_W, EPD_H)
+
+    if not weather:
+        ui.header(draw, ui.Box(0, 0, EPD_W, 56),
+                  "天氣" if ui.use_chinese(lang) else "Weather", fill=BLUE)
+        ui.empty_state(draw, ui.Box(0, 56, EPD_W, EPD_H - 56),
+                       "尚未設定天氣" if ui.use_chinese(lang) else "No weather data",
+                       "Settings → Weather")
+        return
+
+    chinese = ui.use_chinese(lang)
+    head, body = page.cut_top(56)
+    ui.header(draw, head, weather.get("city", "—"),
+              right_text=f"{'更新' if chinese else 'Updated'} {weather.get('updated', '?')}",
+              fill=BLUE)
+
+    body = body.inset(18, 14)
+    hero, lower = body.cut_top(int(body.h * 0.52), gap=12)
+
+    # ── Hero: the icon and the temperature, side by side and large ──
+    icon_box, reading = hero.cut_left(int(hero.w * 0.32), gap=8)
+    ui.weather_icon(draw, icon_box, weather.get("icon"))
+
+    # The temperature is the one thing read from across the room, so it sets
+    # the baseline and everything else hangs off it.
+    temp_font = ui.font(104)
+    temp_text = _temp(weather.get("temp"))
+    temp_w = ui.text_width(temp_text, temp_font)
+    draw.text((reading.x, reading.cy), temp_text, fill=BLACK,
+              font=temp_font, anchor="lm")
+
+    side = reading.x + temp_w + 16
+    side_w = max(0, reading.right - side)
+    draw.text((side, reading.cy - 26),
+              ui.fit(weather.get("description", ""), ui.font(24), side_w),
+              fill=BLACK, font=ui.font(24), anchor="lm")
+    draw.text((side, reading.cy + 4),
+              f"{'體感' if chinese else 'Feels like'} {_temp(weather.get('feels_like'))}",
+              fill=BLUE, font=ui.font(18), anchor="lm")
+    draw.text((side, reading.cy + 30),
+              f"{_temp(weather.get('temp_max'))} / {_temp(weather.get('temp_min'))}"
+              f"  {'今日' if chinese else 'today'}",
+              fill=BLACK, font=ui.font(18), anchor="lm")
+
+    # ── Figures and forecast, side by side underneath ──
+    stats_box, forecast_box = lower.cut_left(int(lower.w * 0.42), gap=16)
+
+    speed_unit = "mph" if weather.get("units") == "imperial" else "m/s"
+    top_row, bottom_row = stats_box.rows(2, gap=8)
+    figures = [
+        ("濕度" if chinese else "Humidity", f"{weather.get('humidity', '—')}%"),
+        ("風速" if chinese else "Wind", f"{weather.get('wind_speed', '—')} {speed_unit}"),
+        ("最高" if chinese else "High", _temp(weather.get("temp_max"))),
+        ("最低" if chinese else "Low", _temp(weather.get("temp_min"))),
     ]
-    for d in details:
-        draw.text((EPD_W // 2, detail_y), d, fill=BLACK, font=font_detail, anchor="mt")
-        detail_y += 28
+    tiles = top_row.cols(2, gap=8) + bottom_row.cols(2, gap=8)
+    for tile, (label, value) in zip(tiles, figures):
+        _draw_stat(draw, tile, label, value)
 
-    # Forecast section
-    draw.line([(50, 375), (EPD_W - 50, 375)], fill=BLACK, width=1)
-    fx = 100
-    for fc in weather.get("forecast", [])[:3]:
-        draw.text((fx, 390), f"{fc['date']}", fill=BLACK, font=font_detail, anchor="mt")
-        draw.text((fx, 415), f"({fc['weekday']})", fill=BLACK, font=_get_font(14), anchor="mt")
-        draw.text((fx, 435), f"{fc['temp_min']}~{fc['temp_max']}°",
-                  fill=BLACK, font=font_detail, anchor="mt")
-        draw.text((fx, 458), fc["description"][:4],
-                  fill=BLACK, font=_get_font(14), anchor="mt")
-        fx += 250
-
-    draw.text((EPD_W - 10, EPD_H - 10),
-              f"Updated: {weather.get('updated', '?')}",
-              fill=BLACK, font=_get_font(12), anchor="rb")
+    forecast = weather.get("forecast") or []
+    if forecast:
+        label_box, days = forecast_box.cut_top(20)
+        draw.text((label_box.x, label_box.y),
+                  "未來三天" if chinese else "Next 3 days",
+                  fill=BLUE, font=ui.font(15), anchor="lt")
+        _draw_forecast_row(draw, days, forecast, lang)
 
 
-def _draw_calendar_fullscreen(draw, events):
-    """Draw full-screen calendar view."""
+def _draw_calendar_fullscreen(draw, events, lang="en"):
+    """Full-screen calendar: month grid on the left, today and agenda right."""
     now = datetime.now()
-    weekdays_en = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    page = ui.Box(0, 0, EPD_W, EPD_H)
+    chinese = ui.use_chinese(lang)
 
-    font_header = _get_font(28)
-    font_date = _get_font(48)
-    font_event = _get_font(18)
-    font_day = _get_font(16)
+    head, body = page.cut_top(56)
+    ui.header(draw, head, ui.month_label(now, lang),
+              right_text=ui.time_label(now), fill=RED)
 
-    # Header bar
-    draw.rectangle([0, 0, EPD_W, 50], fill=RED)
-    month_str = now.strftime("%B %Y")
-    draw.text((EPD_W // 2, 25), month_str, fill=WHITE, font=font_header, anchor="mm")
+    body = body.inset(18, 14)
+    grid_box, side = body.cut_left(int(body.w * 0.56), gap=18)
 
-    # Today's date (big)
-    date_str = f"{now.day}"
-    day_str = weekdays_en[now.weekday()]
-    draw.text((EPD_W // 2, 90), date_str, fill=BLACK, font=_get_font(64), anchor="mt")
-    draw.text((EPD_W // 2, 160), day_str, fill=RED if now.weekday() >= 5 else BLUE,
-              font=font_header, anchor="mt")
+    _draw_month_grid(draw, grid_box, now, events, lang)
 
-    # Monthly calendar grid
-    import calendar
-    cal = calendar.monthcalendar(now.year, now.month)
-    grid_x, grid_y = 80, 200
-    cell_w = (EPD_W - 160) // 7
-    cell_h = 28
+    # A vertical rule instead of a boxed card: one line, no wasted space.
+    draw.line([(side.x - 9, side.y), (side.x - 9, side.bottom)], fill=BLACK, width=1)
 
-    headers = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    for i, hdr in enumerate(headers):
-        cx = grid_x + i * cell_w + cell_w // 2
-        color = RED if i >= 5 else BLACK
-        draw.text((cx, grid_y), hdr, fill=color, font=font_day, anchor="mt")
+    # ── Today, stated once and large ──
+    today_box, agenda_box = side.cut_top(118, gap=10)
+    day_font = ui.font(86)
+    draw.text((today_box.x, today_box.y - 8), str(now.day),
+              fill=BLACK, font=day_font, anchor="lt")
+    offset = ui.text_width(str(now.day), day_font) + 14
+    draw.text((today_box.x + offset, today_box.y + 16),
+              ui.weekday_label(now.weekday(), lang, short=False),
+              fill=RED if now.weekday() >= 5 else BLUE,
+              font=ui.font(24), anchor="lt")
+    draw.text((today_box.x + offset, today_box.y + 48),
+              ui.date_label(now, lang), fill=BLACK, font=ui.font(17), anchor="lt")
 
-    for row_idx, week in enumerate(cal):
-        for col_idx, day in enumerate(week):
-            if day == 0:
-                continue
-            cx = grid_x + col_idx * cell_w + cell_w // 2
-            cy = grid_y + (row_idx + 1) * cell_h + 8
-
-            if day == now.day:
-                r = 13
-                draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=RED)
-                draw.text((cx, cy), str(day), fill=WHITE, font=font_day, anchor="mm")
-            else:
-                color = RED if col_idx >= 5 else BLACK
-                draw.text((cx, cy), str(day), fill=color, font=font_day, anchor="mm")
-
-    # Events list
-    ey = grid_y + (len(cal) + 1) * cell_h + 20
-    draw.line([(50, ey - 5), (EPD_W - 50, ey - 5)], fill=BLACK, width=1)
-
-    if events:
-        for ev in events[:4]:
-            start = ev.get("start")
-            summary = ev.get("summary", "?")[:30]
-            if start:
-                ts = start.strftime("%m/%d %H:%M")
-                draw.text((80, ey), f"• {ts}  {summary}", fill=BLACK, font=font_event)
-                ey += 24
-    else:
-        draw.text((EPD_W // 2, ey + 5), "No upcoming events",
-                  fill=BLACK, font=font_event, anchor="mt")
+    label_box, list_box = agenda_box.cut_top(22, gap=4)
+    draw.text((label_box.x, label_box.y),
+              "接下來" if chinese else "Coming up",
+              fill=BLUE, font=ui.font(15), anchor="lt")
+    _draw_agenda(draw, list_box, events, lang, limit=4)

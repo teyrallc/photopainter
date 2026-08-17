@@ -22,7 +22,10 @@
                 {{ icon('upload', 'icon-xl') }}
                 <p class="strong mb-0">{{ t.drag_or_click }}</p>
                 <p class="tiny dim mb-0">PNG · JPG · BMP · GIF — 800 × 480 {{ t.recommended }}</p>
-                <input type="file" id="file-input" accept="image/*" class="sr-only">
+                {# `multiple` matters most on a phone: the Photos picker then
+                   lets several be ticked in one go, which is the difference
+                   between sending an afternoon's pictures and sending one. #}
+                <input type="file" id="file-input" accept="image/*" multiple class="sr-only">
             </div>
 
             <div class="grid mt-2" style="grid-template-columns:1fr 1fr;gap:12px;">
@@ -44,6 +47,11 @@
                     </select>
                 </div>
             </div>
+
+            <label class="field field--inline mt-2 mb-0" for="upload-show">
+                <input type="checkbox" id="upload-show" checked>
+                <span>{{ t.upload_show_now }}</span>
+            </label>
 
             <div class="mt-2 hidden" id="upload-progress">
                 <div class="progress"><div class="progress__bar progress__bar--striped" style="width:100%"></div></div>
@@ -112,11 +120,11 @@
     zone.addEventListener('drop', function (e) {
         e.preventDefault();
         zone.classList.remove('is-over');
-        if (e.dataTransfer.files.length) upload(e.dataTransfer.files[0]);
+        if (e.dataTransfer.files.length) send(e.dataTransfer.files);
     });
     input.addEventListener('change', function () {
-        if (input.files.length) upload(input.files[0]);
-        input.value = '';
+        if (input.files.length) send(input.files);
+        input.value = '';          // let the same photo be picked again
     });
 
     function showResult(message, type) {
@@ -125,11 +133,46 @@
         result.classList.remove('hidden');
     }
 
+    function options(form) {
+        form.append('rotation', document.getElementById('upload-rotation').value);
+        form.append('fit_mode', document.getElementById('upload-fit-mode').value);
+        return form;
+    }
+
+    /** One photo shows a before/after; several just go. */
+    function send(files) {
+        if (files.length > 1) return uploadMany(files);
+        return upload(files[0]);
+    }
+
+    function uploadMany(files) {
+        var form = new FormData();
+        for (var i = 0; i < files.length; i++) form.append('files', files[i]);
+        options(form);
+
+        progress.classList.remove('hidden');
+        result.classList.add('hidden');
+        card.classList.add('hidden');
+
+        V.api('/api/upload/batch', { method: 'POST', body: form })
+            .then(function (data) {
+                showResult(V.t('upload_complete') + ': ' + data.uploaded + ' / ' + data.total,
+                           data.uploaded === data.total ? 'success' : 'warning');
+                // With a stack of photos the useful next move is the slideshow,
+                // not a preview of whichever one happened to be last.
+                if (data.uploaded) setTimeout(function () {
+                    window.location.href = '/gallery';
+                }, 1200);
+            })
+            .catch(function (err) { showResult(err.message, 'danger'); })
+            .then(function () { progress.classList.add('hidden'); });
+    }
+
     function upload(file) {
         var form = new FormData();
         form.append('file', file);
-        form.append('rotation', document.getElementById('upload-rotation').value);
-        form.append('fit_mode', document.getElementById('upload-fit-mode').value);
+        options(form);
+        if (document.getElementById('upload-show').checked) form.append('display', '1');
 
         progress.classList.remove('hidden');
         result.classList.add('hidden');
@@ -145,6 +188,10 @@
                     '/api/preview/' + encodeURIComponent(data.filename);
                 card.classList.remove('hidden');
                 card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                if (data.displaying) {
+                    // The panel takes ~20s; the request already came back.
+                    showResult(V.t('sending_to_epaper'), 'success');
+                }
             })
             .catch(function (err) { showResult(err.message, 'danger'); })
             .then(function () { progress.classList.add('hidden'); });

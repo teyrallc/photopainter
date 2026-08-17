@@ -21,6 +21,15 @@
     <meta name="color-scheme" content="light dark">
     <title>{% block title %}Vignette{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', filename='img/vignette-logo.svg') }}">
+    {# "Add to Home Screen" on a phone. This is the whole point: sending a
+       photo to the frame should be tapping an icon and picking a picture, not
+       building an automation. Standalone mode drops the browser chrome, and
+       the manifest opens straight onto the upload page. #}
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/app-icon-180.png') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Vignette">
+    <meta name="mobile-web-app-capable" content="yes">
     <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
     {% block head %}{% endblock %}
     <script>
