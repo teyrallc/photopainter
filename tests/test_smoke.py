@@ -922,6 +922,93 @@ def test_the_same_photograph_from_two_places_lands_once():
         _forget_icloud()
 
 
+def test_the_gallery_only_offers_a_refresh_when_there_is_somewhere_to_look():
+    """A button that cannot do anything is a promise the page cannot keep."""
+    client = _paired_client()
+    _forget_icloud()
+    was_drive = config.get("gdrive_connected")
+    try:
+        config.set("gdrive_connected", False)
+        html = client.get("/gallery").get_data(as_text=True)
+        assert 'id="refresh-sources"' not in html, "offered with nothing connected"
+
+        # Refusing rather than pretending it looked and found nothing.
+        answer = client.post("/api/sources/refresh", headers=SAME_ORIGIN)
+        assert answer.status_code == 400, answer.get_data(as_text=True)
+
+        with fake_upstream(_icloud_upstream(photo_guids=("ONLY-1",))):
+            client.post("/api/icloud/connect", headers=SAME_ORIGIN, json={
+                "url": f"https://www.icloud.com/sharedalbum/#{ICLOUD_TOKEN}"})
+        html = client.get("/gallery").get_data(as_text=True)
+        assert 'id="refresh-sources"' in html
+        assert 'id="refresh-result"' in html, "nowhere to say what it found"
+    finally:
+        config.set("gdrive_connected", bool(was_drive))
+        _forget_icloud()
+
+
+def test_refreshing_brings_in_what_is_new_and_skips_what_is_not():
+    """The whole point of the button, pressed twice.
+
+    The second press must not import a second copy, and must say so rather
+    than reporting nothing — "already here" and "nothing new" are different
+    answers and only one of them means the album was read.
+    """
+    client = _paired_client()
+    _forget_icloud()
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+    upstream = _icloud_upstream(photo_guids=("NEW-1", "NEW-2"))
+
+    try:
+        with fake_upstream(upstream):
+            client.post("/api/icloud/connect", headers=SAME_ORIGIN, json={
+                "url": f"https://www.icloud.com/sharedalbum/#{ICLOUD_TOKEN}"})
+            first = client.post("/api/sources/refresh",
+                                headers=SAME_ORIGIN).get_json()
+            second = client.post("/api/sources/refresh",
+                                 headers=SAME_ORIGIN).get_json()
+
+        assert first["imported"] == 2, first
+        assert first["errors"] == [], first
+        assert "icloud" in first["sources"]
+        added = set(os.listdir(vapp.OUTPUT_DIR)) - before
+        assert len(added) == 2, added
+
+        assert second["imported"] == 0, second
+        assert set(os.listdir(vapp.OUTPUT_DIR)) - before == added, "imported twice"
+    finally:
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+        _forget_icloud()
+
+
+def test_one_broken_source_does_not_stop_the_other():
+    """Drive being unreachable must not hide the album's new photographs."""
+    client = _paired_client()
+    _forget_icloud()
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+    was_drive = config.get("gdrive_connected")
+
+    try:
+        with fake_upstream(_icloud_upstream(photo_guids=("BOTH-1",))):
+            client.post("/api/icloud/connect", headers=SAME_ORIGIN, json={
+                "url": f"https://www.icloud.com/sharedalbum/#{ICLOUD_TOKEN}"})
+            # Connected in the config, but with no usable token behind it.
+            config.set("gdrive_connected", True)
+            result = client.post("/api/sources/refresh",
+                                 headers=SAME_ORIGIN).get_json()
+
+        assert result["imported"] == 1, result
+        assert result["errors"], "the failure was swallowed"
+        assert any("Drive" in e for e in result["errors"]), result["errors"]
+        assert "icloud" in result["sources"]
+    finally:
+        config.set("gdrive_connected", bool(was_drive))
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+        _forget_icloud()
+
+
 def test_a_stale_ledger_entry_cannot_swallow_the_import():
     """The duplicate check must not find the file it has just written.
 

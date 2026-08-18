@@ -19,6 +19,7 @@ config.json
 # Which iCloud shared-album photos this device has already imported. Device
 # state, rebuilt on the next sync.
 icloud_album.json
+gdrive_imported.json
 
 # Which photographs this device already holds, keyed by a hash of their bytes.
 # Device state too — and it names the owner's files, which is nobody else's

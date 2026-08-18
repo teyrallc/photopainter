@@ -29,8 +29,20 @@
         {% else %}
         <a class="btn btn--ghost" href="/settings">{{ icon('cloud') }} {{ t.icloud_setup_hint }}</a>
         {% endif %}
+
+        {# Only when there is somewhere to look. With nothing connected the
+           button would be a promise the page cannot keep. #}
+        {% if icloud_connected or gdrive_connected %}
+        <button type="button" class="btn" id="refresh-sources">
+            {{ icon('refresh') }} {{ t.check_for_new }}
+        </button>
+        {% endif %}
     </div>
 </div>
+
+{% if icloud_connected or gdrive_connected %}
+<div id="refresh-result" class="mb-2"></div>
+{% endif %}
 
 <!-- Batch upload progress -->
 <div class="card mb-2 hidden" id="batch-progress">
@@ -747,6 +759,53 @@
                 restore();
                 V.fail(err);
             });
+    }
+
+    /* ── Check every connected source for new photographs ────────────────── */
+
+    var refreshBtn = document.getElementById('refresh-sources');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', function () {
+            var out = document.getElementById('refresh-result');
+            var restore = V.busy(this, V.t('checking'));
+            out.className = 'alert mb-2';
+            out.textContent = V.t('checking') + '…';
+
+            V.api('/api/sources/refresh', { method: 'POST' })
+                .then(function (data) {
+                    // Three different outcomes, and they are not the same
+                    // thing: nothing new, everything already here, or new
+                    // photographs on the way in. Saying "no new photos" for
+                    // the middle one reads as if nothing was looked at.
+                    var parts = [];
+                    if (data.imported) {
+                        parts.push(V.t('icloud_new_photos')
+                            .replace('{n}', data.imported));
+                    }
+                    if (data.duplicates) {
+                        parts.push(V.t('icloud_duplicates')
+                            .replace('{n}', data.duplicates));
+                    }
+                    if (!parts.length) parts.push(V.t('icloud_nothing_new'));
+                    (data.errors || []).forEach(function (e) { parts.push(e); });
+
+                    out.className = 'alert mb-2 alert--' +
+                        ((data.errors || []).length ? 'warning'
+                            : data.imported ? 'success' : 'info');
+                    out.textContent = parts.join(' · ');
+
+                    if (data.imported) {
+                        setTimeout(function () { window.location.reload(); }, 1200);
+                    } else {
+                        restore();
+                    }
+                })
+                .catch(function (err) {
+                    out.className = 'alert alert--danger mb-2';
+                    out.textContent = err.message;
+                    restore();
+                });
+        });
     }
 
     var openIcloud = document.getElementById('open-icloud');

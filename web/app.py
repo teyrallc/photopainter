@@ -36,6 +36,7 @@ CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
 # config.json: an album can run to thousands of entries and config.json is
 # rewritten whole on every settings change.
 ICLOUD_LEDGER_PATH = os.path.join(PROJECT_DIR, "icloud_album.json")
+GDRIVE_LEDGER_PATH = os.path.join(PROJECT_DIR, "gdrive_imported.json")
 
 # Add lib to path for waveshare_epd, add web to path for services
 sys.path.insert(0, LIB_DIR)
@@ -1726,6 +1727,124 @@ def api_icloud_import():
     summary["success"] = True
     summary["status"] = _icloud_status()
     return jsonify(summary)
+
+
+# ── API: Refresh every connected source ──────────────────────────────────
+#
+# One button on the gallery, because the owner does not think of it as "sync
+# the album" and "pull from Drive" — they think "go and look for new
+# photographs". What each source means by that differs, so each answers for
+# itself and the summary says which brought what.
+
+# A Drive holds everything anybody has ever put in it, including screenshots
+# and scans. Only the newest handful is considered on each press, so pressing
+# the button cannot empty somebody's Drive onto a photo frame.
+GDRIVE_SYNC_LIMIT = 25
+
+gdrive_ledger = icloud.ImportLedger(GDRIVE_LEDGER_PATH)
+
+
+def _gdrive_sync():
+    """Bring in the newest Drive images this frame has not imported before."""
+    token = _gdrive_access_token()
+    if not token:
+        raise icloud.ICloudError("Not connected to Google Drive.", status=401)
+
+    listing = gdrive.list_images(token, page_size=GDRIVE_SYNC_LIMIT)
+    if listing.get("error"):
+        config.set("gdrive_access_token", "")
+        raise icloud.ICloudError(f"Google Drive: {listing['error']}", status=401)
+
+    # A photo deleted from the gallery should be able to come back, exactly as
+    # it can for an album.
+    gdrive_ledger.bind(config.get("admin_email", "") or "drive")
+    gdrive_ledger.prune({image["filename"] for image in get_image_list()})
+
+    rotation = config.get("photo_rotation", 0)
+    imported, duplicates, failed = [], [], []
+    for entry in (listing.get("files") or [])[:GDRIVE_SYNC_LIMIT]:
+        file_id = entry.get("id")
+        if not file_id or gdrive_ledger.has(file_id):
+            continue
+
+        name, dest = reserve_output_name(entry.get("name") or f"{file_id}.jpg",
+                                         f"gdrive_{file_id}.jpg")
+        if not gdrive.download_file(token, file_id, dest):
+            failed.append({"id": file_id, "error": "Download failed"})
+            continue
+
+        # Same three-way guard the album import uses: the bytes decide, so a
+        # photograph that arrived from a phone or an album is not fetched
+        # again under a Drive file's name.
+        digest = digest_file(dest)
+        existing = photo_index.lookup(digest) if digest else None
+        if existing == name:
+            photo_index.forget_missing()
+            existing = None
+        if existing:
+            os.remove(dest)
+            gdrive_ledger.record(file_id, existing)
+            duplicates.append(existing)
+            continue
+
+        try:
+            fit_downloaded_image(dest, rotation)
+        except Exception as exc:  # noqa: BLE001 - one bad file, not the sync
+            logger.error(f"Drive: could not process {name}: {exc}")
+            if os.path.exists(dest):
+                os.remove(dest)
+            failed.append({"id": file_id, "error": "Not a readable image"})
+            continue
+
+        if digest:
+            photo_index.remember(digest, name)
+        gdrive_ledger.record(file_id, name)
+        imported.append(name)
+
+    if imported or duplicates:
+        logger.info(f"Drive: imported {len(imported)}, "
+                    f"{len(duplicates)} already here")
+    return {"imported": len(imported), "duplicates": len(duplicates),
+            "failed": len(failed), "names": imported}
+
+
+@app.route('/api/sources/refresh', methods=['POST'])
+def api_sources_refresh():
+    """Look for new photographs in everything that is connected.
+
+    Never fails as a whole because one source did: a broken album must not
+    stop Drive being read, and the owner is told which one complained.
+    """
+    sources, errors = {}, []
+    imported = duplicates = 0
+
+    if _icloud_token():
+        try:
+            summary = _icloud_sync()
+            sources["icloud"] = summary
+            imported += summary.get("imported", 0)
+            duplicates += summary.get("duplicates", 0)
+        except icloud.ICloudError as exc:
+            config.set("icloud_last_error", str(exc))
+            errors.append(f"iCloud: {exc}")
+
+    if config.get("gdrive_connected"):
+        try:
+            summary = _gdrive_sync()
+            sources["gdrive"] = summary
+            imported += summary["imported"]
+            duplicates += summary["duplicates"]
+        except icloud.ICloudError as exc:
+            errors.append(str(exc))
+        except Exception as exc:  # noqa: BLE001 - report, do not 500
+            logger.error(f"Drive refresh failed: {exc}", exc_info=True)
+            errors.append(f"Google Drive: {exc}")
+
+    if not sources and not errors:
+        return jsonify({"error": "No photo source is connected."}), 400
+    return jsonify({"success": True, "imported": imported,
+                    "duplicates": duplicates, "sources": sources,
+                    "errors": errors})
 
 
 @app.route('/api/icloud/sync', methods=['POST'])
