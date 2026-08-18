@@ -226,9 +226,12 @@ def _draw_split_page(img, draw, weather, events):
         return
 
     head_r, rest_r = right.cut_top(46)
-    ui.header(draw, head_r, weather.get("city", "—"),
-              right_text=weather.get("updated", ""), accent=BLUE,
-              title_size=21, right_size=13)
+    # No clock in the corner. The panel is on a wall next to a calendar and a
+    # temperature; what it needs to say is which city and how warm, and the
+    # time the reading was fetched at is of interest to nobody standing in
+    # front of it. The calendar half lost its clock for the same reason.
+    ui.header(draw, head_r, weather.get("city", "—"), accent=BLUE,
+              title_size=21)
 
     rest_r = rest_r.inset(14, 12)
     hero, lower = rest_r.cut_top(int(rest_r.h * 0.42), gap=8)

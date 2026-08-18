@@ -1612,6 +1612,29 @@ def test_settings_saves_itself_except_where_it_must_not():
     assert 'id="save-status"' in html
 
 
+def test_a_gateway_error_page_is_never_pasted_into_the_interface():
+    """A reply that did not come from this device is not an error message.
+
+    Everything the frame answers is JSON. Behind a tunnel, a 502 answers with
+    a full HTML error page instead, and V.api used to hand the first 300
+    characters of it to the caller — which is how the settings page's save line
+    came to read "Not saved \u2014 <!DOCTYPE html> <!--[if lt IE 7]> \u2026".
+
+    This is a source check because the behaviour lives in the browser; it
+    guards the shape rather than the rendering, which was verified by driving
+    a stubbed 502 through a real page.
+    """
+    js = open(os.path.join(REPO, "web", "static", "js", "app.js"),
+              encoding="utf-8").read()
+    assert "text.slice(0, 300)" not in js, "raw response text is reaching callers again"
+    assert "describeGateway" in js, "the non-JSON reply has no description path"
+
+    # And the one line of status bounds whatever does reach it.
+    page = open(os.path.join(REPO, "web", "templates", "settings.html"),
+                encoding="utf-8").read()
+    assert "message.length > 120" in page, "the save line prints unbounded text"
+
+
 def test_static_assets_change_address_when_they_change():
     """An update must not leave the console rendering against its old CSS.
 

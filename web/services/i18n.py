@@ -203,6 +203,7 @@ TRANSLATIONS = {
         "save_saving": "Saving\u2026",
         "save_saved": "All changes saved",
         "save_failed": "Not saved",
+        "gateway_error": "The frame could not be reached",
         # A stored secret is write-only: replaceable, never readable.
         "secret_set": "Configured",
         "secret_unset": "Not set",
@@ -581,6 +582,7 @@ TRANSLATIONS = {
         "save_saving": "儲存中\u2026",
         "save_saved": "已全部儲存",
         "save_failed": "沒有存到",
+        "gateway_error": "連不到相框",
         # A stored secret is write-only: replaceable, never readable.
         "secret_set": "已設定",
         "secret_unset": "未設定",

@@ -624,7 +624,12 @@
     function setStatus(state, message) {
         clearTimeout(idleTimer);
         statusBox.className = 'save-status save-status--' + state;
-        statusText.textContent = message;
+        // Whatever reaches here is bounded before it is shown. An error from
+        // the far side of a tunnel is not always something this device wrote,
+        // and one line of status is not the place to find that out.
+        message = String(message == null ? '' : message);
+        statusText.textContent = message.length > 120
+            ? message.slice(0, 117) + '…' : message;
         statusIcon.innerHTML = '';
         if (state === 'saving') {
             var spin = document.createElement('span');

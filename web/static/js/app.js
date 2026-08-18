@@ -13,6 +13,30 @@
     /* ── API helper ─────────────────────────────────────────────────────── */
 
     /**
+     * Describe a reply that did not come from this device.
+     *
+     * Everything the frame itself answers is JSON. Anything else was produced
+     * by something in between — a tunnel that could not reach the Pi, a proxy,
+     * a captive portal — and its body is a full HTML error page. Pasting 300
+     * characters of that into the interface is not an error message: it is
+     * what put a raw "<!DOCTYPE html> <!--[if lt IE 7]>…" into the settings
+     * page's save line when the Cloudflare tunnel returned a 502.
+     *
+     * Such a page does carry one useful sentence — its <title>, which reads
+     * like "example.com | 502: Bad gateway" — so that is used when it is
+     * short enough to be a message, and the status code alone when it is not.
+     */
+    function describeGateway(status, text) {
+        var title = /<title[^>]*>([^<]*)<\/title>/i.exec(text || '');
+        var headline = title && title[1] ? title[1].replace(/\s+/g, ' ').trim() : '';
+        if (headline && headline.length <= 90) {
+            return headline;
+        }
+        return V.t('gateway_error', 'The frame could not be reached') +
+               (status ? ' (HTTP ' + status + ')' : '');
+    }
+
+    /**
      * Call the device API and resolve with the parsed JSON body.
      *
      * Rejects with an Error carrying the server's `error` field when there is
@@ -39,7 +63,7 @@
                 var data = {};
                 if (text) {
                     try { data = JSON.parse(text); }
-                    catch (e) { data = { error: text.slice(0, 300) }; }
+                    catch (e) { data = { error: describeGateway(res.status, text) }; }
                 }
 
                 if (res.status === 401 && data.redirect) {
