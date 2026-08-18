@@ -734,8 +734,11 @@ def _draw_weather_fullscreen(img, draw, weather):
         return
 
     head, body = page.cut_top(56)
-    ui.header(draw, head, weather.get("city", "—"),
-              right_text=f"Updated {weather.get('updated', '?')}", accent=BLUE)
+    # The last of the three corner clocks, gone the same way as the calendar's
+    # and the split view's. A panel on a wall is read at a glance for the city
+    # and the temperature; when the reading was fetched is a fact about the
+    # software, not about the weather.
+    ui.header(draw, head, weather.get("city", "—"), accent=BLUE)
 
     body = body.inset(18, 14)
     hero, lower = body.cut_top(int(body.h * 0.52), gap=12)

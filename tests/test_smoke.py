@@ -1583,6 +1583,36 @@ def test_update_hands_over_when_it_rewrites_itself():
         assert output.count("continuing with the new version") == 1, output
 
 
+def test_no_view_puts_a_clock_in_its_corner():
+    """Asked for three times, once per view, so it is written down.
+
+    The calendar, the split page and the weather full screen each carried the
+    fetch time in the top-right of their header. A panel on a wall is read at
+    a glance for what day it is and how warm it is; when the reading was
+    fetched is a fact about the software, not about the weather.
+
+    The event times in "Coming up" are deliberately still there — those are
+    when something starts, which is the entire point of the list.
+    """
+    source = open(os.path.join(REPO, "web", "services", "renderer.py"),
+                  encoding="utf-8").read()
+
+    assert "right_text" not in source, (
+        "a header is being given corner text again; if it is a clock, it was "
+        "removed on purpose three times")
+    assert "weather.get('updated'" not in source
+    assert 'weather.get("updated"' not in source
+
+    # ui.header must still *support* it — this is a decision about the pages,
+    # not a capability being deleted from the toolkit.
+    toolkit = open(os.path.join(REPO, "web", "services", "epd_ui.py"),
+                   encoding="utf-8").read()
+    assert "right_text=None" in toolkit
+
+    # The agenda's own times stay.
+    assert "ui.time_label(start)" in source
+
+
 def test_settings_saves_itself_except_where_it_must_not():
     """Which controls save on their own, and which keep a button.
 
