@@ -252,6 +252,45 @@ def test_a_bare_url_is_still_accepted():
     assert calendar_svc.fetch_calendar_events(None) == []
 
 
+def test_the_panel_reads_the_calendar_live_and_the_browser_does_not():
+    """A repaint decides what stands on the wall for the next hour.
+
+    The cache is there so a dashboard being polled does not pull somebody's
+    feed on every poll. It must not be there when the panel is being drawn:
+    the events shown are then up to a quarter of an hour out of date at the one
+    moment they are chosen.
+    """
+    feeds = _Feeds({"https://a.example/a.ics": _ics("A", hours=1)})
+    subscribed = [{"url": "https://a.example/a.ics", "color": "blue"}]
+
+    def reads():
+        calendar_svc.fetch_calendar_events(subscribed)                  # cold
+        calendar_svc.fetch_calendar_events(subscribed)                  # cached
+        cached = dict(feeds.hits)
+        calendar_svc.fetch_calendar_events(subscribed, refresh=True)    # live
+        return cached, dict(feeds.hits)
+
+    cached, live = _with_feeds(feeds, reads)
+    assert cached == {"https://a.example/a.ics": 1}, cached
+    assert live == {"https://a.example/a.ics": 2}, live
+
+
+def test_the_photo_page_does_not_pull_anybody_s_calendar():
+    """A slideshow drawing pictures has no calendar on it to be stale.
+
+    Fetching before deciding which page to draw had a five-minute slideshow
+    reading the feed twelve times an hour for nothing.
+    """
+    source = open(os.path.join(REPO, "web", "services", "display_mgr.py"),
+                  encoding="utf-8").read()
+    body = source[source.index("def display_current_page"):]
+    fetch = body.index("fetch_calendar_events")
+    guard = body.index('page in ("home", "widget")')
+    assert guard < fetch, "the calendar is fetched before the page is known"
+    assert "refresh=True" in body[fetch:fetch + 120], (
+        "the panel is drawing from the browser's cache")
+
+
 # ── Colour on the panel ──────────────────────────────────────────────────
 
 def test_any_css_colour_lands_on_an_ink_the_panel_has():

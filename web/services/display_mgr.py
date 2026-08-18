@@ -88,10 +88,18 @@ def display_current_page():
     page = config.get("current_page", "photo")
     logger.info(f"Rendering page: {page}")
 
+    # Only the pages that show them, and only fresh. A repaint is the moment
+    # what stands on the wall for the next hour gets decided, so the calendar
+    # is read live rather than from the quarter-hour cache the browser uses.
+    # The photo page needs neither, and asking for them there had a five-minute
+    # slideshow pulling somebody's calendar feed twelve times an hour to draw
+    # a picture with no calendar on it.
     events = []
-    weather = weather_svc.fetch_for_config(config)
-    if config.get("calendars"):
-        events = fetch_calendar_events(config.get("calendars"))
+    weather = None
+    if page in ("home", "widget"):
+        weather = weather_svc.fetch_for_config(config)
+        if config.get("calendars"):
+            events = fetch_calendar_events(config.get("calendars"), refresh=True)
 
     photo_path = get_current_photo_path_func()
 

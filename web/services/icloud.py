@@ -158,6 +158,56 @@ def parse_album_token(link):
     return candidate
 
 
+# Apple titles the page behind a link according to what the link actually is.
+# A published album's page carries the album's name; an invitation's page says
+# so in as many words, and in every language it serves. Matching on the
+# English is enough to be useful and never enough to be wrong on its own —
+# this only ever runs after the API has already refused the album.
+_INVITE_TITLE = re.compile(r"<title[^>]*>([^<]*)</title>", re.IGNORECASE)
+_INVITE_WORDS = ("invitation", "invite")
+_DIAGNOSE_BYTES = 64 * 1024
+_DIAGNOSE_TIMEOUT = 8
+
+
+def diagnose_link(link):
+    """Ask Apple what kind of link this is, once the API has said no.
+
+    There are two links in Photos and they look identical. The Share button's
+    link invites people to *join* an album — anyone who has it can accept, so
+    the owner is quite right that it is not private, and it still cannot be
+    read without an Apple Account. Only "Public Website" publishes the JSON
+    this frame reads.
+
+    Telling someone their public album is not public is not a message they can
+    act on, so rather than guess, the page itself is asked: Apple titles an
+    invitation "Shared Album invitation" and a published album by its name.
+    Returns a replacement message, or None to leave the original alone.
+    """
+    text = (link or "").strip()
+    if "icloud.com" not in text.lower():
+        return None
+    if "://" not in text:
+        text = f"https://{text}"
+    try:
+        request = urllib.request.Request(
+            text, headers={"User-Agent": BROWSER_HEADERS["User-Agent"]})
+        with urllib.request.urlopen(request, timeout=_DIAGNOSE_TIMEOUT) as response:
+            page = response.read(_DIAGNOSE_BYTES).decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001 - a better message is a nicety
+        logger.info(f"Could not read the iCloud link's own page: {exc}")
+        return None
+
+    found = _INVITE_TITLE.search(page)
+    title = (found.group(1) if found else "").strip().lower()
+    if not any(word in title for word in _INVITE_WORDS):
+        return None
+    return ("That is a Shared Album *invitation* — Apple's own page for it "
+            "says so. Anyone with it can join the album, but joining needs an "
+            "Apple Account and this frame has none. Open the album in Photos "
+            "→ People (or Subscribers) → turn on Public Website, and use the "
+            "separate link that appears under it.")
+
+
 def album_url(token):
     """The canonical web link for a token, for showing back to the owner."""
     return f"https://www.icloud.com/sharedalbum/#{token}"

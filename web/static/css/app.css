@@ -1016,7 +1016,19 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
 }
 .tile__action:hover { background: #fff; }
 .tile__action--danger:hover { background: var(--danger); color: #fff; }
-.tile__action--grow { width: auto; padding: 0 11px; gap: 6px; font-size: .78rem; font-weight: 650; }
+/* An icon-only action is a 32px square and centres its one child. Adding a
+   label gives the grid a second child, and the default flow puts it on a
+   second row — inside a box fixed at 32px tall, so "Display" was drawn below
+   the button and out the bottom of it. Text goes beside the icon. */
+.tile__action--grow {
+    width: auto;
+    grid-auto-flow: column;
+    padding: 0 11px;
+    gap: 6px;
+    font-size: .78rem;
+    font-weight: 650;
+    white-space: nowrap;
+}
 
 .tile__check {
     position: absolute;

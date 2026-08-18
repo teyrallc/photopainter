@@ -306,6 +306,57 @@ def test_a_missing_album_says_so():
         assert "public website" in str(exc).lower(), exc
 
 
+def test_an_invitation_link_is_named_as_one():
+    """The two links in Photos look identical and are not the same thing.
+
+    The Share button's link invites people to *join* an album — anyone holding
+    it can accept, so an owner is quite right that it is not private, and it
+    still cannot be read without an Apple Account. Only "Public Website"
+    publishes the JSON this frame reads. Telling somebody their public album is
+    not public is not a message they can act on, so the page itself is asked:
+    Apple titles an invitation "Shared Album invitation".
+    """
+    page = ('<!DOCTYPE html><html><head><title>Shared Album invitation</title>'
+            '<meta property="og:title" content="Shared Album invitation">'
+            '</head><body></body></html>')
+
+    def served(request, timeout=None):
+        return io.BytesIO(page.encode("utf-8"))
+
+    real = urllib.request.urlopen
+    urllib.request.urlopen = served
+    try:
+        message = icloud.diagnose_link(
+            "https://photos.icloud.com/shared/album/077QFwtYRXaOWWS7Aupj_GDIg")
+    finally:
+        urllib.request.urlopen = real
+
+    assert message and "invitation" in message.lower()
+    assert "public website" in message.lower(), "it does not say what to do"
+
+    # A published album's page is titled by its own name, so there is nothing
+    # to correct and the API's own message stands.
+    named = '<html><head><title>Summer 2026 - iCloud</title></head></html>'
+    urllib.request.urlopen = lambda request, timeout=None: io.BytesIO(named.encode())
+    try:
+        assert icloud.diagnose_link("https://www.icloud.com/sharedalbum/#B0x") is None
+    finally:
+        urllib.request.urlopen = real
+
+    # Nothing to ask, or nothing answering: the caller keeps its own message.
+    assert icloud.diagnose_link("") is None
+    assert icloud.diagnose_link("https://example.com/whatever") is None
+
+    def refused(request, timeout=None):
+        raise OSError("network is down")
+
+    urllib.request.urlopen = refused
+    try:
+        assert icloud.diagnose_link("https://photos.icloud.com/shared/album/x") is None
+    finally:
+        urllib.request.urlopen = real
+
+
 def test_the_listing_is_cached_briefly():
     """Opening the picker and then importing must not fetch it twice."""
     fake = FakeICloud()

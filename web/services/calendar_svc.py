@@ -26,11 +26,17 @@ _cache = {}
 MAX_MERGED_EVENTS = 60
 
 
-def fetch_calendar_events(calendars, days_ahead=14):
+def fetch_calendar_events(calendars, days_ahead=14, refresh=False):
     """Upcoming events across every subscribed feed, soonest first.
 
     Takes the config's `calendars` list. A bare URL string is also accepted,
     because the setup page and older callers have one of those.
+
+    `refresh` skips the cache. The panel passes it: a repaint is the one moment
+    the events on the wall are decided, and showing a quarter-hour-old copy of
+    a calendar at that exact moment is the one thing the cache must not do. The
+    browser does not pass it — a dashboard being polled has no business
+    fetching somebody's feed on every poll.
     """
     if isinstance(calendars, str):
         calendars = [{"url": calendars}] if calendars.strip() else []
@@ -42,7 +48,7 @@ def fetch_calendar_events(calendars, days_ahead=14):
     merged = []
     for feed in feeds:
         url = feed["url"].strip()
-        name, events = _fetch_one(url, days_ahead)
+        name, events = _fetch_one(url, days_ahead, refresh=refresh)
         label = str(feed.get("name") or "").strip() or name
         color = feed.get("color") or "blue"
         for event in events:
@@ -55,11 +61,11 @@ def fetch_calendar_events(calendars, days_ahead=14):
     return merged[:MAX_MERGED_EVENTS]
 
 
-def _fetch_one(ical_url, days_ahead):
+def _fetch_one(ical_url, days_ahead, refresh=False):
     """One feed's (name, events), from the network or from the cache."""
     now = time.time()
     entry = _cache.get(ical_url)
-    if entry and (now - entry["timestamp"]) < CACHE_DURATION:
+    if entry and not refresh and (now - entry["timestamp"]) < CACHE_DURATION:
         return entry["name"], entry["events"]
 
     try:

@@ -1600,6 +1600,14 @@ def api_icloud_connect():
         token = icloud.parse_album_token(link)
         album = icloud.fetch_album(token, refresh=True)
     except icloud.ICloudError as exc:
+        # 404 means the token named no published album. The usual cause is the
+        # Share button's invitation link, which is indistinguishable from the
+        # Public Website one by eye — so ask Apple's own page which it is
+        # rather than telling the owner their public album is not public.
+        if exc.status == 404:
+            better = icloud.diagnose_link(link)
+            if better:
+                exc = icloud.ICloudError(better, status=exc.status)
         config.set("icloud_last_error", str(exc))
         return _icloud_error(exc)
 

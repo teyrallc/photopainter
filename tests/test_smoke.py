@@ -1776,6 +1776,15 @@ def test_the_gallery_actions_sit_on_the_picture_not_on_the_filename():
     assert actions and "position: absolute" in actions.group(1)
     assert "inset: auto 0 0 0" in actions.group(1)
 
+    # An icon-only action is a 32px square whose grid centres its one child.
+    # Giving one a label adds a second child, and the default flow puts it on
+    # a second row inside that fixed 32px — which drew "Display" below the
+    # button and out the bottom of it.
+    grow = re.search(r"\.tile__action--grow\s*\{([^}]*)\}", css)
+    assert grow, "the labelled action has lost its own rule"
+    assert "grid-auto-flow: column" in grow.group(1), (
+        "the label will stack under the icon again")
+
 
 def test_settings_saves_itself_except_where_it_must_not():
     """Which controls save on their own, and which keep a button.
