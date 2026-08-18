@@ -1737,15 +1737,22 @@ def api_icloud_import():
 # itself and the summary says which brought what.
 
 # A Drive holds everything anybody has ever put in it, including screenshots
-# and scans. Only the newest handful is considered on each press, so pressing
-# the button cannot empty somebody's Drive onto a photo frame.
+# and scans, and there is no album to bound it. So the first look records what
+# is already there and fetches none of it; from then on, anything that was not
+# in that list is new and is brought in. Only the newest handful is considered
+# on each press, which is also what keeps one press from being a long download.
 GDRIVE_SYNC_LIMIT = 25
 
 gdrive_ledger = icloud.ImportLedger(GDRIVE_LEDGER_PATH)
 
 
 def _gdrive_sync():
-    """Bring in the newest Drive images this frame has not imported before."""
+    """Bring in Drive images added since the last look.
+
+    The first look brings in nothing. It writes down what the Drive already
+    holds and stops there — see GDRIVE_SYNC_LIMIT — so the button means "from
+    now on, anything new" rather than "everything you have ever saved".
+    """
     token = _gdrive_access_token()
     if not token:
         raise icloud.ICloudError("Not connected to Google Drive.", status=401)
@@ -1756,15 +1763,30 @@ def _gdrive_sync():
         raise icloud.ICloudError(f"Google Drive: {listing['error']}", status=401)
 
     # A photo deleted from the gallery should be able to come back, exactly as
-    # it can for an album.
+    # it can for an album. Entries that were only noted survive this — they
+    # never had a file to lose.
     gdrive_ledger.bind(config.get("admin_email", "") or "drive")
     gdrive_ledger.prune({image["filename"] for image in get_image_list()})
 
+    files = [e for e in (listing.get("files") or [])[:GDRIVE_SYNC_LIMIT]
+             if e.get("id")]
+
+    # Nothing known about this Drive yet: write it all down, fetch none of it.
+    # An emptied ledger is not the same thing — notes have no file to be
+    # pruned with, so a ledger that has ever been looked at stays non-empty.
+    if not gdrive_ledger.count:
+        for entry in files:
+            gdrive_ledger.note(entry["id"])
+        logger.info(f"Drive: noted {len(files)} existing photo(s); "
+                    "new ones from here on will be brought in")
+        return {"imported": 0, "duplicates": 0, "failed": 0, "names": [],
+                "noted": len(files)}
+
     rotation = config.get("photo_rotation", 0)
     imported, duplicates, failed = [], [], []
-    for entry in (listing.get("files") or [])[:GDRIVE_SYNC_LIMIT]:
-        file_id = entry.get("id")
-        if not file_id or gdrive_ledger.has(file_id):
+    for entry in files:
+        file_id = entry["id"]
+        if gdrive_ledger.has(file_id):
             continue
 
         name, dest = reserve_output_name(entry.get("name") or f"{file_id}.jpg",
@@ -1805,7 +1827,7 @@ def _gdrive_sync():
         logger.info(f"Drive: imported {len(imported)}, "
                     f"{len(duplicates)} already here")
     return {"imported": len(imported), "duplicates": len(duplicates),
-            "failed": len(failed), "names": imported}
+            "failed": len(failed), "names": imported, "noted": 0}
 
 
 @app.route('/api/sources/refresh', methods=['POST'])
@@ -1815,7 +1837,7 @@ def api_sources_refresh():
     Never fails as a whole because one source did: a broken album must not
     stop Drive being read, and the owner is told which one complained.
     """
-    sources, errors = {}, []
+    sources, errors, notes = {}, [], []
     imported = duplicates = 0
 
     if _icloud_token():
@@ -1834,6 +1856,11 @@ def api_sources_refresh():
             sources["gdrive"] = summary
             imported += summary["imported"]
             duplicates += summary["duplicates"]
+            # The first look at a Drive fetches nothing on purpose. Saying so
+            # is the difference between a considered decision and a button
+            # that appears not to work.
+            if summary.get("noted"):
+                notes.append({"source": "gdrive", "noted": summary["noted"]})
         except icloud.ICloudError as exc:
             errors.append(str(exc))
         except Exception as exc:  # noqa: BLE001 - report, do not 500
@@ -1844,7 +1871,7 @@ def api_sources_refresh():
         return jsonify({"error": "No photo source is connected."}), 400
     return jsonify({"success": True, "imported": imported,
                     "duplicates": duplicates, "sources": sources,
-                    "errors": errors})
+                    "errors": errors, "notes": notes})
 
 
 @app.route('/api/icloud/sync', methods=['POST'])

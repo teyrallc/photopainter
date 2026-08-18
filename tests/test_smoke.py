@@ -24,6 +24,14 @@ import urllib.error
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# The update-script tests drive real git against a bare repo in /tmp. None of
+# it touches a network, but all of it is at the mercy of whatever else the
+# machine is doing — a `git clone` of four files timed out at 30 seconds with
+# a browser and a dev server running beside it. The generous number is not
+# there to let a slow operation pass; it is there so a busy machine does not
+# report a failure that is not one.
+GIT_TIMEOUT = 90
+
 
 # ── Hardware and system stubs ─────────────────────────────────────────────
 
@@ -982,6 +990,115 @@ def test_refreshing_brings_in_what_is_new_and_skips_what_is_not():
         _forget_icloud()
 
 
+def _gdrive_upstream(file_ids):
+    """A Drive listing plus real PNG bytes, one distinct picture per file."""
+    from PIL import Image
+
+    pngs = {}
+    for index, file_id in enumerate(file_ids):
+        buffer = io.BytesIO()
+        Image.new("RGB", (50, 30), (20 + index * 30, 90, 160)).save(buffer, "PNG")
+        pngs[file_id] = buffer.getvalue()
+
+    def upstream(request, timeout=None):
+        url = request.full_url
+        if "/oauth2" in url or "token" in url:
+            return _Body(json.dumps({"access_token": "TOKEN",
+                                     "expires_in": 3600}).encode())
+        if "/drive/v3/files?" in url:
+            # Newest first, which is what the real listing is ordered by.
+            return _Body(json.dumps({"files": [
+                {"id": f, "name": f"{f}.png", "mimeType": "image/png",
+                 "modifiedTime": "2026-08-18T09:00:00Z"}
+                for f in reversed(file_ids)]}).encode())
+        for file_id, body in pngs.items():
+            if f"/files/{file_id}?" in url:
+                return _Body(body)
+        raise AssertionError(f"unexpected request: {url}")
+
+    return upstream
+
+
+def test_the_first_look_at_a_drive_takes_nothing():
+    """A Drive is not a chosen set, so the button does not empty it.
+
+    The first press writes down what is already there. Everything added after
+    that is new and comes in. Without this, connecting a Drive and pressing
+    once put twenty-five screenshots on the wall.
+    """
+    client = _paired_client()
+    _forget_icloud()
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+    was_drive = config.get("gdrive_connected")
+    was_token = config.get("gdrive_access_token")
+
+    try:
+        vapp.gdrive_ledger.clear()
+        config.update({"gdrive_connected": True, "gdrive_access_token": "TOKEN"})
+
+        with fake_upstream(_gdrive_upstream(["OLD-1", "OLD-2"])):
+            first = client.post("/api/sources/refresh",
+                                headers=SAME_ORIGIN).get_json()
+        assert first["imported"] == 0, first
+        assert first["sources"]["gdrive"]["noted"] == 2, first
+        assert first["notes"] == [{"source": "gdrive", "noted": 2}], first
+        assert set(os.listdir(vapp.OUTPUT_DIR)) == before, "it fetched something"
+
+        # Two more photos land in the Drive. Only those two come in.
+        with fake_upstream(_gdrive_upstream(["OLD-1", "OLD-2", "NEW-1", "NEW-2"])):
+            second = client.post("/api/sources/refresh",
+                                 headers=SAME_ORIGIN).get_json()
+        assert second["imported"] == 2, second
+        assert second["sources"]["gdrive"]["noted"] == 0, second
+        added = set(os.listdir(vapp.OUTPUT_DIR)) - before
+        assert len(added) == 2, added
+
+        # And pressing again with nothing new does nothing at all.
+        with fake_upstream(_gdrive_upstream(["OLD-1", "OLD-2", "NEW-1", "NEW-2"])):
+            third = client.post("/api/sources/refresh",
+                                headers=SAME_ORIGIN).get_json()
+        assert third["imported"] == 0, third
+        assert set(os.listdir(vapp.OUTPUT_DIR)) - before == added
+
+        # Deleting an imported photo brings it back; the notes are untouched,
+        # or the whole Drive would look new again.
+        os.remove(os.path.join(vapp.OUTPUT_DIR, sorted(added)[0]))
+        with fake_upstream(_gdrive_upstream(["OLD-1", "OLD-2", "NEW-1", "NEW-2"])):
+            fourth = client.post("/api/sources/refresh",
+                                 headers=SAME_ORIGIN).get_json()
+        assert fourth["imported"] == 1, fourth
+        assert fourth["sources"]["gdrive"]["noted"] == 0, (
+            "the notes were pruned away and the Drive looked new again")
+    finally:
+        config.update({"gdrive_connected": bool(was_drive),
+                       "gdrive_access_token": was_token or ""})
+        vapp.gdrive_ledger.clear()
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+        _forget_icloud()
+
+
+def test_a_noted_photo_survives_pruning():
+    """The two kinds of ledger entry, and why only one of them is pruned."""
+    import tempfile as _tempfile
+
+    with _tempfile.TemporaryDirectory() as directory:
+        ledger = vapp.icloud.ImportLedger(os.path.join(directory, "l.json"))
+        ledger.bind("drive")
+        ledger.record("IMPORTED", "photo.jpg")
+        ledger.note("SEEN")
+
+        assert ledger.has("IMPORTED") and ledger.has("SEEN")
+        assert ledger.count == 2
+
+        # photo.jpg is gone from the gallery, so it may be fetched again.
+        # SEEN never had a file, so there is nothing to notice missing.
+        assert ledger.prune(set()) == 1
+        assert not ledger.has("IMPORTED")
+        assert ledger.has("SEEN"), "a note was pruned away"
+        assert ledger.count == 1
+
+
 def test_one_broken_source_does_not_stop_the_other():
     """Drive being unreachable must not hide the album's new photographs."""
     client = _paired_client()
@@ -1521,7 +1638,7 @@ def test_update_diagnoses_an_ssh_remote_it_cannot_use():
 
         def git(*args):
             return run_real(["git", "-C", tmp, *args], capture_output=True,
-                            text=True, timeout=30, env=env)
+                            text=True, timeout=GIT_TIMEOUT, env=env)
 
         git("init", "-q", "-b", "main", ".")
         git("config", "user.email", "test@example.com")
@@ -1566,12 +1683,12 @@ def test_update_diagnoses_a_local_ref_with_no_commit_behind_it():
 
         def git(*args, cwd=work):
             return run_real(["git", "-C", cwd, *args], capture_output=True,
-                            text=True, timeout=30, env=env)
+                            text=True, timeout=GIT_TIMEOUT, env=env)
 
         run_real(["git", "init", "-q", "--bare", "-b", "main", upstream],
-                 capture_output=True, text=True, timeout=30, env=env)
+                 capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
         run_real(["git", "clone", "-q", upstream, work],
-                 capture_output=True, text=True, timeout=30, env=env)
+                 capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
         os.makedirs(os.path.join(work, "scripts"), exist_ok=True)
         shutil.copy(os.path.join(REPO, "scripts", "update.sh"),
                     os.path.join(work, "scripts", "update.sh"))
@@ -1653,12 +1770,12 @@ def test_update_never_stops_at_a_password_prompt():
 
         def git(*args, cwd=work):
             return run_real(["git", "-C", cwd, *args], capture_output=True,
-                            text=True, timeout=30, env=env)
+                            text=True, timeout=GIT_TIMEOUT, env=env)
 
         run_real(["git", "init", "-q", "--bare", "-b", "main", upstream],
-                 capture_output=True, text=True, timeout=30, env=env)
+                 capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
         run_real(["git", "clone", "-q", upstream, work],
-                 capture_output=True, text=True, timeout=30, env=env)
+                 capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
         os.makedirs(os.path.join(work, "scripts"), exist_ok=True)
         shutil.copy(script, os.path.join(work, "scripts", "update.sh"))
         git("config", "user.email", "test@example.com")
@@ -1737,12 +1854,12 @@ def test_update_hands_over_when_it_rewrites_itself():
 
         def git(*args):
             return run_real(["git", "-C", work, *args], capture_output=True,
-                            text=True, timeout=30, env=env)
+                            text=True, timeout=GIT_TIMEOUT, env=env)
 
         run_real(["git", "init", "-q", "--bare", "-b", "main", upstream],
-                 capture_output=True, text=True, timeout=30, env=env)
+                 capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
         run_real(["git", "clone", "-q", upstream, work],
-                 capture_output=True, text=True, timeout=30, env=env)
+                 capture_output=True, text=True, timeout=GIT_TIMEOUT, env=env)
         os.makedirs(os.path.join(work, "scripts"), exist_ok=True)
         shutil.copy(os.path.join(REPO, "scripts", "update.sh"), script)
         git("config", "user.email", "test@example.com")

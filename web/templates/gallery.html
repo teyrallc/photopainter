@@ -786,6 +786,9 @@
                         parts.push(V.t('icloud_duplicates')
                             .replace('{n}', data.duplicates));
                     }
+                    (data.notes || []).forEach(function (n) {
+                        parts.push(V.t('drive_noted').replace('{n}', n.noted));
+                    });
                     if (!parts.length) parts.push(V.t('icloud_nothing_new'));
                     (data.errors || []).forEach(function (e) { parts.push(e); });
 

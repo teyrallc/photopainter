@@ -770,11 +770,26 @@ class ImportLedger:
             if self._imported.pop(guid, None) is not None:
                 self._save()
 
+    def note(self, guid):
+        """Remember a photo without claiming to have brought it in.
+
+        For a source that has no chosen set — a Google Drive holds everything
+        anybody ever put in it — the first look records what is already there
+        and fetches none of it, so pressing the button once cannot empty a
+        Drive onto a photo frame. Everything added after that is new, and is.
+        """
+        self.record(guid, "")
+
     def prune(self, existing_filenames):
-        """Drop entries whose file is gone, so a re-sync can bring them back."""
+        """Drop entries whose file is gone, so a re-sync can bring them back.
+
+        Entries that name no file are left alone: they were never imported,
+        so there is nothing missing to notice, and dropping them would make
+        the next look treat a whole Drive as new all over again.
+        """
         with self._lock:
             missing = [g for g, name in self._imported.items()
-                       if name not in existing_filenames]
+                       if name and name not in existing_filenames]
             for guid in missing:
                 del self._imported[guid]
             if missing:
