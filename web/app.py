@@ -2395,7 +2395,9 @@ def api_calendar():
     events = fetch_calendar_events(config.get("calendar_ical_url", ""))
     today = get_today_info()
     return jsonify({"today": today, "events": [
-        {"summary": e.get("summary"), "start": e["start"].isoformat() if e.get("start") else None}
+        {"summary": e.get("summary"),
+         "start": e["start"].isoformat() if e.get("start") else None,
+         "all_day": bool(e.get("all_day"))}
         for e in events
     ]})
 

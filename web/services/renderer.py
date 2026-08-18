@@ -641,7 +641,7 @@ def _draw_agenda(draw, box, events, limit=None, compact=False):
         # it survives the six-colour quantiser cleanly.
         draw.rectangle([box.x, top + 2, box.x + 3, top + row_h - 6], fill=BLUE)
 
-        when = f"{ui.relative_day(start)} {ui.time_label(start)}"
+        when = ui.when_label(start, event.get("all_day"))
         draw.text((box.x + 10, top + 1), ui.fit(when, meta_font, box.w - 12),
                   fill=BLUE, font=meta_font, anchor="lt")
         summary = event.get("summary", "?")

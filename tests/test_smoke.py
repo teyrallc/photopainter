@@ -1647,6 +1647,59 @@ def test_coming_up_covers_the_next_three_days_and_fills_the_space():
     assert short >= 1
 
 
+def test_an_all_day_event_is_never_given_a_time():
+    """A date-only event occupies the day, not the stroke of midnight.
+
+    Published as ``DTSTART;VALUE=DATE:20260818``, an all-day entry has no time
+    in it at all. Parsing it lands on 00:00, and printing that read as "Today
+    00:00" on the panel — a dentist appointment apparently booked for
+    midnight. The flag has to survive the parser, the label and the drawn row.
+    """
+    from datetime import datetime, timedelta
+    from PIL import Image, ImageDraw
+    from services import epd_ui as ui, renderer
+    from services.calendar_svc import _parse_ical
+
+    ics = ("BEGIN:VCALENDAR\r\n"
+           "BEGIN:VEVENT\r\nSUMMARY:Nose check\r\n"
+           "DTSTART;VALUE=DATE:{d}\r\nDTEND;VALUE=DATE:{n}\r\nEND:VEVENT\r\n"
+           "BEGIN:VEVENT\r\nSUMMARY:Dentist\r\n"
+           "DTSTART:{d}T190000Z\r\nEND:VEVENT\r\n"
+           "END:VCALENDAR\r\n").format(
+               d=datetime.now().strftime("%Y%m%d"),
+               n=(datetime.now() + timedelta(days=1)).strftime("%Y%m%d"))
+
+    parsed = {e["summary"]: e for e in _parse_ical(ics, 7)}
+    assert parsed["Nose check"]["all_day"] is True
+    assert parsed["Dentist"]["all_day"] is False, "a timed event is not all-day"
+
+    # No DTEND at all: an all-day event still covers its whole day, or it
+    # disappears from the frame at 00:01 on the day it is happening.
+    bare = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Nose check\r\n"
+            "DTSTART;VALUE=DATE:{d}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            ).format(d=datetime.now().strftime("%Y%m%d"))
+    assert [e["summary"] for e in _parse_ical(bare, 7)] == ["Nose check"]
+
+    # The label says so, and never invents an hour for it.
+    when = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    assert ui.when_label(when, all_day=True) == "Today All day"
+    assert "00:00" not in ui.when_label(when, all_day=True)
+    assert ui.when_label(when.replace(hour=19), all_day=False) == "Today 19:00"
+
+    # And the drawn row carries it through, rather than the flag being lost
+    # somewhere between the parser and the panel.
+    img = Image.new("RGB", (400, 200), (255, 255, 255))
+    renderer._draw_agenda(ImageDraw.Draw(img), ui.Box(0, 0, 380, 180),
+                          [{"summary": "Nose check", "start": when,
+                            "all_day": True}])
+    plain = Image.new("RGB", (400, 200), (255, 255, 255))
+    renderer._draw_agenda(ImageDraw.Draw(plain), ui.Box(0, 0, 380, 180),
+                          [{"summary": "Nose check", "start": when}])
+    assert img.tobytes() != plain.tobytes(), (
+        "the all-day row draws identically to a midnight one — the flag is "
+        "not reaching the renderer")
+
+
 def test_no_view_puts_a_clock_in_its_corner():
     """Asked for three times, once per view, so it is written down.
 
@@ -1673,8 +1726,12 @@ def test_no_view_puts_a_clock_in_its_corner():
                    encoding="utf-8").read()
     assert "right_text=None" in toolkit
 
-    # The agenda's own times stay.
-    assert "ui.time_label(start)" in source
+    # The agenda's own times stay — now via ui.when_label, which says the
+    # start time for a timed event and "All day" for a date-only one.
+    assert "ui.when_label(start" in source
+    toolkit_when = "def when_label("
+    assert toolkit_when in toolkit
+    assert "time_label(when)" in toolkit
 
 
 def test_settings_saves_itself_except_where_it_must_not():

@@ -683,6 +683,17 @@ def time_label(when):
     return when.strftime("%H:%M")
 
 
+def when_label(when, all_day=False, now=None):
+    """The left half of an agenda line: which day, then what time.
+
+    An all-day event has no time to show, so it says so. Writing the midnight
+    it happens to parse to would be a lie of precision — "Today 00:00" for a
+    thing that occupies the whole day.
+    """
+    day = relative_day(when, now)
+    return f"{day} All day" if all_day else f"{day} {time_label(when)}"
+
+
 def relative_day(when, now=None):
     """"Today" / "Tomorrow" / a weekday, for an agenda line."""
     now = now or datetime.now()

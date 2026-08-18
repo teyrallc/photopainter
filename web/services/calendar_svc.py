@@ -88,7 +88,13 @@ def _parse_ical(text, days_ahead):
             in_event = False
             if event.get("start"):
                 start = event["start"]
-                ev_end = event.get("end", start)
+                ev_end = event.get("end")
+                if ev_end is None:
+                    # An all-day event with no DTEND covers the whole day, not
+                    # the midnight it parsed to — without this it drops off the
+                    # frame at 00:01 on the very day it is happening.
+                    ev_end = (start + timedelta(days=1)
+                              if event.get("all_day") else start)
                 # Include if event overlaps with [now, end]
                 if start <= end and ev_end >= now:
                     events.append(event)
@@ -107,6 +113,7 @@ def _parse_ical(text, days_ahead):
             event["summary"] = _decode_ical_text(value)
         elif prop_name == "DTSTART":
             event["start"] = _parse_ical_date(prop, value)
+            event["all_day"] = _is_date_only(prop, value)
         elif prop_name == "DTEND":
             event["end"] = _parse_ical_date(prop, value)
         elif prop_name == "LOCATION":
@@ -125,6 +132,23 @@ def _split_ical_line(line):
     if idx < 0:
         return None, None
     return line[:idx], line[idx + 1:]
+
+
+def _is_date_only(prop, datestr):
+    """Whether a DTSTART names a day rather than a moment.
+
+    An all-day event is published as ``DTSTART;VALUE=DATE:20260818`` — there
+    is no time in it at all. Parsing that lands on midnight, which is a real
+    instant and reads on the panel as "Today 00:00": a dentist appointment
+    apparently booked for the stroke of twelve. The flag travels with the
+    event so whoever draws it can say "All day" instead of inventing an hour.
+
+    The parameter is what RFC 5545 requires, and the eight-digit shape is what
+    it means; either is accepted, since a date-time value always carries a T.
+    """
+    if re.search(r"VALUE=DATE(?![-A-Za-z])", prop or "", re.IGNORECASE):
+        return True
+    return bool(re.fullmatch(r"\d{8}", (datestr or "").strip()))
 
 
 def _parse_ical_date(prop, datestr):
