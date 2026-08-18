@@ -135,12 +135,72 @@ def test_every_shape_of_link_resolves_to_the_same_token():
         # The newer share link puts the album's *name* after the #, so
         # "whatever follows the hash" is the wrong rule.
         f"https://share.icloud.com/photos/{TOKEN}#SummerHoliday2024",
+        # Photos now hands out this shape, and it also carries the token in
+        # the path. Not knowing it is what made a working link unpasteable.
+        f"https://photos.icloud.com/shared/album/{TOKEN}",
+        f"photos.icloud.com/shared/album/{TOKEN}",
         f"#{TOKEN}",
         TOKEN,
     ):
         assert icloud.parse_album_token(link) == TOKEN, link
 
     assert icloud.album_url(TOKEN).endswith(f"#{TOKEN}")
+
+
+def test_a_token_may_carry_the_whole_base64url_alphabet():
+    """Apple has issued tokens with "-" and "_" in them.
+
+    The alphabet was pinned to base62 from the one example anybody had, so
+    "077QFwtYRXaOWWS7Aupj_GDIg" — a real link, straight out of Photos — was
+    turned away at the door with "that does not look like a link", which is
+    both wrong and unfixable by the person reading it.
+    """
+    for token in ("077QFwtYRXaOWWS7Aupj_GDIg", "A1b2C3d4-e5_F6g7H8",
+                  "B0abcdefghijkl", "_" * 10, "-" * 10):
+        assert icloud.parse_album_token(token) == token, token
+        assert icloud.parse_album_token(
+            f"https://photos.icloud.com/shared/album/{token}") == token
+
+    # Widening the alphabet must not widen it to path separators: the token
+    # is interpolated into a URL path, and that is the whole reason it is
+    # checked at all.
+    for bad in ("a" * 9, "a" * 65, "abcdefghij/k", "abcdefghij.k",
+                "abcdefghij k", "abcdefghij%2F", "abcdefghij?x=1"):
+        try:
+            icloud.parse_album_token(bad)
+            raise AssertionError(f"{bad!r} should have been refused")
+        except icloud.ICloudError:
+            pass
+
+
+def test_a_link_must_have_come_from_icloud():
+    """Once "-" is a token character, any URL's last word looks like a token.
+
+    Before the alphabet was widened the token pattern happened to reject
+    "example.com/not-an-album"; afterwards it parsed as the album
+    "not-an-album" and the frame went off to ask Apple about it. The host is
+    what actually decides whether a link is an album link.
+    """
+    for link in (f"https://www.icloud.com/sharedalbum/#{TOKEN}",
+                 f"https://share.icloud.com/photos/{TOKEN}",
+                 f"https://photos.icloud.com/shared/album/{TOKEN}",
+                 f"https://icloud.com/sharedalbum/#{TOKEN}"):
+        assert icloud.parse_album_token(link) == TOKEN, link
+
+    for link in (f"https://example.com/{TOKEN}",
+                 f"https://evil.example/photos/{TOKEN}",
+                 # A suffix match on "icloud.com" alone would take this one.
+                 f"https://icloud.com.evil.example/photos/{TOKEN}",
+                 f"https://noticloud.com/sharedalbum/#{TOKEN}",
+                 "https://example.com/not-an-album"):
+        try:
+            icloud.parse_album_token(link)
+            raise AssertionError(f"{link!r} should have been refused")
+        except icloud.ICloudError as exc:
+            assert exc.status == 400, link
+
+    # A bare token has no host to check and is still accepted.
+    assert icloud.parse_album_token(TOKEN) == TOKEN
 
 
 def test_anything_that_is_not_a_token_is_refused():
@@ -151,6 +211,8 @@ def test_anything_that_is_not_a_token_is_refused():
                  # path word, which is the right length and the right alphabet.
                  "https://www.icloud.com/sharedalbum/",
                  "https://share.icloud.com/photos/",
+                 "https://photos.icloud.com/shared/album/",
+                 "https://photos.icloud.com/shared/albums",
                  "not a link at all"):
         try:
             icloud.parse_album_token(junk)
@@ -237,6 +299,11 @@ def test_a_missing_album_says_so():
     except icloud.ICloudError as exc:
         assert exc.status == 404
         assert "album" in str(exc).lower(), exc
+        # 404 from this endpoint means "no public website behind that token",
+        # which is nearly always the Share button's invite link — identical to
+        # look at, and a different thing. Saying "the link may have been
+        # regenerated" sent people to copy the same link again.
+        assert "public website" in str(exc).lower(), exc
 
 
 def test_the_listing_is_cached_briefly():

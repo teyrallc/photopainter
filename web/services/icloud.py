@@ -46,9 +46,18 @@ API_PATH = "/{token}/sharedstreams/{endpoint}"
 _HOST_RE = re.compile(r"^p\d{1,3}-sharedstreams\.icloud\.com$")
 _ASSET_HOST_SUFFIXES = (".icloud.com", ".icloud-content.com", ".apple.com")
 
-# Tokens are base62 with a leading letter. Validating before use keeps a hand
-# -edited link from turning into a path segment of our own choosing.
-_TOKEN_RE = re.compile(r"^[A-Za-z0-9]{10,64}$")
+# Tokens are base64url — Apple has issued both the short base62 kind
+# ("B0abcdefghijkl") and longer ones carrying "-" and "_", and a regex that
+# knew only the first rejected a perfectly good link on sight. Validating at
+# all is what keeps a hand-edited link from turning into a path segment of our
+# own choosing, so the alphabet is widened rather than dropped.
+_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{10,64}$")
+
+# Words that appear in these links but are never the token. Without this, a
+# link whose token went missing resolves to whatever word came last —
+# "sharedalbum" is the right length and, until now, the right alphabet.
+_PATH_WORDS = ("sharedalbum", "sharedalbums", "photos", "sharedstreams",
+               "shared", "album", "albums", "gallery")
 
 HTTP_TIMEOUT = 25
 DOWNLOAD_TIMEOUT = 90
@@ -96,12 +105,20 @@ def parse_album_token(link):
         https://www.icloud.com/sharedalbum/zh-tw/#B0abcdefghijkl
         https://share.icloud.com/photos/B0abcdefghijkl
         https://share.icloud.com/photos/B0abcdefghijkl#Family
+        https://photos.icloud.com/shared/album/B0abcdefghijkl
         B0abcdefghijkl
 
-    Where the token sits depends on the shape, and the two disagree: the
-    icloud.com link carries it in the fragment, while a share.icloud.com link
-    carries it in the path and may put the *album's name* in the fragment. So
-    the host decides, rather than "whatever follows the #".
+    Where the token sits depends on the shape, and they disagree: the old
+    icloud.com link carries it in the fragment, while share.icloud.com and the
+    newer photos.icloud.com carry it in the path and may put the *album's
+    name* in the fragment. So the position is decided by the link, not by
+    "whatever follows the #".
+
+    Getting the token out is not the same as the album being reachable — a
+    link copied from Photos' Share button looks exactly like this one and
+    still answers 404, because it invites people rather than publishing a
+    website. That is a fact about the album, not about the text, so it is
+    reported when the album is fetched.
     """
     text = (link or "").strip()
     if not text:
@@ -110,15 +127,25 @@ def parse_album_token(link):
     if "://" in text or "icloud.com" in text.lower():
         split = urllib.parse.urlsplit(text if "://" in text else f"https://{text}")
         host = (split.hostname or "").lower()
+        # A link is only an album link if Apple served it. This used to be
+        # left to the token pattern, which worked only while that pattern was
+        # base62: once "-" and "_" were allowed — as Apple's own tokens
+        # require — the last path word of any URL started to look like a
+        # token, and "example.com/not-an-album" parsed as the album
+        # "not-an-album". The host is the thing that actually settles it.
+        if not (host == "icloud.com" or host.endswith(".icloud.com")):
+            raise ICloudError(
+                "That link is not from iCloud. Copy the album link from "
+                "Photos — it starts with icloud.com.", status=400)
         fragment = split.fragment.split("?")[0].split("&")[0]
         segments = [s for s in split.path.split("/") if s]
         last = segments[-1] if segments else ""
-        # A path word is never the token; without this, a link whose fragment
-        # went missing resolves to "sharedalbum", which is the right length and
-        # the right alphabet and completely wrong.
-        if last.lower() in ("sharedalbum", "photos", "sharedstreams"):
+        if last.lower() in _PATH_WORDS:
             last = ""
-        candidate = last if host.startswith("share.") else (fragment or last)
+        # The path wins wherever a link puts the token there; only the old
+        # www.icloud.com/sharedalbum/#TOKEN form keeps it in the fragment.
+        in_path = host.startswith("share.") or host.startswith("photos.")
+        candidate = last if in_path else (fragment or last)
     else:
         candidate = text.lstrip("#")
 
@@ -180,8 +207,14 @@ def _http_message(exc):
         return ("iCloud refused the album. Make sure Public Website is still "
                 "on for it in Photos.")
     if exc.code == 404:
-        return ("iCloud does not know that album. The link may have been "
-                "regenerated — copy it from Photos again.")
+        # The link parsed and iCloud answered — it simply has no public
+        # website behind that token. Nearly always this is the invite link
+        # from Photos' Share button, which looks identical and is a different
+        # thing, so the message names the toggle rather than blaming the link.
+        return ("That album has no public website. In Photos open the album → "
+                "People (or Subscribers) → turn on Public Website, then copy "
+                "the link that appears there — the Share button's link invites "
+                "people instead, and this frame cannot sign in.")
     if exc.code == 429:
         return "iCloud is rate limiting this album. Try again in a few minutes."
     return f"iCloud returned HTTP {exc.code}."
