@@ -922,6 +922,12 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
     object-fit: cover;
     display: block;
 }
+/* The picture and anything drawn over it. The action bar is anchored here
+   rather than to the whole tile: pinned to the tile's bottom edge it covered
+   the filename and the file size sitting underneath the image — permanently
+   so on touch, where the bar never hides. */
+.tile__media { position: relative; }
+
 .tile__meta {
     padding: 9px 10px;
     border-top: 1px solid var(--border);

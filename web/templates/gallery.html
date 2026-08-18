@@ -67,17 +67,21 @@
 <div class="tiles" id="gallery-grid">
     {% for img in images %}
     <div class="tile" data-filename="{{ img.filename }}">
-        <button type="button" class="tile__thumb" data-preview>
-            <img src="/output/{{ img.filename | urlencode }}" alt="{{ img.filename }}" loading="lazy">
-            <span class="tile__check hidden">{{ icon('check') }}</span>
-        </button>
-        <div class="tile__actions">
-            <button type="button" class="tile__action tile__action--grow" data-display>
-                {{ icon('display') }} {{ t.display }}
+        {# The actions overlay the picture, so they share its box. Anchored to
+           the tile instead they landed on top of the filename underneath. #}
+        <div class="tile__media">
+            <button type="button" class="tile__thumb" data-preview>
+                <img src="/output/{{ img.filename | urlencode }}" alt="{{ img.filename }}" loading="lazy">
+                <span class="tile__check hidden">{{ icon('check') }}</span>
             </button>
-            <span style="flex:1"></span>
-            <button type="button" class="tile__action tile__action--danger" data-delete
-                    aria-label="{{ t.delete }}">{{ icon('trash') }}</button>
+            <div class="tile__actions">
+                <button type="button" class="tile__action tile__action--grow" data-display>
+                    {{ icon('display') }} {{ t.display }}
+                </button>
+                <span style="flex:1"></span>
+                <button type="button" class="tile__action tile__action--danger" data-delete
+                        aria-label="{{ t.delete }}">{{ icon('trash') }}</button>
+            </div>
         </div>
         <div class="tile__meta">
             <span class="tile__name" title="{{ img.filename }}">{{ img.filename }}</span>

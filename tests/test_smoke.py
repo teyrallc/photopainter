@@ -1734,6 +1734,49 @@ def test_no_view_puts_a_clock_in_its_corner():
     assert "time_label(when)" in toolkit
 
 
+def test_the_gallery_actions_sit_on_the_picture_not_on_the_filename():
+    """Display and Delete overlay the photo, and only the photo.
+
+    The bar was anchored to the tile, whose bottom edge is below the filename
+    and the file size — so it was drawn on top of both. Hover hid it on a
+    desktop; a phone reports no hover at all and keeps the bar up permanently,
+    which is where this was noticed: the filename with a Display button
+    printed across it.
+    """
+    import re
+
+    from PIL import Image
+
+    # The tile markup only exists when there is something in the gallery.
+    seeded = os.path.join(vapp.OUTPUT_DIR, "tile-layout-check.png")
+    Image.new("RGB", (8, 8), (255, 255, 255)).save(seeded)
+    try:
+        html = _paired_client().get("/gallery").get_data(as_text=True)
+    finally:
+        os.remove(seeded)
+
+    # The bar and the picture share a box, and the meta row is outside it.
+    # Checked by order rather than by parsing: tile__media opens, the thumb
+    # and the actions fall inside it, and tile__meta comes after it closes.
+    assert 'class="tile__media"' in html, (
+        "tile__media is gone — the actions have nothing to anchor to")
+    order = [html.index(f'class="tile__{part}"')
+             for part in ("media", "thumb", "actions", "meta")]
+    assert order == sorted(order), (
+        "the action bar and the filename are not in the order the layout "
+        "depends on", order)
+
+    css = open(os.path.join(REPO, "web", "static", "css", "app.css"),
+               encoding="utf-8").read()
+    # Absolute positioning needs a positioned ancestor; without this rule the
+    # actions fall back to .tile and land on the filename again.
+    assert re.search(r"\.tile__media\s*\{[^}]*position:\s*relative", css), (
+        ".tile__media is not a positioning context")
+    actions = re.search(r"\.tile__actions\s*\{([^}]*)\}", css)
+    assert actions and "position: absolute" in actions.group(1)
+    assert "inset: auto 0 0 0" in actions.group(1)
+
+
 def test_settings_saves_itself_except_where_it_must_not():
     """Which controls save on their own, and which keep a button.
 
