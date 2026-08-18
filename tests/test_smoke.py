@@ -1583,6 +1583,70 @@ def test_update_hands_over_when_it_rewrites_itself():
         assert output.count("continuing with the new version") == 1, output
 
 
+def test_coming_up_covers_the_next_three_days_and_fills_the_space():
+    """What "Coming up" is for, and how much of it gets shown.
+
+    It answers "is there anything on?" — so it covers today and the two days
+    after, and beyond that a frame on a wall is not a planner. How many of
+    those it shows is decided by the height of the box it is handed, not by a
+    number chosen in advance: three entries stretched over 200 pixels read as
+    a page with nothing on it.
+    """
+    from datetime import datetime, timedelta
+    from services import renderer
+
+    now = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
+
+    def at(**kw):
+        return {"summary": "x", "start": now + timedelta(**kw)}
+
+    events = [
+        at(hours=-3),                 # earlier today: still shown
+        at(hours=2),                  # later today
+        at(days=1),                   # tomorrow
+        at(days=2, hours=8),          # the day after
+        at(days=3),                   # one day past the window
+        at(days=9),                   # well past it
+    ]
+    # Deliberately out of order: the window must sort as well as filter.
+    shuffled = [events[4], events[2], events[0], events[5], events[3], events[1]]
+
+    inside = renderer._agenda_rows(shuffled, now=now)
+    assert len(inside) == 4, [e["start"] for e in inside]
+    assert inside == sorted(inside, key=lambda e: e["start"]), "not in time order"
+    horizon = (now + timedelta(days=renderer.AGENDA_DAYS - 1)).date()
+    assert all(e["start"].date() <= horizon for e in inside)
+
+    # Yesterday is not "coming up", however recently it was.
+    assert renderer._agenda_rows([at(days=-1)], now=now) == []
+    assert renderer._agenda_rows([], now=now) == []
+    assert renderer._agenda_rows(None, now=now) == []
+    # An event with no start at all must not crash the page.
+    assert renderer._agenda_rows([{"summary": "no date"}], now=now) == []
+
+    # A taller box shows more of the same list. Rendering the two calendar
+    # layouts is the honest way to check that, since the capacity comes from
+    # the box each view hands over.
+    from PIL import Image, ImageDraw
+    from services import epd_ui as ui
+
+    def rows_drawn(height):
+        img = Image.new("RGB", (400, 480), (255, 255, 255))
+        renderer._draw_agenda(ImageDraw.Draw(img), ui.Box(0, 0, 380, height), events)
+        # Count the blue ticks: one per row, and the only blue in this box.
+        px = img.load()
+        ticks = set()
+        for y in range(height):
+            if px[1, y] == (0, 0, 255):
+                ticks.add(y // 8)
+        return len(ticks)
+
+    tall = rows_drawn(240)
+    short = rows_drawn(90)
+    assert tall > short, (tall, short)
+    assert short >= 1
+
+
 def test_no_view_puts_a_clock_in_its_corner():
     """Asked for three times, once per view, so it is written down.
 

@@ -169,7 +169,7 @@ def _draw_home_column(img, draw, box, weather, events):
     label_box, list_box = rest.cut_top(20, gap=6)
     draw.text((label_box.x, label_box.y), "Coming up",
               fill=BLUE, font=ui.display(14, "semibold"), anchor="lt")
-    _draw_agenda(draw, list_box, events, limit=3)
+    _draw_agenda(draw, list_box, events)
 
 
 def render_widget_page(mode, weather_data, calendar_events):
@@ -214,7 +214,7 @@ def _draw_split_page(img, draw, weather, events):
     label_box, list_box = agenda_box.cut_top(20, gap=2)
     draw.text((label_box.x, label_box.y), "Coming up",
               fill=BLUE, font=ui.font(14), anchor="lt")
-    _draw_agenda(draw, list_box, events, limit=3)
+    _draw_agenda(draw, list_box, events)
 
     # ── Right: now, then the next three days ──
     if not weather:
@@ -587,22 +587,52 @@ def _draw_month_grid(draw, box, now, events=None, compact=False):
                     draw.ellipse([cx - dot, dy - dot, cx + dot, dy + dot], fill=BLUE)
 
 
-def _draw_agenda(draw, box, events, limit=3, compact=False):
-    """The upcoming-events list: day on the left, time and title beside it."""
+# What "coming up" covers: today and the two days after it. Beyond that a
+# frame on a wall is not a planner — it is answering "is there anything on?",
+# and a meeting next Thursday is not the answer to that question.
+AGENDA_DAYS = 3
+
+
+def _agenda_rows(events, now=None):
+    """The events worth showing, soonest first, within the window."""
+    now = now or datetime.now()
+    horizon = now.date() + timedelta(days=AGENDA_DAYS - 1)
+    rows = [e for e in events or [] if e.get("start")
+            and e["start"].date() <= horizon
+            # An event that finished hours ago is not coming up. Anything
+            # still to happen today is, which is why this compares to now
+            # rather than to the start of the day.
+            and e["start"] >= now.replace(hour=0, minute=0, second=0, microsecond=0)]
+    return sorted(rows, key=lambda e: e["start"])
+
+
+def _draw_agenda(draw, box, events, limit=None, compact=False):
+    """The upcoming-events list: day on the left, time and title beside it.
+
+    Shows as many of the next few days' events as the box can hold at a fixed
+    row height, rather than a fixed count stretched to fill it. Three entries
+    spread over 200 pixels read as a page with nothing on it; the same 200
+    pixels hold four or five at the height the type actually needs.
+    """
     title_size = 13 if compact else 16
     # Titles come from somebody's calendar, so they may be Chinese; the times
     # beside them never are.
     meta_font = ui.display(11 if compact else 13, "medium")
 
-    if not events:
-        draw.text((box.x, box.y), "No upcoming events",
+    candidates = _agenda_rows(events)
+    if not candidates:
+        draw.text((box.x, box.y), "Nothing in the next few days",
                   fill=BLACK, font=meta_font, anchor="lt")
         return
 
-    rows = [e for e in events if e.get("start")][:limit]
-    if not rows:
-        return
-    row_h = min(box.h / len(rows), 46 if not compact else 30)
+    # 40px holds an 11px time over a 16px title with air to spare — the 46 it
+    # was left a third of a row's worth of space unused at the foot of every
+    # column, which is one fewer event shown for nothing.
+    row_h = 28 if compact else 40
+    capacity = max(1, int(box.h // row_h))
+    if limit:
+        capacity = min(capacity, limit)
+    rows = candidates[:capacity]
 
     for index, event in enumerate(rows):
         start = event["start"]
@@ -836,4 +866,4 @@ def _draw_calendar_fullscreen(draw, events):
     draw.text((label_box.x, label_box.y),
               "Coming up",
               fill=BLUE, font=ui.font(15), anchor="lt")
-    _draw_agenda(draw, list_box, events, limit=4)
+    _draw_agenda(draw, list_box, events)
