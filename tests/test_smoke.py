@@ -1078,6 +1078,44 @@ def test_the_first_look_at_a_drive_takes_nothing():
         _forget_icloud()
 
 
+def test_disconnecting_a_drive_forgets_what_it_held():
+    """The next Drive connected is a different Drive.
+
+    Keeping the notes would leave its first press importing its newest
+    twenty-five rather than writing them down — which is the one thing the
+    first-look rule exists to prevent.
+    """
+    client = _paired_client()
+    was_drive = config.get("gdrive_connected")
+    was_token = config.get("gdrive_access_token")
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+    _forget_icloud()
+
+    try:
+        vapp.gdrive_ledger.clear()
+        config.update({"gdrive_connected": True, "gdrive_access_token": "TOKEN"})
+        with fake_upstream(_gdrive_upstream(["MINE-1", "MINE-2"])):
+            client.post("/api/sources/refresh", headers=SAME_ORIGIN)
+        assert vapp.gdrive_ledger.count == 2, "the first look wrote nothing down"
+
+        client.post("/api/gdrive/disconnect", headers=SAME_ORIGIN)
+        assert vapp.gdrive_ledger.count == 0, "the old Drive's notes were kept"
+
+        # Somebody else's Drive: its first press must also take nothing.
+        config.update({"gdrive_connected": True, "gdrive_access_token": "TOKEN"})
+        with fake_upstream(_gdrive_upstream(["THEIRS-1", "THEIRS-2", "THEIRS-3"])):
+            first = client.post("/api/sources/refresh",
+                                headers=SAME_ORIGIN).get_json()
+        assert first["imported"] == 0, first
+        assert set(os.listdir(vapp.OUTPUT_DIR)) == before
+    finally:
+        config.update({"gdrive_connected": bool(was_drive),
+                       "gdrive_access_token": was_token or ""})
+        vapp.gdrive_ledger.clear()
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+
+
 def test_a_noted_photo_survives_pruning():
     """The two kinds of ledger entry, and why only one of them is pruned."""
     import tempfile as _tempfile

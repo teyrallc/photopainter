@@ -1397,6 +1397,10 @@ def api_gdrive_disconnect():
         "gdrive_refresh_token": "",
         "gdrive_connected": False,
     })
+    # Whatever is connected next is a different Drive, and its photos have
+    # never been looked at. Keeping the old notes would leave the first press
+    # importing that Drive's newest twenty-five instead of writing them down.
+    gdrive_ledger.clear()
     return jsonify({"success": True})
 
 
@@ -1765,7 +1769,13 @@ def _gdrive_sync():
     # A photo deleted from the gallery should be able to come back, exactly as
     # it can for an album. Entries that were only noted survive this — they
     # never had a file to lose.
-    gdrive_ledger.bind(config.get("admin_email", "") or "drive")
+    #
+    # Bound to a constant, not to anything about the account: an album's
+    # ledger is keyed on which album, because connecting a different one is a
+    # different set of photos, but there is only ever one Drive connected and
+    # nothing here identifies it that is not a credential. Disconnecting is
+    # what clears it — see api_gdrive_disconnect.
+    gdrive_ledger.bind("drive")
     gdrive_ledger.prune({image["filename"] for image in get_image_list()})
 
     files = [e for e in (listing.get("files") or [])[:GDRIVE_SYNC_LIMIT]
