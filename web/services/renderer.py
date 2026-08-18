@@ -235,15 +235,28 @@ def _draw_split_page(img, draw, weather, events):
 
     rest_r = rest_r.inset(14, 12)
     hero, lower = rest_r.cut_top(int(rest_r.h * 0.42), gap=8)
-    icon_box, reading = hero.cut_left(int(hero.w * 0.42), gap=4)
-    ui.weather_icon(img, icon_box, weather.get("icon"))
+    icon_col, reading = hero.cut_left(int(hero.w * 0.42), gap=4)
 
-    temp_font = ui.font(66)
-    draw.text((reading.x, reading.cy - 12), _temp(weather.get("temp")),
-              fill=BLACK, font=temp_font, anchor="lm")
-    draw.text((reading.x, reading.cy + 26),
-              ui.fit(_describe(weather), ui.font(17), reading.w),
-              fill=BLACK, font=ui.font(17), anchor="lt")
+    # Bounded, and centred on the same line as the reading beside it. Filling
+    # the column made the cloud the loudest thing on the half — larger than the
+    # temperature it belongs to — and rain and snow hang below their own centre,
+    # so at that size the icon ran past the bottom of the band it sits in.
+    icon_side = min(icon_col.w, hero.h) * 0.62
+    ui.weather_icon(img, ui.Box(icon_col.cx - icon_side / 2,
+                                hero.cy - icon_side / 2,
+                                icon_side, icon_side), weather.get("icon"))
+
+    # Two lines, centred on that same line, so the two halves of the band
+    # balance instead of each starting wherever its own box did.
+    temp_font = ui.display(60, "medium")
+    desc_font = ui.face(_describe(weather), 17, "regular")
+    block_h = 60 * 0.72 + 10 + ui.text_height(desc_font)
+    baseline = hero.cy - block_h / 2 + 60 * 0.72
+    draw.text((reading.x, baseline), _temp(weather.get("temp")),
+              fill=BLACK, font=temp_font, anchor="ls")
+    draw.text((reading.x, baseline + 10),
+              ui.fit(_describe(weather), desc_font, reading.w),
+              fill=BLACK, font=desc_font, anchor="lt")
 
     stats, forecast_box = lower.cut_top(58, gap=10)
     speed_unit = "mph" if weather.get("units") == "imperial" else "m/s"
