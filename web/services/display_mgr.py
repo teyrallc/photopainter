@@ -90,8 +90,8 @@ def display_current_page():
 
     events = []
     weather = weather_svc.fetch_for_config(config)
-    if config.get("calendar_ical_url"):
-        events = fetch_calendar_events(config.get("calendar_ical_url"))
+    if config.get("calendars"):
+        events = fetch_calendar_events(config.get("calendars"))
 
     photo_path = get_current_photo_path_func()
 

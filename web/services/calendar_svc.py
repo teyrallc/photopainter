@@ -1,5 +1,10 @@
 """
-Calendar service - fetches events from iCal URL.
+Calendar service - fetches events from one or more iCal URLs.
+
+A household keeps more than one calendar — work, school, the shared one — so
+this takes a list of feeds rather than a single URL. Each event is tagged with
+the colour of the feed it came from, which is how the panel tells them apart
+with the four inks it has left after the paper and the type.
 """
 
 import logging
@@ -11,17 +16,51 @@ from datetime import datetime, timedelta, timezone
 logger = logging.getLogger("vignette.calendar")
 
 CACHE_DURATION = 900  # 15 minutes
-_cache = {"data": None, "timestamp": 0}
+# Keyed by URL: one slow or broken feed must not evict another's listing, and
+# a feed that fails now keeps showing what it last said rather than blanking
+# the whole page.
+_cache = {}
+
+# More than any panel can show, but a bound all the same — a runaway feed must
+# not be able to fill the Pi's memory with events nothing will ever draw.
+MAX_MERGED_EVENTS = 60
 
 
-def fetch_calendar_events(ical_url, days_ahead=14):
-    """Fetch upcoming events from an iCal URL."""
-    if not ical_url:
+def fetch_calendar_events(calendars, days_ahead=14):
+    """Upcoming events across every subscribed feed, soonest first.
+
+    Takes the config's `calendars` list. A bare URL string is also accepted,
+    because the setup page and older callers have one of those.
+    """
+    if isinstance(calendars, str):
+        calendars = [{"url": calendars}] if calendars.strip() else []
+    feeds = [c for c in (calendars or [])
+             if isinstance(c, dict) and str(c.get("url") or "").strip()]
+    if not feeds:
         return []
 
+    merged = []
+    for feed in feeds:
+        url = feed["url"].strip()
+        name, events = _fetch_one(url, days_ahead)
+        label = str(feed.get("name") or "").strip() or name
+        color = feed.get("color") or "blue"
+        for event in events:
+            # Copied rather than mutated: the cache holds these, and tagging
+            # in place would leave one feed's colour on another's cached
+            # events if the same URL were subscribed twice.
+            merged.append(dict(event, calendar=label, color=color))
+
+    merged.sort(key=lambda e: e["start"])
+    return merged[:MAX_MERGED_EVENTS]
+
+
+def _fetch_one(ical_url, days_ahead):
+    """One feed's (name, events), from the network or from the cache."""
     now = time.time()
-    if _cache["data"] is not None and (now - _cache["timestamp"]) < CACHE_DURATION:
-        return _cache["data"]
+    entry = _cache.get(ical_url)
+    if entry and (now - entry["timestamp"]) < CACHE_DURATION:
+        return entry["name"], entry["events"]
 
     try:
         req = urllib.request.Request(ical_url, headers={"User-Agent": "Vignette/1.0"})
@@ -34,14 +73,29 @@ def fetch_calendar_events(ical_url, days_ahead=14):
                 ical_text = raw.decode("latin-1")
 
         events = _parse_ical(ical_text, days_ahead)
-        _cache["data"] = events
-        _cache["timestamp"] = now
-        logger.info(f"Calendar updated: {len(events)} upcoming events")
-        return events
+        name = _calendar_name(ical_text)
+        _cache[ical_url] = {"events": events, "name": name, "timestamp": now}
+        logger.info(f"Calendar updated: {len(events)} upcoming events "
+                    f"from {name or ical_url}")
+        return name, events
 
     except Exception as e:
         logger.error(f"Calendar fetch failed: {e}", exc_info=True)
-        return _cache.get("data") or []
+        # Stale is better than empty on a frame on a wall: a flaky feed would
+        # otherwise wipe today's events off the panel until it recovered.
+        return (entry or {}).get("name", ""), (entry or {}).get("events", [])
+
+
+def _calendar_name(text):
+    """The feed's own name, so a calendar can label itself in Settings."""
+    match = re.search(r"^X-WR-CALNAME[^:]*:(.+)$", text or "",
+                      re.IGNORECASE | re.MULTILINE)
+    return _decode_ical_text(match.group(1).strip())[:40] if match else ""
+
+
+def forget_calendars():
+    """Drop every cached feed so the next read is live."""
+    _cache.clear()
 
 
 def _unfold_ical(text):
@@ -116,6 +170,10 @@ def _parse_ical(text, days_ahead):
             event["all_day"] = _is_date_only(prop, value)
         elif prop_name == "DTEND":
             event["end"] = _parse_ical_date(prop, value)
+        elif prop_name == "COLOR":
+            # RFC 7986: a CSS3 colour name for this one event, independent of
+            # whatever colour its calendar is drawn in.
+            event["event_color"] = value.strip()[:32]
         elif prop_name == "LOCATION":
             event["location"] = _decode_ical_text(value)
         elif prop_name == "DESCRIPTION":

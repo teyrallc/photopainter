@@ -65,7 +65,16 @@ DEFAULT_CONFIG = {
     "weather_units": "metric",  # metric, imperial
     "weather_lang": "en",
 
-    # Calendar settings
+    # Calendar settings.
+    #
+    # `calendars` is the real setting: a list of
+    #     {"url": ..., "name": ..., "color": "blue"|"red"|"green"|"yellow"}
+    # so a household can subscribe to more than one feed and tell them apart
+    # on the panel. `calendar_ical_url` is kept as the first calendar's URL —
+    # a device updating in the field has one, the setup page writes one, and
+    # the two are reconciled in _sync_calendars() so there is never a moment
+    # where they disagree.
+    "calendars": [],
     "calendar_ical_url": "",
 
     # Google Drive
@@ -180,11 +189,64 @@ def is_secret_name(key):
     return any(part in lowered for part in _SECRET_NAME_PARTS)
 
 
+# The panel has six inks and two of them are the paper and the type, so a
+# calendar can be told apart by one of four. Blue first because it is what the
+# agenda already used, and yellow last because it is the faintest on white.
+CALENDAR_COLORS = ("blue", "red", "green", "yellow")
+
+
+def normalize_calendars(value, legacy_url=""):
+    """Clean up whatever is stored (or posted) as the calendar list.
+
+    Anything without a URL is dropped, names are trimmed, and a colour that is
+    not one this panel can print is replaced by the next unused one — so a
+    hand-edited config.json cannot put a colour on the screen that the display
+    has no ink for.
+    """
+    entries = []
+    for item in (value if isinstance(value, list) else []):
+        if isinstance(item, str):
+            item = {"url": item}
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        # A feed is fetched with urllib, which will happily open file:// and
+        # ftp:// as well. Nothing useful comes back from those and a config
+        # file is something a person edits, so the scheme is pinned here
+        # rather than left to whatever urlopen is willing to do.
+        if not url.lower().startswith(("http://", "https://")):
+            continue
+        color = str(item.get("color") or "").strip().lower()
+        entries.append({"url": url,
+                        "name": str(item.get("name") or "").strip()[:40],
+                        "color": color if color in CALENDAR_COLORS else ""})
+
+    # Colours are filled in a second pass, so that what somebody actually
+    # chose is reserved before the gaps are filled. Done in one pass, a
+    # calendar with no colour ahead of a blue one takes blue for itself and
+    # the two arrive on the panel indistinguishable.
+    taken = {entry["color"] for entry in entries if entry["color"]}
+    for index, entry in enumerate(entries):
+        if entry["color"]:
+            continue
+        entry["color"] = next((c for c in CALENDAR_COLORS if c not in taken),
+                              CALENDAR_COLORS[index % len(CALENDAR_COLORS)])
+        taken.add(entry["color"])
+
+    # A device that has only ever had the single-URL setting arrives here with
+    # an empty list and that URL still in place.
+    if not entries and str(legacy_url or "").strip():
+        entries.append({"url": legacy_url.strip(), "name": "",
+                        "color": CALENDAR_COLORS[0]})
+    return entries
+
+
 class Config:
     def __init__(self, config_path):
         self.config_path = config_path
         self._data = dict(DEFAULT_CONFIG)
         self.load()
+        self._sync_calendars()
 
     def load(self):
         if os.path.exists(self.config_path):
@@ -192,6 +254,13 @@ class Config:
                 with open(self.config_path, 'r') as f:
                     saved = json.load(f)
                 self._data.update(saved)
+                # A config written before calendars became a list carries only
+                # the single URL. Promote it once, here, where "the key is not
+                # in the file" still distinguishes an old config from a list
+                # somebody has deliberately emptied.
+                if "calendars" not in saved:
+                    self._data["calendars"] = normalize_calendars(
+                        [], saved.get("calendar_ical_url", ""))
                 logger.info(f"Config loaded from {self.config_path}")
             except Exception as e:
                 logger.error(f"Failed to load config: {e}")
@@ -229,12 +298,51 @@ class Config:
         return self._data.get(key, default)
 
     def set(self, key, value):
-        self._data[key] = value
-        self.save()
+        self.update({key: value})
 
     def update(self, data):
+        data = self._calendar_url_edit(dict(data or {}))
         self._data.update(data)
+        self._sync_calendars()
         self.save()
+
+    def _calendar_url_edit(self, data):
+        """Turn a write to the single URL into an edit of the first calendar.
+
+        The setup page and older builds know one iCal URL and nothing about a
+        list. Rewriting the payload here means the list stays the only thing
+        that is ever stored, so there is no second source of truth to drift.
+        """
+        if "calendar_ical_url" not in data or "calendars" in data:
+            return data
+        url = str(data.pop("calendar_ical_url") or "").strip()
+        entries = normalize_calendars(self._data.get("calendars"))
+        if not url:
+            # Clearing the one URL the caller knows about clears its calendar,
+            # and leaves any others alone.
+            entries = entries[1:]
+        elif entries:
+            entries[0] = dict(entries[0], url=url)
+        else:
+            entries = [{"url": url, "name": "", "color": CALENDAR_COLORS[0]}]
+        data["calendars"] = entries
+        return data
+
+    def _sync_calendars(self):
+        """`calendars` is the setting; `calendar_ical_url` mirrors its first.
+
+        The mirror only ever flows one way. Reconciling in both directions
+        looks tidier and is wrong: deleting the first calendar leaves the old
+        URL sitting in the mirror, which is indistinguishable from someone
+        having just typed it, and the deleted feed comes straight back.
+
+        A write to the single URL is turned into a list edit where it happens
+        — see `_calendar_url_edit` — so by the time this runs the list is
+        already the truth.
+        """
+        entries = normalize_calendars(self._data.get("calendars"))
+        self._data["calendars"] = entries
+        self._data["calendar_ical_url"] = entries[0]["url"] if entries else ""
 
     def apply_user_settings(self, data):
         """Apply a POST /api/config payload, ignoring anything not writable.

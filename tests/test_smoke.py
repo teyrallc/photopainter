@@ -1798,9 +1798,15 @@ def test_settings_saves_itself_except_where_it_must_not():
     # Every field the autosave wiring names has to exist, or a setting silently
     # stops saving with nothing on screen to say so.
     for field in ("s-rotation", "s-fit-mode", "s-weather-city", "s-weather-units",
-                  "s-weather-lang", "s-weather-key", "s-cal-url",
+                  "s-weather-lang", "s-weather-key",
                   "s-icloud-auto", "s-icloud-interval"):
         assert f'id="{field}"' in html, field
+
+    # The calendar is a list, not a field: its rows are built in the browser
+    # from what the server seeds here, and the whole list saves itself.
+    assert 'id="cal-list"' in html
+    assert 'id="cal-add"' in html
+    assert "data-calendars=" in html
 
     # And the page has somewhere to say what it did.
     assert 'id="save-status"' in html

@@ -190,12 +190,21 @@
                     <button type="button" class="btn btn--sm" id="test-calendar">{{ t.test }}</button>
                 </div>
 
-                <div class="field">
-                    <label class="label" for="s-cal-url">{{ t.ical_url }}</label>
-                    <input type="url" class="input" id="s-cal-url" value="{{ config.calendar_ical_url }}"
-                           placeholder="{{ t.ical_placeholder }}" spellcheck="false">
-                    <p class="hint">{{ t.ical_hint }}</p>
+                {# One row per feed, on a shared grid so the swatch, the name,
+                   the URL and the remove button line up down the whole list
+                   however many there are. Rendered from JS because rows come
+                   and go; the server's list is the seed. #}
+                <div class="callist" id="cal-list"
+                     data-calendars="{{ config.calendars | tojson | forceescape }}"></div>
+
+                <div class="callist__foot">
+                    <button type="button" class="btn btn--ghost btn--sm" id="cal-add">
+                        {{ icon('plus') }} {{ t.cal_add }}
+                    </button>
                 </div>
+
+                <p class="hint">{{ t.ical_hint }}</p>
+                <p class="hint">{{ t.cal_colour_hint }}</p>
 
                 <div id="cal-test-result"></div>
             </section>
@@ -791,7 +800,154 @@
     autosave(document.getElementById('s-weather-lang'), saveConfigKey('weather_lang'));
     autosaveSecret(document.getElementById('s-weather-key'), saveConfigKey('weather_api_key'));
 
-    autosave(document.getElementById('s-cal-url'), saveConfigKey('calendar_ical_url'));
+    /* ── Calendars ──────────────────────────────────────────────────────────
+       A list rather than a field. The whole list is posted on every change:
+       there is no per-row identity to send a partial update against, and the
+       device reconciles it in one place. */
+
+    (function () {
+        var list = document.getElementById('cal-list');
+        var addBtn = document.getElementById('cal-add');
+        if (!list || !addBtn) return;
+
+        var COLOURS = ['blue', 'red', 'green', 'yellow'];
+        var rows, saved, timer = null, seq = 0;
+
+        try {
+            rows = JSON.parse(list.dataset.calendars || '[]');
+        } catch (e) { rows = []; }
+        if (!Array.isArray(rows)) rows = [];
+        saved = JSON.stringify(rows);
+
+        /* The colour a new calendar gets: the first nobody is using, so two
+           feeds added in a row never arrive looking identical. */
+        function nextColour() {
+            var taken = rows.map(function (r) { return r.color; });
+            for (var i = 0; i < COLOURS.length; i++) {
+                if (taken.indexOf(COLOURS[i]) === -1) return COLOURS[i];
+            }
+            return COLOURS[rows.length % COLOURS.length];
+        }
+
+        function push() {
+            // Blur commits, and blurring a field nobody touched is not a
+            // change. Without this every tab through the list posted the
+            // whole thing again and flashed "Saving…" for nothing.
+            var current = JSON.stringify(rows);
+            if (current === saved) return;
+            var body = rows.filter(function (r) { return (r.url || '').trim(); });
+            var mine = ++seq;
+            var previous = saved;
+            saved = current;
+            commit(V.api('/api/config', { method: 'POST',
+                                          body: { calendars: body } }))
+                .catch(function () {
+                    // Only the newest attempt may put the list back, for the
+                    // same reason a single field's does not: an older failure
+                    // would otherwise discard an edit made after it.
+                    if (mine !== seq) return;
+                    saved = previous;
+                    rows = JSON.parse(previous);
+                    render();
+                });
+        }
+
+        function schedule() {
+            clearTimeout(timer);
+            timer = setTimeout(push, SETTLE_MS);
+        }
+
+        function commitNow() { clearTimeout(timer); push(); }
+
+        function render(focusIndex, focusField) {
+            list.innerHTML = '';
+            if (!rows.length) {
+                var empty = document.createElement('p');
+                empty.className = 'hint mb-0';
+                empty.textContent = V.t('cal_none');
+                list.appendChild(empty);
+                return;
+            }
+
+            rows.forEach(function (row, index) {
+                var el = document.createElement('div');
+                el.className = 'calrow';
+
+                var colour = document.createElement('select');
+                colour.className = 'input calrow__colour';
+                colour.setAttribute('aria-label', V.t('cal_colour'));
+                colour.dataset.colour = row.color;
+                COLOURS.forEach(function (name) {
+                    var opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = V.t('colour_' + name);
+                    if (name === row.color) opt.selected = true;
+                    colour.appendChild(opt);
+                });
+                colour.addEventListener('change', function () {
+                    rows[index].color = colour.value;
+                    colour.dataset.colour = colour.value;
+                    commitNow();
+                });
+
+                var name = document.createElement('input');
+                name.type = 'text';
+                name.className = 'input calrow__name';
+                name.value = row.name || '';
+                name.placeholder = V.t('cal_name_ph');
+                name.maxLength = 40;
+
+                var url = document.createElement('input');
+                url.type = 'url';
+                url.className = 'input calrow__url';
+                url.value = row.url || '';
+                url.placeholder = V.t('ical_placeholder');
+                url.spellcheck = false;
+
+                [[name, 'name'], [url, 'url']].forEach(function (pair) {
+                    var input = pair[0], key = pair[1];
+                    input.dataset.field = key;
+                    input.addEventListener('input', function () {
+                        rows[index][key] = input.value;
+                        schedule();
+                    });
+                    input.addEventListener('blur', commitNow);
+                });
+
+                var remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'btn btn--ghost btn--sm calrow__remove';
+                remove.setAttribute('aria-label', V.t('cal_remove'));
+                remove.appendChild(V.svg('trash'));
+                remove.addEventListener('click', function () {
+                    rows.splice(index, 1);
+                    render();
+                    commitNow();
+                });
+
+                el.appendChild(colour);
+                el.appendChild(name);
+                el.appendChild(url);
+                el.appendChild(remove);
+                list.appendChild(el);
+
+                if (index === focusIndex) {
+                    var target = el.querySelector('[data-field=' + (focusField || 'url') + ']');
+                    if (target) target.focus();
+                }
+            });
+        }
+
+        addBtn.addEventListener('click', function () {
+            rows.push({ url: '', name: '', color: nextColour() });
+            // An empty row is not worth posting; it saves itself once it has a
+            // URL in it.
+            render(rows.length - 1, 'url');
+        });
+
+        render();
+    })();
+
 
     // The album link is not here: storing it means reaching Apple first, so it
     // waits for the button in that section.

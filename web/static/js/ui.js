@@ -45,7 +45,11 @@
         'memory':       '<rect x="2.5" y="7" width="19" height="10" rx="1.8"/><path d="M6.5 11v2.5"/><path d="M10 11v2.5"/><path d="M13.5 11v2.5"/><path d="M17 11v2.5"/>',
         'disk':         '<ellipse cx="12" cy="6" rx="8.5" ry="3.2"/><path d="M3.5 6v12c0 1.77 3.8 3.2 8.5 3.2s8.5-1.43 8.5-3.2V6"/><path d="M3.5 12c0 1.77 3.8 3.2 8.5 3.2s8.5-1.43 8.5-3.2"/>',
         'clock':        '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.3l3.4 2"/>',
-        'gallery':      '<rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8.6" cy="8.6" r="1.6"/><path d="m3.5 17 4.6-4.4a2 2 0 0 1 2.7 0L20.5 21"/>'
+        'gallery':      '<rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8.6" cy="8.6" r="1.6"/><path d="m3.5 17 4.6-4.4a2 2 0 0 1 2.7 0L20.5 21"/>',
+        /* Same path as the server-side icon of this name. A name missing from
+           here silently draws the info circle instead, which is how a remove
+           button came to be marked with an "i". */
+        'trash':        '<path d="M3.5 6h17"/><path d="M8.5 6V4.5A1.5 1.5 0 0 1 10 3h4a1.5 1.5 0 0 1 1.5 1.5V6"/><path d="M18.5 6v13a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2V6"/><path d="M10 11v5"/><path d="M14 11v5"/>'
     };
 
     function svg(name, cls) {

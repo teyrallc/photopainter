@@ -52,7 +52,8 @@ logger = logging.getLogger("vignette")
 from services.config import Config
 from services import weather as weather_svc
 from services.weather import WeatherError
-from services.calendar_svc import fetch_calendar_events, get_today_info
+from services.calendar_svc import (fetch_calendar_events, forget_calendars,
+                                   get_today_info)
 from services.i18n import get_translations
 from services import renderer
 from services import gdrive
@@ -927,6 +928,11 @@ def api_config_set():
     # finishing out the old entry's hour.
     if _WEATHER_KEYS & set(applied):
         weather_svc.clear_cache()
+    # Same reasoning for the calendar: a feed added in Settings has to show up
+    # in the Test button and on the next repaint, not a quarter of an hour
+    # later when its cache happens to expire.
+    if {"calendars", "calendar_ical_url"} & set(applied):
+        forget_calendars()
     return jsonify({"success": True, "applied": sorted(applied),
                     "config": config.public_dict()})
 
@@ -1811,8 +1817,8 @@ def api_preview_current():
     page = config.get("current_page", "photo")
     events = []
     weather = weather_svc.fetch_for_config(config)
-    if config.get("calendar_ical_url"):
-        events = fetch_calendar_events(config.get("calendar_ical_url"))
+    if config.get("calendars"):
+        events = fetch_calendar_events(config.get("calendars"))
 
     photo_path = get_current_photo_path()
 
@@ -2392,12 +2398,15 @@ def api_weather():
 @app.route('/api/calendar')
 def api_calendar():
     """Get upcoming calendar events."""
-    events = fetch_calendar_events(config.get("calendar_ical_url", ""))
+    events = fetch_calendar_events(config.get("calendars", []))
     today = get_today_info()
     return jsonify({"today": today, "events": [
         {"summary": e.get("summary"),
          "start": e["start"].isoformat() if e.get("start") else None,
-         "all_day": bool(e.get("all_day"))}
+         "all_day": bool(e.get("all_day")),
+         "calendar": e.get("calendar", ""),
+         "color": e.get("color", "blue"),
+         "event_color": e.get("event_color", "")}
         for e in events
     ]})
 

@@ -524,13 +524,28 @@ def _lanczos():
     return getattr(Image, 'Resampling', Image).LANCZOS
 
 
+# Three dots is what a cell can hold without them touching the day number or
+# each other; a fourth subscribed calendar falling on the same day is not
+# worth making the other three illegible for.
+MAX_DAY_DOTS = 3
+
+
 def _event_days(events, now):
-    """Which days of the current month carry an event, for the grid dots."""
-    days = set()
+    """Which days of the current month carry an event, and in what colours.
+
+    Returns {day: [ink, ...]} — one ink per calendar with something on that
+    day, in the order the calendars are subscribed, so the same feed keeps the
+    same position across the month instead of shuffling day by day.
+    """
+    days = {}
     for event in events or []:
         start = event.get("start")
-        if start and start.year == now.year and start.month == now.month:
-            days.add(start.day)
+        if not (start and start.year == now.year and start.month == now.month):
+            continue
+        ink = ui.calendar_ink(event.get("color"))
+        inks = days.setdefault(start.day, [])
+        if ink not in inks:
+            inks.append(ink)
     return days
 
 
@@ -545,7 +560,7 @@ def _draw_month_grid(draw, box, now, events=None, compact=False):
     import calendar
 
     weeks = calendar.monthcalendar(now.year, now.month)
-    marked = _event_days(events, now) if events else set()
+    marked = _event_days(events, now) if events else {}
 
     head_h = 18 if compact else 24
     head, body = box.cut_top(head_h, gap=3 if compact else 5)
@@ -580,11 +595,24 @@ def _draw_month_grid(draw, box, now, events=None, compact=False):
                 draw.text((cx, cy), str(day),
                           fill=RED if col >= 5 else BLACK, font=day_font, anchor="mm")
                 # A day with something on it gets a dot, so the month reads as
-                # a schedule at a glance and not just as numbers.
-                if day in marked and show_dots:
+                # a schedule at a glance and not just as numbers — one dot per
+                # calendar, in that calendar's colour.
+                inks = marked.get(day, [])[:MAX_DAY_DOTS] if show_dots else []
+                if inks:
                     dot = max(1.5, cell_h * 0.065)
                     dy = cy + cell_h * 0.40
-                    draw.ellipse([cx - dot, dy - dot, cx + dot, dy + dot], fill=BLUE)
+                    # Centred as a group under the numeral, so a day with three
+                    # dots still hangs off the same axis as a day with one.
+                    step = dot * 2 + max(1.5, dot * 0.9)
+                    first = cx - step * (len(inks) - 1) / 2
+                    for slot, ink in enumerate(inks):
+                        dx = first + slot * step
+                        # A yellow disc this small all but disappears on white
+                        # paper, so it is given an edge to be seen by. The
+                        # other three need none and are left alone.
+                        draw.ellipse([dx - dot, dy - dot, dx + dot, dy + dot],
+                                     fill=ink,
+                                     outline=BLACK if ink == YELLOW else None)
 
 
 # What "coming up" covers: today and the two days after it. Beyond that a
@@ -638,12 +666,28 @@ def _draw_agenda(draw, box, events, limit=None, compact=False):
         start = event["start"]
         top = box.y + index * row_h
         # A coloured tick beside each entry: cheaper to scan than a bullet, and
-        # it survives the six-colour quantiser cleanly.
-        draw.rectangle([box.x, top + 2, box.x + 3, top + row_h - 6], fill=BLUE)
+        # it survives the six-colour quantiser cleanly. Its colour is the
+        # calendar's, which is the whole of how two feeds are told apart.
+        #
+        # An event may also carry a colour of its own (RFC 7986 COLOR). When
+        # it does and it differs, the tick is split: the calendar's colour on
+        # top, the event's underneath, so one mark answers both "whose
+        # calendar" and "which kind of thing". Note that Google's iCal export
+        # publishes no colour at all — a Google feed will always be solid.
+        ink = ui.calendar_ink(event.get("color"))
+        own = ui.nearest_calendar_ink(event.get("event_color"))
+        y0, y1 = top + 2, top + row_h - 6
+        if own and own != ink:
+            middle = (y0 + y1) / 2
+            draw.rectangle([box.x, y0, box.x + 3, middle], fill=ink)
+            draw.rectangle([box.x, middle, box.x + 3, y1], fill=own)
+        else:
+            draw.rectangle([box.x, y0, box.x + 3, y1], fill=ink)
 
         when = ui.when_label(start, event.get("all_day"))
         draw.text((box.x + 10, top + 1), ui.fit(when, meta_font, box.w - 12),
-                  fill=BLUE, font=meta_font, anchor="lt")
+                  fill=ui.calendar_text_ink(event.get("color")),
+                  font=meta_font, anchor="lt")
         summary = event.get("summary", "?")
         title_font = ui.face(summary, title_size, "regular")
         draw.text((box.x + 10, top + (14 if compact else 17)),

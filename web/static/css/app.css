@@ -879,6 +879,50 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
 .dropzone .icon { color: var(--text-mute); }
 .dropzone:hover .icon, .dropzone.is-over .icon { color: var(--accent); }
 
+/* ── Calendar list ──────────────────────────────────────────────────────── */
+
+/* One grid for the whole list rather than a grid per row: the swatch, the
+   name, the URL and the remove button then sit on four shared axes all the
+   way down, however long the URLs are. */
+.callist { display: grid; gap: 8px; }
+.calrow {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr) minmax(0, 2fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+.calrow__colour { grid-area: 1 / 1; }
+.calrow__name   { grid-area: 1 / 2; }
+.calrow__url    { grid-area: 1 / 3; }
+.calrow__remove { grid-area: 1 / 4; }
+
+/* Below this the four columns cannot each hold their content, so the row
+   becomes two lines — colour and name, then the URL across both, with the
+   remove button beside them on its own column for the height of the row.
+   Every cell is placed by hand: leaving three of them to auto-placement and
+   spanning only the fourth put the remove button in the first column and
+   squeezed the colour control to nothing. */
+@media (max-width: 640px) {
+    .calrow { grid-template-columns: 6.5rem minmax(0, 1fr) auto; }
+    .calrow__colour { grid-area: 1 / 1; }
+    .calrow__name   { grid-area: 1 / 2; }
+    .calrow__url    { grid-area: 2 / 1 / 3 / 3; }
+    .calrow__remove { grid-area: 1 / 3 / 3 / 4; align-self: center; }
+}
+
+/* The colour is named in the option text for anyone reading it, and shown as
+   a band down the edge of the control for everyone else. */
+.calrow__colour { border-left: 5px solid var(--border); }
+.calrow__colour[data-colour="blue"]   { border-left-color: #2563eb; }
+.calrow__colour[data-colour="red"]    { border-left-color: #dc2626; }
+.calrow__colour[data-colour="green"]  { border-left-color: #16a34a; }
+.calrow__colour[data-colour="yellow"] { border-left-color: #ca8a04; }
+
+.calrow__remove { color: var(--text-mute); }
+.calrow__remove:hover { color: var(--danger); }
+
+.callist__foot { margin-top: 10px; }
+
 /* ── Gallery ────────────────────────────────────────────────────────────── */
 
 .tiles {

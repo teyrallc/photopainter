@@ -25,6 +25,7 @@ ones with half the space empty.
 """
 
 import logging
+import colorsys
 import os
 from datetime import datetime
 
@@ -41,6 +42,101 @@ RED = (255, 0, 0)
 YELLOW = (255, 255, 0)
 BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
+
+# Which inks a calendar may be drawn in. Black and white are the type and the
+# paper, so four are left — the names match services/config.CALENDAR_COLORS.
+CALENDAR_INK = {"blue": BLUE, "red": RED, "green": GREEN, "yellow": YELLOW}
+
+
+def calendar_ink(name):
+    """A calendar's colour, falling back to the one the agenda always used."""
+    return CALENDAR_INK.get(str(name or "").lower(), BLUE)
+
+
+# Enough of the CSS3 names to cover what calendar apps actually publish, and
+# a #rrggbb parse for the rest. RFC 7986's COLOR is a CSS3 colour name, and
+# what any of them mean on a six-ink panel is "whichever of the four is
+# nearest".
+_CSS_COLORS = {
+    "black": (0, 0, 0), "white": (255, 255, 255), "silver": (192, 192, 192),
+    "gray": (128, 128, 128), "grey": (128, 128, 128),
+    "red": (255, 0, 0), "maroon": (128, 0, 0), "crimson": (220, 20, 60),
+    "firebrick": (178, 34, 34), "tomato": (255, 99, 71),
+    "salmon": (250, 128, 114), "lightsalmon": (255, 160, 122),
+    "coral": (255, 127, 80), "orangered": (255, 69, 0),
+    "orange": (255, 165, 0), "darkorange": (255, 140, 0),
+    "gold": (255, 215, 0), "yellow": (255, 255, 0), "khaki": (240, 230, 140),
+    "olive": (128, 128, 0), "green": (0, 128, 0), "lime": (0, 255, 0),
+    "limegreen": (50, 205, 50), "seagreen": (46, 139, 87),
+    "forestgreen": (34, 139, 34), "darkgreen": (0, 100, 0),
+    "teal": (0, 128, 128), "turquoise": (64, 224, 208),
+    "cyan": (0, 255, 255), "aqua": (0, 255, 255),
+    "blue": (0, 0, 255), "navy": (0, 0, 128), "royalblue": (65, 105, 225),
+    "dodgerblue": (30, 144, 255), "steelblue": (70, 130, 180),
+    "cornflowerblue": (100, 149, 237), "skyblue": (135, 206, 235),
+    "indigo": (75, 0, 130), "purple": (128, 0, 128), "violet": (238, 130, 238),
+    "magenta": (255, 0, 255), "fuchsia": (255, 0, 255),
+    "orchid": (218, 112, 214), "plum": (221, 160, 221),
+    "pink": (255, 192, 203), "hotpink": (255, 105, 180),
+    "deeppink": (255, 20, 147), "brown": (165, 42, 42),
+    "sienna": (160, 82, 45), "chocolate": (210, 105, 30),
+    "peru": (205, 133, 63), "tan": (210, 180, 140),
+    "lavender": (230, 230, 250), "beige": (245, 245, 220),
+}
+
+
+def nearest_calendar_ink(color, default=None):
+    """The panel ink closest to a CSS colour, or None if it names nothing.
+
+    A calendar app can put any colour on an event; this panel has four it can
+    draw one in. Nearest in plain RGB distance is crude and is the right kind
+    of crude here — the question is only which of red, blue, green and yellow
+    a salmon or a lavender should become.
+    """
+    text = str(color or "").strip().lower()
+    if not text:
+        return default
+    rgb = _CSS_COLORS.get(text)
+    if rgb is None and text.startswith("#") and len(text) in (4, 7):
+        digits = text[1:]
+        if len(digits) == 3:
+            digits = "".join(ch * 2 for ch in digits)
+        try:
+            rgb = tuple(int(digits[i:i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            rgb = None
+    if rgb is None:
+        return default
+    return _nearest_ink(rgb, default)
+
+
+# The four inks are pure hues, so "which one is this" is a question about hue
+# and not about distance in RGB. Straight RGB distance answers it wrongly in
+# exactly the cases that matter: salmon (250,128,114) is marginally closer to
+# yellow than to red by that measure, which is not what anybody sees.
+_INK_HUES = ((0.0, RED), (1 / 6, YELLOW), (1 / 3, GREEN), (2 / 3, BLUE))
+
+
+def _nearest_ink(rgb, default=None):
+    hue, saturation, value = colorsys.rgb_to_hsv(*(c / 255 for c in rgb))
+    # Grey, white and near-black have no hue to match on; leaving them to the
+    # calendar's own colour beats printing an arbitrary one.
+    if saturation < 0.18 or value < 0.15:
+        return default
+    return min(_INK_HUES,
+               key=lambda pair: min(abs(hue - pair[0]), 1 - abs(hue - pair[0])))[1]
+
+
+def calendar_text_ink(name):
+    """The same colour, where it has to be read as words.
+
+    Yellow ink on white paper has almost no contrast — as a solid tick it is
+    perfectly clear, as 11-point type it is a smudge. So a yellow calendar's
+    time line is set in black; the tick beside it still carries the colour,
+    which is what identifies the feed.
+    """
+    ink = calendar_ink(name)
+    return BLACK if ink == YELLOW else ink
 
 PALETTE = (BLACK, WHITE, RED, YELLOW, BLUE, GREEN)
 
