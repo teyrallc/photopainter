@@ -104,6 +104,23 @@
                 <p>{{ t.pane_display_sub }}</p>
             </div>
 
+            <section class="subsection" id="sec-orientation">
+                <div class="subsection__head">
+                    {{ icon('display') }}<h2>{{ t.orientation }}</h2>
+                </div>
+
+                <div class="field mb-0">
+                    <label class="label" for="s-orientation">{{ t.how_hung }}</label>
+                    <select class="select" id="s-orientation">
+                        <option value="0"   {% if config.display_rotation == 0 %}selected{% endif %}>{{ t.orient_landscape }} · 0°</option>
+                        <option value="180" {% if config.display_rotation == 180 %}selected{% endif %}>{{ t.orient_landscape_flipped }} · 180°</option>
+                        <option value="270" {% if config.display_rotation == 270 %}selected{% endif %}>{{ t.orient_portrait }} · −90°</option>
+                        <option value="90"  {% if config.display_rotation == 90 %}selected{% endif %}>{{ t.orient_portrait_other }} · 90°</option>
+                    </select>
+                    <p class="hint">{{ t.orientation_desc }}</p>
+                </div>
+            </section>
+
             <section class="subsection" id="sec-photo">
                 <div class="subsection__head">
                     {{ icon('camera') }}<h2>{{ t.photo_settings }}</h2>
@@ -786,6 +803,17 @@
     }
 
     /* ── What saves itself ──────────────────────────────────────────────── */
+
+    // Turning the frame changes every page's layout, so the panel is redrawn
+    // and the dashboard preview refreshed the moment it settles.
+    autosave(document.getElementById('s-orientation'), function (value) {
+        return V.api('/api/config', { method: 'POST',
+                                      body: { display_rotation: parseInt(value, 10) } })
+            .then(function (data) {
+                document.dispatchEvent(new CustomEvent('vignette:displayed'));
+                return data;
+            });
+    });
 
     autosave(document.getElementById('s-rotation'), function (value) {
         return V.api('/api/photo/rotation', {

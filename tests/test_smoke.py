@@ -1804,6 +1804,128 @@ def test_an_all_day_event_is_never_given_a_time():
         "not reaching the renderer")
 
 
+def test_every_page_is_composed_for_the_shape_the_frame_is_hung_in():
+    """Portrait is a layout, not a rotation of a landscape one.
+
+    The panel is 800x480 whichever way the frame hangs. Turning a page
+    composed for it gives a tall picture of a wide layout — a 320-point column
+    beside a photo, stood on its end. So the page is composed on 480x800 and
+    turned once on the way out.
+    """
+    from datetime import datetime, timedelta
+    from services import renderer
+
+    now = datetime.now()
+    weather = {"city": "Taipei", "temp": 21, "feels_like": 20, "temp_min": 18,
+               "temp_max": 24, "humidity": 60, "description": "clear sky",
+               "icon": "01d", "wind_speed": 2.0, "units": "metric",
+               "forecast": [{"weekday": d, "temp_min": 18, "temp_max": 24,
+                             "description": "clear sky", "icon": "01d"}
+                            for d in ("Wed", "Thu", "Fri")]}
+    events = [{"summary": "Dentist", "start": now + timedelta(hours=2),
+               "color": "blue"}]
+
+    class _Cfg(dict):
+        def get(self, key, default=None):
+            return dict.get(self, key, default)
+
+    cfg = _Cfg({"photo_rotation": 0, "photo_fit_mode": "fit"})
+    pages = {
+        "home": lambda p: renderer.render_home_page(weather, events, None, cfg,
+                                                    portrait=p),
+        "weather": lambda p: renderer.render_widget_page("weather", weather,
+                                                         events, portrait=p),
+        "calendar": lambda p: renderer.render_widget_page("calendar", weather,
+                                                          events, portrait=p),
+        "split": lambda p: renderer.render_widget_page("split", weather, events,
+                                                       portrait=p),
+        "photo": lambda p: renderer.render_photo_page(None, 0, "fit", portrait=p),
+        "qr": lambda p: renderer.render_qr_setup(None, ap_ssid="V", ap_password="x",
+                                                 portrait=p),
+        "wifi": lambda p: renderer.render_wifi_connected("Net", "192.168.1.5",
+                                                         portrait=p),
+        "otp": lambda p: renderer.render_otp_page("428917", portrait=p),
+    }
+
+    for name, render in pages.items():
+        assert render(False).size == (800, 480), name
+        assert render(True).size == (480, 800), name
+
+    assert renderer.page_size() == (800, 480)
+    assert renderer.page_size(True) == (480, 800)
+
+
+def test_the_panel_always_receives_its_own_800x480():
+    """Whatever the page was composed on, the buffer is the panel's."""
+    from PIL import Image
+    from services import display_mgr
+
+    original = config.get("display_rotation")
+    try:
+        for degrees, composed in ((0, (800, 480)), (180, (800, 480)),
+                                  (90, (480, 800)), (270, (480, 800))):
+            config.set("display_rotation", degrees)
+            assert display_mgr.display_rotation() == degrees
+            assert display_mgr.is_portrait() is (degrees in (90, 270))
+            page = Image.new("RGB", composed, (255, 255, 255))
+            assert display_mgr.orient_for_panel(page).size == (800, 480), degrees
+
+        # A page that does not match the setting is letterboxed, not stretched:
+        # a mismatch is a bug to be seen, and a squashed page hides it.
+        config.set("display_rotation", 270)
+        odd = display_mgr.orient_for_panel(Image.new("RGB", (800, 480)))
+        assert odd.size == (800, 480)
+
+        # Anything that is not one of the four falls back rather than throwing.
+        for junk in ("sideways", None, 45, -1):
+            config.set("display_rotation", junk)
+            assert display_mgr.display_rotation() == 180, junk
+    finally:
+        config.set("display_rotation", original)
+
+
+def test_turning_the_frame_turns_what_it_shows():
+    """The 180 default, and the -90 the portrait option means.
+
+    Checked on the ink rather than on the size: a page and the same page
+    upside down are both 800x480, and only the pixels say which is which.
+    """
+    from PIL import Image
+    from services import display_mgr
+
+    original = config.get("display_rotation")
+    try:
+        mark = Image.new("RGB", (800, 480), (255, 255, 255))
+        mark.putpixel((5, 5), (255, 0, 0))          # top-left of the page
+
+        config.set("display_rotation", 0)
+        assert display_mgr.orient_for_panel(mark).getpixel((5, 5)) == (255, 0, 0)
+
+        config.set("display_rotation", 180)
+        turned = display_mgr.orient_for_panel(mark)
+        assert turned.getpixel((5, 5)) == (255, 255, 255)
+        assert turned.getpixel((794, 474)) == (255, 0, 0), "not turned end for end"
+
+        # The two portrait choices are quarter turns in opposite directions,
+        # which is the whole reason both are offered: only the wall knows
+        # which way round the frame ended up. PIL turns anticlockwise, so 270
+        # is the -90 the setting is labelled with.
+        tall = Image.new("RGB", (480, 800), (255, 255, 255))
+        tall.putpixel((5, 5), (0, 0, 255))
+
+        config.set("display_rotation", 270)
+        spun = display_mgr.orient_for_panel(tall)
+        assert spun.size == (800, 480)
+        assert spun.getpixel((794, 5)) == (0, 0, 255), "-90 turned the wrong way"
+
+        config.set("display_rotation", 90)
+        other = display_mgr.orient_for_panel(tall)
+        assert other.getpixel((5, 474)) == (0, 0, 255), "+90 turned the wrong way"
+        assert other.getpixel((794, 5)) == (255, 255, 255), "both turns are the same"
+    finally:
+        config.set("display_rotation", original)
+
+
 def test_no_view_puts_a_clock_in_its_corner():
     """Asked for three times, once per view, so it is written down.
 

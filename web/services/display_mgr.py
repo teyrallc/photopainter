@@ -48,11 +48,58 @@ def init_display_mgr(cfg, p_state, get_photo_path_fn):
     photo_state = p_state
     get_current_photo_path_func = get_photo_path_fn
 
+VALID_ROTATIONS = (0, 90, 180, 270)
+
+
+def display_rotation():
+    """How far the finished page is turned before it reaches the panel."""
+    value = config.get("display_rotation", 180) if config else 180
+    try:
+        value = int(value) % 360
+    except (TypeError, ValueError):
+        return 180
+    return value if value in VALID_ROTATIONS else 180
+
+
+def is_portrait():
+    """Whether pages are composed tall. 90 and 270 hang the frame on its side."""
+    return display_rotation() in (90, 270)
+
+
+def orient_for_panel(img, degrees=None):
+    """Turn a composed page into the panel's own 800x480 buffer.
+
+    Image.rotate(expand=True) turns anticlockwise, which is what the setting
+    means: 270 is the same as -90, the angle a frame hung with its top edge to
+    the left needs. A portrait page is 480x800 and comes out 800x480; a
+    landscape one is already the right shape and 180 keeps it that way.
+
+    Anything that does not land on the panel's exact size is centred on it
+    rather than stretched — a mismatch means the config and the layout have
+    disagreed, and a letterboxed page is far easier to diagnose than a
+    squashed one.
+    """
+    degrees = display_rotation() if degrees is None else degrees
+    if degrees:
+        img = img.rotate(degrees, expand=True)
+    if img.size == (EPD_WIDTH, EPD_HEIGHT):
+        return img
+    logger.warning(f"Composed page is {img.size}, not {(EPD_WIDTH, EPD_HEIGHT)}; "
+                   "centring it on the panel")
+    canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+    fitted = img.copy()
+    fitted.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
+    canvas.paste(fitted, ((EPD_WIDTH - fitted.width) // 2,
+                          (EPD_HEIGHT - fitted.height) // 2))
+    return canvas
+
+
 def display_pil_image(img):
     """Send a PIL Image to the e-paper display with thread safety and retry logic."""
     with display_lock:
         display_state["status"] = "displaying"
         logger.info("Sending image to e-paper...")
+        img = orient_for_panel(img)
         
         # Try up to 3 times to initialize and display
         last_error = None
@@ -103,15 +150,18 @@ def display_current_page():
 
     photo_path = get_current_photo_path_func()
 
+    portrait = is_portrait()
     if page == "home":
-        img = renderer.render_home_page(weather, events, photo_path, config)
+        img = renderer.render_home_page(weather, events, photo_path, config,
+                                        portrait=portrait)
     elif page == "widget":
         mode = config.get("widget_mode", "weather")
-        img = renderer.render_widget_page(mode, weather, events)
+        img = renderer.render_widget_page(mode, weather, events, portrait=portrait)
     else:  # photo
         rotation = config.get("photo_rotation", 0)
         fit_mode = config.get("photo_fit_mode", "fit")
-        img = renderer.render_photo_page(photo_path, rotation, fit_mode)
+        img = renderer.render_photo_page(photo_path, rotation, fit_mode,
+                                         portrait=portrait)
 
     display_state["current_image"] = f"[{page} page]"
     return display_pil_image(img)
@@ -127,7 +177,8 @@ def display_qr_setup(ip=None):
     constants, and this screen is the only place that password is published.
     """
     ssid, password = device_id.ap_credentials(config)
-    img = renderer.render_qr_setup(ip, ap_ssid=ssid, ap_password=password)
+    img = renderer.render_qr_setup(ip, ap_ssid=ssid, ap_password=password,
+                                   portrait=is_portrait())
     display_state["current_image"] = "[QR setup]"
     return display_pil_image(img)
 
@@ -137,37 +188,41 @@ def display_wifi_connected(ssid, ip_address, remote_url=None):
     `remote_url` is the tunnel address when one is up — that is the one the
     owner actually needs, since the LAN address only works inside the house.
     """
-    img = renderer.render_wifi_connected(ssid, ip_address, remote_url=remote_url)
+    img = renderer.render_wifi_connected(ssid, ip_address, remote_url=remote_url,
+                                         portrait=is_portrait())
     display_state["current_image"] = "[WiFi connected]"
     return display_pil_image(img)
 
 def display_otp_code(code):
     """Display 6-digit Hardware Auth OTP on e-paper."""
-    img = renderer.render_otp_page(code)
+    img = renderer.render_otp_page(code, portrait=is_portrait())
     display_state["current_image"] = "[OTP Code]"
     return display_pil_image(img)
 
 def display_test_pattern():
     """Send a test pattern to e-paper."""
     logger.info("Sending test pattern...")
-    img = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
+    # Composed the way the frame is hung, so the bars fill the panel in either
+    # orientation instead of being letterboxed into the middle of it.
+    width, height = renderer.page_size(is_portrait())
+    img = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
     colors = [
         ((0, 0, 0), "Black"), ((255, 255, 255), "White"),
         ((0, 255, 0), "Green"), ((0, 0, 255), "Blue"),
         ((255, 0, 0), "Red"), ((255, 255, 0), "Yellow"),
     ]
-    bar_width = EPD_WIDTH // len(colors)
+    bar_width = width // len(colors)
     for i, (color, name) in enumerate(colors):
         x0, x1 = i * bar_width, (i + 1) * bar_width
-        draw.rectangle([x0, 0, x1, EPD_HEIGHT], fill=color)
+        draw.rectangle([x0, 0, x1, height], fill=color)
         tc = (255, 255, 255) if color in [(0, 0, 0), (0, 0, 255)] else (0, 0, 0)
-        draw.text((x0 + 10, EPD_HEIGHT // 2), name, fill=tc)
-    draw.rectangle([0, 0, EPD_WIDTH, 48], fill=(0, 0, 0))
+        draw.text((x0 + 10, height // 2), name, fill=tc)
+    draw.rectangle([0, 0, width, 48], fill=(0, 0, 0))
     draw.text((12, 24), "Vignette", fill=(255, 255, 255),
               font=_get_logo_font(34), anchor="lm")
-    draw.text((240, 24), "— E-Paper Test Pattern", fill=(255, 255, 255),
-              font=ImageFont.load_default(), anchor="lm")
+    draw.text((min(240, width - 200), 24), "— E-Paper Test Pattern",
+              fill=(255, 255, 255), font=ImageFont.load_default(), anchor="lm")
     display_state["current_image"] = "[test pattern]"
     return display_pil_image(img)
 

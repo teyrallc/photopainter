@@ -339,6 +339,10 @@ def inject_globals():
         "t": get_translations(lang),
         "current_lang": lang,
         "ap_ssid": AP_SSID,
+        # Every page carries it, not just the ones handed `config`: the
+        # e-paper frame is drawn on four of them and all four should be the
+        # shape the panel actually is.
+        "orientation": "portrait" if display_mgr.is_portrait() else "landscape",
     }
 
 
@@ -661,7 +665,16 @@ def quantize_to_epaper(image_path):
     return buf
 
 
-def process_upload(file_storage, rotation=0, fit_mode="fit"):
+# A stored photo is bounded by the panel's longest edge in *both* axes rather
+# than fitted to its exact shape. Baking an 800x480 letterbox into the file
+# made every stored photograph landscape, so turning the frame on its side
+# showed a 480x288 strip adrift in a 480x800 page. Fit and stretch are decided
+# when the page is drawn — they always were — so nothing is lost by not
+# deciding them twice.
+MAX_STORED_EDGE = max(EPD_WIDTH, EPD_HEIGHT)
+
+
+def process_upload(file_storage, rotation=0):
     """Store an uploaded image, ready for the panel.
 
     Returns (filename, was_already_here). The second value is what lets a
@@ -719,19 +732,7 @@ def process_upload(file_storage, rotation=0, fit_mode="fit"):
         raise
 
     try:
-        # Apply fit mode
-        if fit_mode == "stretch":
-            img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-        else:
-            # Fit: maintain aspect ratio, save at original (rotated) size
-            img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-            # Create white canvas and center
-            canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
-            px = (EPD_WIDTH - img.width) // 2
-            py = (EPD_HEIGHT - img.height) // 2
-            canvas.paste(img, (px, py))
-            img = canvas
-
+        img.thumbnail((MAX_STORED_EDGE, MAX_STORED_EDGE), LANCZOS)
         img.save(filepath)
     except Exception:
         if os.path.exists(filepath):
@@ -766,12 +767,14 @@ def reserve_output_name(preferred, fallback):
     return safe_name, dest
 
 
-def fit_downloaded_image(path, rotation=0, fit_mode="fit"):
+def fit_downloaded_image(path, rotation=0):
     """Reshape a freshly downloaded photo for the panel, in place.
 
     The bytes come off the internet, so they are verified before being decoded
     — an import used to leave whatever it fetched sitting in the gallery, where
     every later listing counted it as a photo even when it was not one.
+
+    Bounded rather than fitted, for the reason given above MAX_STORED_EDGE.
     """
     with Image.open(path) as probe:
         probe.verify()                       # settles what the bytes really are
@@ -780,15 +783,7 @@ def fit_downloaded_image(path, rotation=0, fit_mode="fit"):
     try:
         if rotation:
             img = img.rotate(-rotation, expand=True)
-        if fit_mode == "stretch":
-            img = img.resize((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-        else:
-            img.thumbnail((EPD_WIDTH, EPD_HEIGHT), LANCZOS)
-            canvas = Image.new("RGB", (EPD_WIDTH, EPD_HEIGHT), (255, 255, 255))
-            px = (EPD_WIDTH - img.width) // 2
-            py = (EPD_HEIGHT - img.height) // 2
-            canvas.paste(img, (px, py))
-            img = canvas
+        img.thumbnail((MAX_STORED_EDGE, MAX_STORED_EDGE), LANCZOS)
         img.save(path)
     finally:
         img.close()
@@ -1200,11 +1195,10 @@ def api_upload(token=None):
         return jsonify({"error": "File type not allowed"}), 400
 
     rotation = int(request.form.get('rotation', 0))
-    fit_mode = request.form.get('fit_mode', config.get('photo_fit_mode', 'fit'))
     show_now = request.form.get('display', '') in ('1', 'true', 'yes')
 
     try:
-        filename, duplicate = process_upload(file, rotation, fit_mode)
+        filename, duplicate = process_upload(file, rotation)
         # A repeated photo is a success, not an error: the phone automation
         # re-offers everything in its time window on every run, and answering
         # 200 is what keeps its log clean.
@@ -1286,7 +1280,6 @@ def api_upload_batch():
         return jsonify({"error": "No files provided"}), 400
 
     rotation = int(request.form.get('rotation', 0))
-    fit_mode = request.form.get('fit_mode', config.get('photo_fit_mode', 'fit'))
 
     results = []
     for file in files:
@@ -1295,7 +1288,7 @@ def api_upload_batch():
                             "error": "Invalid file"})
             continue
         try:
-            filename, duplicate = process_upload(file, rotation, fit_mode)
+            filename, duplicate = process_upload(file, rotation)
             results.append({"filename": filename, "success": True,
                             "duplicate": duplicate})
         except UnidentifiedImageError:
@@ -1434,7 +1427,6 @@ def api_gdrive_download():
         return jsonify({"error": "No files selected"}), 400
 
     rotation = int(data.get("rotation", 0))
-    fit_mode = data.get("fit_mode", config.get("photo_fit_mode", "fit"))
 
     results = []
     for f in files:
@@ -1448,7 +1440,7 @@ def api_gdrive_download():
         ok = gdrive.download_file(token, file_id, dest)
         if ok:
             try:
-                fit_downloaded_image(dest, rotation, fit_mode)
+                fit_downloaded_image(dest, rotation)
                 results.append({"name": safe_name, "success": True})
             except Exception as e:
                 logger.error(f"Failed to process {safe_name}: {e}")
@@ -1509,7 +1501,7 @@ def _icloud_error(exc):
     return jsonify({"error": str(exc)}), _upstream_status(exc)
 
 
-def _icloud_import(album, photos, rotation=None, fit_mode=None):
+def _icloud_import(album, photos, rotation=None):
     """Download `photos` from `album` into the gallery. Returns a summary.
 
     Only ever called with entries that came from a listing this process
@@ -1517,7 +1509,6 @@ def _icloud_import(album, photos, rotation=None, fit_mode=None):
     from the browser.
     """
     rotation = config.get("photo_rotation", 0) if rotation is None else rotation
-    fit_mode = config.get("photo_fit_mode", "fit") if fit_mode is None else fit_mode
 
     imported, failed, duplicates = [], [], []
     with _icloud_import_lock:
@@ -1557,7 +1548,7 @@ def _icloud_import(album, photos, rotation=None, fit_mode=None):
                 continue
 
             try:
-                fit_downloaded_image(dest, rotation, fit_mode)
+                fit_downloaded_image(dest, rotation)
             except Exception as e:  # noqa: BLE001 - one bad photo, not the album
                 logger.error(f"iCloud: could not process {name}: {e}")
                 if os.path.exists(dest):
@@ -1855,15 +1846,22 @@ def api_preview_current():
 
     photo_path = get_current_photo_path()
 
+    # Composed the way the frame is hung, and returned that way. The panel
+    # gets the same page turned once more so it comes out upright on the wall;
+    # a browser looking at the preview is already upright, so turning it here
+    # too would show the owner a picture lying on its side.
+    portrait = display_mgr.is_portrait()
     if page == "home":
-        img = renderer.render_home_page(weather, events, photo_path, config)
+        img = renderer.render_home_page(weather, events, photo_path, config,
+                                        portrait=portrait)
     elif page == "widget":
         mode = config.get("widget_mode", "weather")
-        img = renderer.render_widget_page(mode, weather, events)
+        img = renderer.render_widget_page(mode, weather, events, portrait=portrait)
     else:
         rotation = config.get("photo_rotation", 0)
         fit_mode = config.get("photo_fit_mode", "fit")
-        img = renderer.render_photo_page(photo_path, rotation, fit_mode)
+        img = renderer.render_photo_page(photo_path, rotation, fit_mode,
+                                         portrait=portrait)
 
     buf = io.BytesIO()
     img.save(buf, format='PNG')

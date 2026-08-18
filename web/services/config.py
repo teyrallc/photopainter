@@ -103,6 +103,19 @@ DEFAULT_CONFIG = {
     "upload_token_hash": "",
     "upload_token_created": "",
 
+    # How the finished page is turned on its way to the panel, in degrees
+    # anticlockwise: 0, 90, 180 or 270.
+    #
+    # This is about how the frame is hung, not about any one photograph. 0 and
+    # 180 are landscape and the page is composed on the panel's own 800x480;
+    # 90 and 270 are portrait, and the page is composed on 480x800 and turned
+    # to fit — so a portrait frame gets layouts built for a tall canvas rather
+    # than a wide one rotated.
+    #
+    # 180 by default: the panel's ribbon leaves the board at one end, and the
+    # way these frames actually end up on a wall puts that end at the top.
+    "display_rotation": 180,
+
     # Photo settings
     "photo_rotation": 0,  # 0, 90, 180, 270
     "photo_fit_mode": "fit",  # fit (letterbox) or stretch

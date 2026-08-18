@@ -20,6 +20,21 @@ logger = logging.getLogger("vignette.renderer")
 EPD_W = 800
 EPD_H = 480
 
+
+def page_size(portrait=False):
+    """The canvas a page is composed on.
+
+    The panel itself is always 800x480; portrait means the frame is hung on
+    its side, so the page is drawn tall and turned once on the way out. Every
+    layout below asks for this rather than assuming the panel's own shape.
+    """
+    return (EPD_H, EPD_W) if portrait else (EPD_W, EPD_H)
+
+
+def page_box(portrait=False):
+    width, height = page_size(portrait)
+    return ui.Box(0, 0, width, height)
+
 # The six the panel can render. Kept as names here for the pages written
 # before services/epd_ui.py existed; both refer to the same palette.
 BLACK = ui.BLACK
@@ -63,7 +78,8 @@ def _get_font(size):
     return ui.font(size)
 
 
-def render_home_page(weather_data, calendar_events, photo_path, config):
+def render_home_page(weather_data, calendar_events, photo_path, config,
+                     portrait=False):
     """The default page: a photo, with the day's information beside it.
 
     Rebuilt around one narrow column rather than two stacked quarter-panels.
@@ -75,21 +91,32 @@ def render_home_page(weather_data, calendar_events, photo_path, config):
     Now the column states the day once, top to bottom, at one rhythm: date,
     weather, the next three days, what is on. The photo takes everything else.
     """
-    img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
+    page = page_box(portrait)
+    img = Image.new("RGB", (page.w, page.h), WHITE)
     draw = ImageDraw.Draw(img)
 
-    COLUMN_W = 320
-    _draw_home_column(img, draw, ui.Box(0, 0, COLUMN_W, EPD_H),
-                      weather_data, calendar_events)
-    draw.line([(COLUMN_W, 0), (COLUMN_W, EPD_H)], fill=BLACK, width=2)
+    if portrait:
+        # Turned on its side the column becomes a band, and it goes underneath:
+        # the photograph is why the thing is on a wall, so it takes the top of
+        # the page and the larger share. The band is composed for its own
+        # shape — date and weather beside each other, the agenda under them —
+        # rather than being the tall column squeezed into 480 points of width.
+        photo_box, info = page.cut_top(int(page.h * 0.56))
+        draw.line([(0, info.y), (page.w, info.y)], fill=BLACK, width=2)
+        info = ui.Box(info.x, info.y + 2, info.w, info.h - 2)
+        _draw_home_band(img, draw, info, weather_data, calendar_events)
+    else:
+        COLUMN_W = 320
+        _draw_home_column(img, draw, ui.Box(0, 0, COLUMN_W, page.h),
+                          weather_data, calendar_events)
+        draw.line([(COLUMN_W, 0), (COLUMN_W, page.h)], fill=BLACK, width=2)
+        photo_box = ui.Box(COLUMN_W + 2, 0, page.w - COLUMN_W - 2, page.h)
 
     # Flatten the chrome before the photograph goes in: type and hairlines
     # want exact palette colours, and the photograph wants the driver's dither.
     # This returns a new image, so anything drawn after it needs a new handle.
     img = ui.flatten_to_palette(img)
     draw = ImageDraw.Draw(img)
-
-    photo_box = ui.Box(COLUMN_W + 2, 0, EPD_W - COLUMN_W - 2, EPD_H)
     if photo_path and os.path.exists(photo_path):
         photo = _prepare_photo(photo_path, photo_box.w - 4, photo_box.h - 4,
                                config.get("photo_rotation", 0),
@@ -172,44 +199,111 @@ def _draw_home_column(img, draw, box, weather, events):
     _draw_agenda(draw, list_box, events)
 
 
-def render_widget_page(mode, weather_data, calendar_events):
+def _draw_home_band(img, draw, box, weather, events):
+    """The same three facts as the column, laid out wide instead of tall.
+
+    Date and weather sit side by side on one row — a 480-point band has the
+    width for that and nowhere near the height to stack them — with a rule
+    under the pair and whatever is on filling the rest. The two halves share
+    one baseline so the row reads as a line of type, not as two cards.
+    """
+    now = datetime.now()
+    inner = box.inset(18, 14)
+    top, rest = inner.cut_top(92, gap=10)
+    date_side, weather_side = top.cut_left(int(top.w * 0.46), gap=12)
+
+    _draw_date_block(draw, date_side, now, 64, 18, 13, gap=11)
+
+    if weather:
+        # Icon and reading centred together on the row's own middle, so the
+        # weather half balances the date half rather than starting wherever
+        # its box happens to.
+        icon_side = min(64, weather_side.h)
+        temp_font = ui.display(46, "medium")
+        desc_font = ui.face(_describe(weather), 13, "regular")
+        temp_text = _temp(weather.get("temp"))
+        temp_w = ui.text_width(temp_text, temp_font)
+        reading_x = weather_side.x + icon_side + 10
+
+        ui.weather_icon(img, ui.Box(weather_side.x, top.cy - icon_side / 2,
+                                    icon_side, icon_side), weather.get("icon"))
+        block_h = 46 * 0.72 + 8 + ui.text_height(desc_font)
+        baseline = top.cy - block_h / 2 + 46 * 0.72
+        draw.text((reading_x, baseline), temp_text,
+                  fill=BLACK, font=temp_font, anchor="ls")
+        draw.text((reading_x, baseline + 8),
+                  ui.fit(_describe(weather), desc_font, weather_side.right - reading_x),
+                  fill=BLACK, font=desc_font, anchor="lt")
+        draw.text((reading_x + temp_w + 8, baseline),
+                  f"{_temp(weather.get('temp_max'))}/{_temp(weather.get('temp_min'))}",
+                  fill=BLUE, font=ui.display(13, "medium"), anchor="ls")
+
+    if rest.h < 40:
+        return
+    ui.rule(draw, ui.Box(inner.x, rest.y - 6, inner.w, 1))
+    label_box, list_box = rest.cut_top(20, gap=4)
+    draw.text((label_box.x, label_box.y), "Coming up",
+              fill=BLUE, font=ui.display(14, "semibold"), anchor="lt")
+    _draw_agenda(draw, list_box, events)
+
+
+def render_widget_page(mode, weather_data, calendar_events, portrait=False):
     """Render full-screen widget: weather, calendar, or split (both)."""
-    img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
+    page = page_box(portrait)
+    img = Image.new("RGB", (page.w, page.h), WHITE)
     draw = ImageDraw.Draw(img)
 
     if mode == "split":
-        _draw_split_page(img, draw, weather_data, calendar_events)
+        _draw_split_page(img, draw, weather_data, calendar_events, page)
     elif mode == "weather":
-        _draw_weather_fullscreen(img, draw, weather_data)
+        _draw_weather_fullscreen(img, draw, weather_data, page)
     else:
-        _draw_calendar_fullscreen(draw, calendar_events)
+        _draw_calendar_fullscreen(draw, calendar_events, page)
 
     # No photograph on these pages, so nothing here wants dithering.
     return ui.flatten_to_palette(img)
 
 
-def _draw_split_page(img, draw, weather, events):
-    """Calendar and weather side by side, each given a full-height column.
+def _draw_split_page(img, draw, weather, events, page=None):
+    """Calendar and weather, each given a half of the page.
 
     Not the quarter-panel layouts stretched: those are designed for 240 pixels
     of height, and simply handing them 480 left a band of white through the
-    middle of both halves. Each column is composed for the space it has.
+    middle of both halves. Each half is composed for the space it has.
+
+    Which way the page is cut follows how the frame is hung — side by side on
+    a wide panel, one above the other on a tall one. Everything after this
+    line works off the two boxes and does not care which it was.
     """
     now = datetime.now()
-    left = ui.Box(0, 0, 400, EPD_H)
-    right = ui.Box(400, 0, 400, EPD_H)
-    draw.line([(400, 0), (400, EPD_H)], fill=BLACK, width=2)
+    page = page or page_box()
+    if page.h > page.w:
+        left, right = page.rows(2)
+        draw.line([(0, left.bottom), (page.w, left.bottom)], fill=BLACK, width=2)
+        right = ui.Box(right.x, right.y + 2, right.w, right.h - 2)
+    else:
+        left, right = page.cols(2)
+        draw.line([(right.x, 0), (right.x, page.h)], fill=BLACK, width=2)
 
     # ── Left: the month, then what is on ──
     head, rest = left.cut_top(46)
     ui.header(draw, head, ui.month_label(now), accent=RED, title_size=21)
 
     rest = rest.inset(14, 12)
-    today_box, below = rest.cut_top(72, gap=8)
-    _draw_date_block(draw, today_box, now, 60, 20, 15, gap=12)
-
-    grid_box, agenda_box = below.cut_top(int(below.h * 0.52), gap=10)
-    _draw_month_grid(draw, grid_box, now, events)
+    if left.w > left.h:
+        # A wide, short half — which is what the stacked layout hands over.
+        # The date and the month go beside each other rather than one under
+        # the other: stacked, the grid was left 135 points for six weeks and
+        # printed rows of 21-point cells across 68 points of width.
+        top, agenda_box = rest.cut_top(int(rest.h * 0.62), gap=8)
+        today_box, grid_box = top.cut_left(int(top.w * 0.32), gap=12)
+        _draw_date_block(draw, today_box, now, 60, 20, 15, gap=12)
+        _draw_month_grid(draw, grid_box, now, events)
+    else:
+        today_box, below = rest.cut_top(72, gap=8)
+        _draw_date_block(draw, today_box, now, 60, 20, 15, gap=12)
+        grid_box, agenda_box = below.cut_top(int(below.h * 0.52), gap=10)
+        _draw_month_grid(draw, grid_box, now, events)
 
     label_box, list_box = agenda_box.cut_top(20, gap=2)
     draw.text((label_box.x, label_box.y), "Coming up",
@@ -276,33 +370,74 @@ def _draw_split_page(img, draw, weather, events):
         _draw_forecast_row(img, draw, days, forecast)
 
 
-def render_photo_page(photo_path, rotation=0, fit_mode="fit"):
+def render_photo_page(photo_path, rotation=0, fit_mode="fit", portrait=False):
     """Render full-screen photo with rotation and fit mode."""
-    img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
+    width, height = page_size(portrait)
+    img = Image.new("RGB", (width, height), WHITE)
 
     if photo_path and os.path.exists(photo_path):
-        photo = _prepare_photo(photo_path, EPD_W, EPD_H, rotation, fit_mode)
-        px = (EPD_W - photo.width) // 2
-        py = (EPD_H - photo.height) // 2
-        img.paste(photo, (px, py))
+        photo = _prepare_photo(photo_path, width, height, rotation, fit_mode)
+        img.paste(photo, ((width - photo.width) // 2, (height - photo.height) // 2))
     else:
         draw = ImageDraw.Draw(img)
-        font = _get_font(28)
-        draw.text((EPD_W // 2, EPD_H // 2), "No Photo", fill=BLACK,
-                  font=font, anchor="mm")
+        draw.text((width // 2, height // 2), "No Photo", fill=BLACK,
+                  font=_get_font(28), anchor="mm")
 
     return img
 
 
-def render_qr_setup(ip_address=None, port=5000, ap_ssid="Vignette", ap_password=""):
-    """Render QR code WiFi setup page on e-paper (800x480).
-    Modern two-column layout: WiFi QR | URL QR.
+def _qr_image(data, side):
+    """One QR code at a given pixel size, or None if the module is missing."""
+    try:
+        import qrcode
+    except ImportError:
+        return None
+    code = qrcode.QRCode(box_size=7, border=2)
+    code.add_data(data)
+    code.make(fit=True)
+    return code.make_image(fill_color="black",
+                           back_color="white").convert("RGB").resize(
+        (int(side), int(side)), _lanczos())
+
+
+def _page_footer(img, draw, page, font_tiny, note=()):
+    """The rule, the wordmark and the copyright every setup page ends with.
+
+    `note` is a sequence of lines rather than one string with newlines in it:
+    PIL refuses an anchor on multiline text, so each line is placed itself.
+    """
+    note = [note] if isinstance(note, str) else list(note)
+    line_h = ui.text_height(font_tiny) + 3
+    footer, _ = page.cut_bottom(64 + len(note) * line_h)
+    draw.line([(20, footer.y), (page.right - 20, footer.y)],
+              fill=(180, 180, 180), width=1)
+    y = footer.y + 6
+    for line in note:
+        draw.text((page.cx, y), ui.fit(line, font_tiny, page.w - 24),
+                  fill=BLACK, font=font_tiny, anchor="mt")
+        y += line_h
+    y += 16
+    _draw_logo(draw, page.cx, y, 20, BLACK)
+    draw.text((page.cx, y + 24), "\u00a9 2026 Vignette",
+              fill=BLACK, font=font_tiny, anchor="mt")
+    return footer
+
+
+def render_qr_setup(ip_address=None, port=5000, ap_ssid="Vignette",
+                    ap_password="", portrait=False):
+    """The hotspot pairing page: join the network, then open the browser.
+
+    Two steps, side by side on a wide panel and stacked on a tall one. The
+    stacked form is not the wide one squeezed — the divider turns with the
+    layout and each step gets a full-width band, which is the only way two
+    210-pixel QR codes fit in 480 points of width at all.
 
     `ip_address` is accepted for call-site symmetry but deliberately unused:
     this page is only ever shown while the device is serving its own hotspot,
     where the only address that works is the fixed gateway below.
     """
-    img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
+    page = page_box(portrait)
+    img = Image.new("RGB", (page.w, page.h), WHITE)
     draw = ImageDraw.Draw(img)
 
     wifi_qr_str = f"WIFI:T:WPA;S:{ap_ssid};P:{ap_password};;"
@@ -314,74 +449,77 @@ def render_qr_setup(ip_address=None, port=5000, ap_ssid="Vignette", ap_password=
     font_small  = _get_font(12)
     font_tiny   = _get_font(10)
 
-    # ── Header (0–60): logo left · divider · "WiFi Setup" right ──
-    draw.rectangle([0, 0, EPD_W, 60], fill=BLUE)
-    _draw_logo(draw, EPD_W // 2 - 80, 30, 38, WHITE)
-    draw.line([(EPD_W // 2 - 8, 14), (EPD_W // 2 - 8, 46)],
+    # ── Header: logo · divider · title, centred as one group ──
+    #
+    # Measured rather than placed at fixed offsets from the middle. The
+    # wordmark is a script face whose drawn width has little to do with its
+    # nominal size, and on a 480-point header the old offsets printed "WiFi
+    # Setup" straight through the tail of it.
+    head, body = page.cut_top(60)
+    draw.rectangle([0, 0, page.w, head.h], fill=BLUE)
+    logo_font = _get_logo_font(38)
+    logo_w = ui.text_width("Vignette", logo_font)
+    title_w = ui.text_width("WiFi Setup", font_header)
+    gap = 22
+    group_w = logo_w + gap * 2 + title_w
+    left = page.cx - group_w / 2
+    draw.text((left, head.cy), "Vignette",
+              fill=WHITE, font=logo_font, anchor="lm")
+    divider_x = left + logo_w + gap
+    draw.line([(divider_x, head.cy - 16), (divider_x, head.cy + 16)],
               fill=(180, 180, 220), width=1)
-    draw.text((EPD_W // 2 + 52, 30), "WiFi Setup",
-              fill=WHITE, font=font_header, anchor="mm")
+    draw.text((divider_x + gap, head.cy), "WiFi Setup",
+              fill=WHITE, font=font_header, anchor="lm")
 
-    # ── Column centers ──
-    L = EPD_W // 4        # 200
-    R = 3 * EPD_W // 4   # 600
-    QR_SIZE = 210
-    QR_TOP  = 88
+    steps_note = [f'\u2460 Scan the first QR \u2192 join "{ap_ssid}"',
+                  "\u2461 Scan the second \u2192 open the browser"]
+    footer = _page_footer(img, draw, page, font_tiny,
+                          note=steps_note if portrait
+                          else ["     ".join(steps_note)])
+    body = ui.Box(body.x, body.y, body.w, footer.y - body.y - 8)
 
-    # Vertical divider between columns
-    draw.line([(EPD_W // 2, 64), (EPD_W // 2, EPD_H - 80)],
-              fill=(180, 180, 180), width=1)
+    steps = body.rows(2, gap=10) if portrait else body.cols(2, gap=0)
+    if portrait:
+        draw.line([(20, steps[1].y - 5), (page.right - 20, steps[1].y - 5)],
+                  fill=(180, 180, 180), width=1)
+    else:
+        draw.line([(page.cx, body.y), (page.cx, body.bottom)],
+                  fill=(180, 180, 180), width=1)
 
-    # ── Step indicators (64–86) ──
-    for i, (cx, label) in enumerate([(L, "Connect to WiFi"), (R, "Open Browser")], 1):
-        draw.ellipse([cx - 36, 68, cx - 16, 84], fill=BLUE)
-        draw.text((cx - 26, 76), str(i), fill=WHITE, font=font_tiny, anchor="mm")
-        draw.text((cx - 6,  76), label, fill=BLACK, font=font_step, anchor="lm")
+    qr_side = min(210, steps[0].h - 66, steps[0].w - 40)
+    panels = (("Connect to WiFi", wifi_qr_str, [(ap_ssid, font_info, BLACK),
+                                                (ap_password, font_small, BLACK)]),
+              ("Open Browser", url_str, [(url_str, font_info, BLUE)]))
 
-    try:
-        import qrcode
+    for index, (step, (label, data, lines)) in enumerate(zip(steps, panels), 1):
+        # The numbered bullet and its label share one line, centred as a pair
+        # so the step reads as one thing rather than as a dot near some words.
+        label_w = ui.text_width(label, font_step)
+        left = step.cx - (label_w + 30) / 2
+        draw.ellipse([left, step.y + 4, left + 20, step.y + 24], fill=BLUE)
+        draw.text((left + 10, step.y + 14), str(index),
+                  fill=WHITE, font=font_tiny, anchor="mm")
+        draw.text((left + 30, step.y + 14), label,
+                  fill=BLACK, font=font_step, anchor="lm")
 
-        # Left QR — WiFi credentials
-        qr = qrcode.QRCode(box_size=7, border=2)
-        qr.add_data(wifi_qr_str)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        qr_img = qr_img.resize((QR_SIZE, QR_SIZE), _lanczos())
-        img.paste(qr_img, (L - QR_SIZE // 2, QR_TOP))
+        code = _qr_image(data, qr_side)
+        if code is None:
+            draw.text((step.cx, step.cy), "Install qrcode module",
+                      fill=RED, font=font_header, anchor="mm")
+            continue
+        top = step.y + 32
+        img.paste(code, (int(step.cx - qr_side // 2), int(top)))
 
-        # Right QR — setup URL
-        qr2 = qrcode.QRCode(box_size=7, border=2)
-        qr2.add_data(url_str)
-        qr2.make(fit=True)
-        qr2_img = qr2.make_image(fill_color="black", back_color="white").convert("RGB")
-        qr2_img = qr2_img.resize((QR_SIZE, QR_SIZE), _lanczos())
-        img.paste(qr2_img, (R - QR_SIZE // 2, QR_TOP))
-
-        # Info below QRs
-        info_y = QR_TOP + QR_SIZE + 8   # 306
-        draw.text((L, info_y),      ap_ssid,     fill=BLACK, font=font_info,  anchor="mt")
-        draw.text((L, info_y + 17), ap_password, fill=BLACK, font=font_small, anchor="mt")
-        draw.text((R, info_y),      url_str,     fill=BLUE,  font=font_info,  anchor="mt")
-
-    except ImportError:
-        draw.text((EPD_W // 2, 240),
-                  "Install qrcode module", fill=RED, font=font_header, anchor="mm")
-
-    # ── Footer ──
-    FT = EPD_H - 80   # 400
-    draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
-    draw.text((EPD_W // 2, FT + 6),
-              f'\u2460 Scan left QR  \u2192  Join "{ap_ssid}"'
-              f'     \u2461 Scan right QR  \u2192  Open browser',
-              fill=BLACK, font=font_tiny, anchor="mt")
-    _draw_logo(draw, EPD_W // 2, FT + 38, 18, BLACK)
-    draw.text((EPD_W // 2, FT + 60),
-              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
+        y = top + qr_side + 6
+        for text, font, colour in lines:
+            draw.text((step.cx, y), text, fill=colour, font=font, anchor="mt")
+            y += ui.text_height(font) + 3
 
     return img
 
 
-def render_wifi_connected(ssid, ip_address, port=5000, remote_url=None):
+def render_wifi_connected(ssid, ip_address, port=5000, remote_url=None,
+                          portrait=False):
     """Render 'WiFi Connected' confirmation page on e-paper (800x480).
     Clean centered layout: header · network · URL · QR · footer.
 
@@ -390,7 +528,8 @@ def render_wifi_connected(ssid, ip_address, port=5000, remote_url=None):
     the one moment the owner is standing there ready to scan it. The LAN
     address is still printed underneath as the local fallback.
     """
-    img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
+    page = page_box(portrait)
+    img = Image.new("RGB", (page.w, page.h), WHITE)
     draw = ImageDraw.Draw(img)
 
     local_url = f"http://{ip_address}:{port}"
@@ -407,96 +546,91 @@ def render_wifi_connected(ssid, ip_address, port=5000, remote_url=None):
     font_small = _get_font(13)
     font_tiny  = _get_font(10)
 
-    # ── Header (0–58) ──
-    draw.rectangle([0, 0, EPD_W, 58], fill=GREEN)
-    draw.text((EPD_W // 2, 29), "WiFi Connected!",
+    # ── Header ──
+    head, body = page.cut_top(58)
+    draw.rectangle([0, 0, page.w, head.h], fill=GREEN)
+    draw.text((page.cx, head.cy), "WiFi Connected!",
               fill=WHITE, font=font_title, anchor="mm")
 
-    # ── Network name ──
-    draw.text((EPD_W // 2, 72), f"Network:  {ssid}",
-              fill=BLACK, font=font_label, anchor="mt")
+    footer = _page_footer(img, draw, page, font_tiny)
 
-    # ── URL (adaptive font: shorter URL = larger text) ──
+    # Everything between the header and the footer is one centred stack, so
+    # the page composes itself at whatever height it is given rather than at
+    # the run of hard-coded y positions it used to carry.
+    body = ui.Box(body.x, body.y, body.w, footer.y - body.y)
     url_fs = 22 if len(url) <= 35 else 18 if len(url) <= 50 else 13
-    draw.text((EPD_W // 2, 100), "Open in your browser:",
-              fill=BLACK, font=font_small, anchor="mt")
-    draw.text((EPD_W // 2, 120), url,
-              fill=BLUE, font=_get_font(url_fs), anchor="mt")
-
-    # ── QR code (fixed 210 px, centered) ──
-    QR_SIZE = 210
-    QR_TOP  = 150
-    try:
-        import qrcode
-        qr = qrcode.QRCode(box_size=6, border=2)
-        qr.add_data(url)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        qr_img = qr_img.resize((QR_SIZE, QR_SIZE), _lanczos())
-        img.paste(qr_img, ((EPD_W - QR_SIZE) // 2, QR_TOP))
-    except ImportError:
-        pass
-
-    # ── Instructions ──
+    url_font = _get_font(url_fs)
     instructions = ("Scan the QR code or type the URL in your browser"
                     if not remote_url else
                     "Scan the QR code — this address works from anywhere")
-    draw.text((EPD_W // 2, QR_TOP + QR_SIZE + 10),
-              instructions, fill=BLACK, font=font_tiny, anchor="mt")
 
-    # When the tunnel is what the QR points at, the LAN address is still worth
-    # printing: it keeps working if the internet drops.
+    lines = [(f"Network:  {ssid}", font_label, BLACK, 8),
+             ("Open in your browser:", font_small, BLACK, 4),
+             (url, url_font, BLUE, 12)]
+    tail = [(instructions, font_tiny, BLACK, 4)]
     if remote_url:
-        draw.text((EPD_W // 2, QR_TOP + QR_SIZE + 26),
-                  f"On this network: {local_url}",
-                  fill=BLACK, font=font_tiny, anchor="mt")
+        # When the tunnel is what the QR points at, the LAN address is still
+        # worth printing: it keeps working if the internet drops.
+        tail.append((f"On this network: {local_url}", font_tiny, BLACK, 0))
 
-    # ── Footer ──
-    FT = EPD_H - 74   # 406
-    draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
-    _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
-    draw.text((EPD_W // 2, FT + 52),
-              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
+    qr_side = min(210, body.w - 80)
+    stack_h = (sum(ui.text_height(f) + gap for _, f, _, gap in lines)
+               + qr_side + 12
+               + sum(ui.text_height(f) + gap for _, f, _, gap in tail))
+    y = body.y + max(0, (body.h - stack_h) / 2)
+
+    for text, font, colour, gap in lines:
+        draw.text((page.cx, y), ui.fit(text, font, body.w - 24),
+                  fill=colour, font=font, anchor="mt")
+        y += ui.text_height(font) + gap
+
+    code = _qr_image(url, qr_side)
+    if code is not None:
+        img.paste(code, (int(page.cx - qr_side // 2), int(y)))
+    y += qr_side + 12
+
+    for text, font, colour, gap in tail:
+        draw.text((page.cx, y), ui.fit(text, font, body.w - 24),
+                  fill=colour, font=font, anchor="mt")
+        y += ui.text_height(font) + gap
 
     return img
 
 
-def render_otp_page(code):
+def render_otp_page(code, portrait=False):
     """Render the 6-digit OTP code on the e-paper for Hardware 2FA."""
-    img = Image.new("RGB", (EPD_W, EPD_H), WHITE)
+    page = page_box(portrait)
+    img = Image.new("RGB", (page.w, page.h), WHITE)
     draw = ImageDraw.Draw(img)
 
-    font_title = _get_font(38)
-    font_code  = _get_font(100)
-    font_desc  = _get_font(22)
+    # The code is the page. It is sized to the width it has rather than fixed
+    # at 100 points, which on a 480-wide panel ran off both edges.
+    title_size = 38 if page.w > 600 else 26
+    font_title = _get_font(title_size)
+    font_code  = _get_font(100 if page.w > 600 else 76)
+    font_desc  = _get_font(22 if page.w > 600 else 17)
     font_small = _get_font(15)
     font_tiny  = _get_font(10)
 
-    # ── Header (0–65) ──
-    draw.rectangle([0, 0, EPD_W, 65], fill=RED)
-    draw.text((EPD_W // 2, 32), "Authentication Required",
+    head, body = page.cut_top(65)
+    draw.rectangle([0, 0, page.w, head.h], fill=RED)
+    draw.text((page.cx, head.cy),
+              ui.fit("Authentication Required", font_title, page.w - 24),
               fill=WHITE, font=font_title, anchor="mm")
 
-    # ── Sub-label ──
-    draw.text((EPD_W // 2, 82), "Hardware Verification Code",
-              fill=BLACK, font=_get_font(16), anchor="mt")
+    footer = _page_footer(img, draw, page, font_tiny)
+    body = ui.Box(body.x, body.y, body.w, footer.y - body.y)
 
-    # ── OTP Code ──
-    draw.text((EPD_W // 2, 228), code,
-              fill=BLACK, font=font_code, anchor="mm")
-
-    # ── Description + expiry ──
-    draw.text((EPD_W // 2, 320), "Enter this code on the web interface.",
-              fill=BLACK, font=font_desc, anchor="mt")
-    draw.text((EPD_W // 2, 356), "Expires in 10 minutes.",
-              fill=RED, font=font_small, anchor="mt")
-
-    # ── Footer (consistent with other pages) ──
-    FT = EPD_H - 74   # 406
-    draw.line([(20, FT), (EPD_W - 20, FT)], fill=(180, 180, 180), width=1)
-    _draw_logo(draw, EPD_W // 2, FT + 28, 20, BLACK)
-    draw.text((EPD_W // 2, FT + 52),
-              "\u00a9 2026 Vignette", fill=BLACK, font=font_tiny, anchor="mt")
+    lines = [("Hardware Verification Code", _get_font(16), BLACK, 26),
+             (code, font_code, BLACK, 30),
+             ("Enter this code on the web interface.", font_desc, BLACK, 8),
+             ("Expires in 10 minutes.", font_small, RED, 0)]
+    stack_h = sum(ui.text_height(f) + gap for _, f, _, gap in lines)
+    y = body.y + max(0, (body.h - stack_h) / 2)
+    for text, font, colour, gap in lines:
+        draw.text((page.cx, y), ui.fit(text, font, body.w - 24),
+                  fill=colour, font=font, anchor="mt")
+        y += ui.text_height(font) + gap
 
     return img
 
@@ -572,8 +706,15 @@ def _draw_month_grid(draw, box, now, events=None, compact=False):
     # touching, so the markers are dropped rather than drawn on top.
     show_dots = cell_h >= 22
     # Weekday initials and day numbers: Latin by construction either way.
-    label_font = ui.display(12 if compact else 15, "medium")
-    day_font = ui.display(13 if compact else 17, "medium")
+    #
+    # Sized from the cell rather than from a compact flag. A grid can be wide
+    # and short — a 480x400 half of a portrait split view gives 68-point cells
+    # only 23 points tall — and 17-point numerals in those ran through the
+    # today marker and into the row beneath.
+    day_size = int(max(10, min(17 if not compact else 13, cell_h * 0.58)))
+    label_size = int(max(9, min(15 if not compact else 12, cell_h * 0.52)))
+    label_font = ui.display(label_size, "medium")
+    day_font = ui.display(day_size, "medium")
 
     for index in range(7):
         cx = box.x + index * cell_w + cell_w / 2
@@ -770,8 +911,16 @@ def _draw_forecast_row(img, draw, box, forecast, compact=False):
     # than assumed, which is what had "Sat" printed through the raindrops.
     text_h = (40 if compact else 42)
     for column, day in zip(box.cols(len(days), gap=4), days):
-        icon_side = min(column.w * (0.54 if compact else 0.60), max(0, column.h - text_h))
-        icon = ui.Box(column.cx - icon_side / 2, column.y, icon_side, icon_side)
+        icon_side = min(column.w * (0.54 if compact else 0.68), max(0, column.h - text_h))
+        # Centred in the space above the labels rather than pinned to the top
+        # of it. Given a tall column — which is what a portrait page hands
+        # over — pinning left a hand's width of white between the icon and
+        # the day it belongs to.
+        # Four points of air kept under the icon: centred hard against the
+        # labels, a rain glyph's drops sit on top of the weekday.
+        band = ui.Box(column.x, column.y, column.w, max(0, column.h - text_h - 8))
+        icon = ui.Box(column.cx - icon_side / 2, band.cy - icon_side / 2,
+                      icon_side, icon_side)
         ui.weather_icon(img, icon, day.get("icon"))
 
         label_y = column.bottom - text_h
@@ -796,15 +945,15 @@ def _draw_stat(draw, box, label, value, accent=BLUE):
               fill=BLACK, font=value_font, anchor="mm")
 
 
-def _draw_weather_fullscreen(img, draw, weather):
+def _draw_weather_fullscreen(img, draw, weather, page=None):
     """Full-screen weather: header, hero reading, four figures, three days."""
-    page = ui.Box(0, 0, EPD_W, EPD_H)
+    page = page or page_box()
+    portrait = page.h > page.w
 
     if not weather:
-        ui.header(draw, ui.Box(0, 0, EPD_W, 56), "Weather", accent=BLUE)
-        ui.empty_state(draw, ui.Box(0, 56, EPD_W, EPD_H - 56),
-                       "No weather data",
-                       "Settings → Weather")
+        head, body = page.cut_top(56)
+        ui.header(draw, head, "Weather", accent=BLUE)
+        ui.empty_state(draw, body, "No weather data", "Settings → Weather")
         return
 
     head, body = page.cut_top(56)
@@ -815,6 +964,10 @@ def _draw_weather_fullscreen(img, draw, weather):
     ui.header(draw, head, weather.get("city", "—"), accent=BLUE)
 
     body = body.inset(18, 14)
+    if portrait:
+        _draw_weather_tall(img, draw, weather, body)
+        return
+
     hero, lower = body.cut_top(int(body.h * 0.52), gap=12)
 
     # The two blocks underneath set the page's vertical axes, so they are
@@ -884,10 +1037,76 @@ def _draw_weather_fullscreen(img, draw, weather):
         _draw_forecast_row(img, draw, forecast_days, forecast)
 
 
-def _draw_calendar_fullscreen(draw, events):
-    """Full-screen calendar: month grid on the left, today and agenda right."""
+def _draw_weather_tall(img, draw, weather, body):
+    """The weather page on a tall panel: one column, four bands.
+
+    The wide version hangs the temperature off the first forecast column, an
+    alignment that only exists because the days sit beside it. Stacked, the
+    axis to hold is the vertical one: the icon and the reading share a centre
+    line, and the tiles and the days below share the page's own margins.
+    """
+    # The description gets its own band rather than being drawn past the
+    # bottom of the hero's — written that way it landed on top of the first
+    # tile underneath it.
+    hero, lower = body.cut_top(int(body.h * 0.26), gap=2)
+    desc_band, lower = lower.cut_top(26, gap=12)
+    stats_box, forecast_box = lower.cut_top(int(lower.h * 0.46), gap=14)
+
+    # ── Icon and reading, on one line ──
+    icon_side = min(hero.h * 0.92, hero.w * 0.34)
+    temp_font = ui.display(96, "medium")
+    temp_text = _temp(weather.get("temp"))
+    temp_w = ui.text_width(temp_text, temp_font)
+    desc = _describe(weather)
+    desc_font = ui.font(19)
+
+    # The pair is centred as a pair, so the band balances on the page's middle
+    # rather than on whichever of the two happens to be wider.
+    pair_w = icon_side + 14 + temp_w
+    left = hero.cx - pair_w / 2
+    ui.weather_icon(img, ui.Box(left, hero.cy - icon_side / 2,
+                                icon_side, icon_side), weather.get("icon"))
+    draw.text((left + icon_side + 14, hero.cy), temp_text,
+              fill=BLACK, font=temp_font, anchor="lm")
+
+    draw.text((body.cx, desc_band.y), ui.fit(desc, desc_font, body.w),
+              fill=BLACK, font=desc_font, anchor="mt")
+
+    # ── The figures, two by two ──
+    speed_unit = "mph" if weather.get("units") == "imperial" else "m/s"
+    figures = [
+        ("Feels like", _temp(weather.get("feels_like"))),
+        ("Humidity", f"{weather.get('humidity', '—')}%"),
+        ("High", _temp(weather.get("temp_max"))),
+        ("Low", _temp(weather.get("temp_min"))),
+    ]
+    stats_box, wind_box = stats_box.cut_top(int(stats_box.h * 0.66), gap=8)
+    top_row, bottom_row = stats_box.rows(2, gap=8)
+    for tile, (label, value) in zip(top_row.cols(2, gap=8) + bottom_row.cols(2, gap=8),
+                                    figures):
+        _draw_stat(draw, tile, label, value)
+    _draw_stat(draw, wind_box, "Wind",
+               f"{weather.get('wind_speed', '—')} {speed_unit}")
+
+    # ── The next three days ──
+    forecast = (weather.get("forecast") or [])[:3]
+    if not forecast:
+        return
+    label_box, days = forecast_box.cut_top(22, gap=4)
+    draw.text((label_box.x, label_box.y), "Next 3 days",
+              fill=BLUE, font=ui.font(15), anchor="lt")
+    _draw_forecast_row(img, draw, days, forecast)
+
+
+def _draw_calendar_fullscreen(draw, events, page=None):
+    """Full-screen calendar: the month, today, and what is on.
+
+    Side by side when the page is wide — grid left, today and agenda right —
+    and stacked when it is tall, where a 56%-width grid would leave the agenda
+    270 points to fit an event title into.
+    """
     now = datetime.now()
-    page = ui.Box(0, 0, EPD_W, EPD_H)
+    page = page or page_box()
 
     head, body = page.cut_top(56)
     ui.header(draw, head, ui.month_label(now), accent=RED)
@@ -895,16 +1114,27 @@ def _draw_calendar_fullscreen(draw, events):
     # A solid block of red is heavy; the grid needs to breathe under it or the
     # whole page reads as one crowded slab.
     body = body.inset(18, 16)
-    grid_box, side = body.cut_left(int(body.w * 0.56), gap=18)
 
-    _draw_month_grid(draw, grid_box, now, events)
-
-    # A vertical rule instead of a boxed card: one line, no wasted space.
-    draw.line([(side.x - 9, side.y), (side.x - 9, side.bottom)], fill=BLACK, width=1)
-
-    # ── Today, stated once and large ──
-    today_box, agenda_box = side.cut_top(118, gap=10)
-    _draw_date_block(draw, today_box, now, 86, 24, 17)
+    if page.h > page.w:
+        # Today first, because that is what the page is asked at a glance,
+        # then the month, then what is on. A single rule under the date keeps
+        # the three bands apart without boxing any of them.
+        today_box, rest = body.cut_top(104, gap=10)
+        _draw_date_block(draw, today_box, now, 86, 24, 17)
+        draw.line([(body.x, rest.y - 5), (body.right, rest.y - 5)],
+                  fill=BLACK, width=1)
+        grid_box, agenda_box = rest.cut_top(int(rest.h * 0.46), gap=12)
+        _draw_month_grid(draw, grid_box, now, events)
+        draw.line([(body.x, agenda_box.y - 6), (body.right, agenda_box.y - 6)],
+                  fill=BLACK, width=1)
+    else:
+        grid_box, side = body.cut_left(int(body.w * 0.56), gap=18)
+        _draw_month_grid(draw, grid_box, now, events)
+        # A vertical rule instead of a boxed card: one line, no wasted space.
+        draw.line([(side.x - 9, side.y), (side.x - 9, side.bottom)],
+                  fill=BLACK, width=1)
+        today_box, agenda_box = side.cut_top(118, gap=10)
+        _draw_date_block(draw, today_box, now, 86, 24, 17)
 
     label_box, list_box = agenda_box.cut_top(22, gap=4)
     draw.text((label_box.x, label_box.y),

@@ -822,14 +822,28 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
     background: linear-gradient(160deg, #33322f, #1c1b19);
     box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255,255,255,.12);
 }
+/* The frame is the shape the panel is hung in, so a portrait page fills it
+   instead of sitting letterboxed inside a landscape cutout. Set once on <html>
+   from the stored orientation; the aspect is a variable so every .epaper on
+   every page follows without each one being told. */
 .epaper__screen {
     position: relative;
     display: block;
     width: 100%;
-    aspect-ratio: 800 / 480;   /* reserve space so the card never jumps */
+    /* Reserve space so the card never jumps while the image loads. */
+    aspect-ratio: var(--epaper-aspect, 800 / 480);
     border-radius: 7px;
     overflow: hidden;
     background: #e6e4de;
+}
+:root[data-orientation="portrait"] {
+    --epaper-aspect: 480 / 800;
+}
+/* Tall and full-width, a preview would be most of a phone screen on its own,
+   so the portrait frame is held to a readable width rather than a full one. */
+:root[data-orientation="portrait"] .hero__preview .epaper {
+    max-width: 330px;
+    margin-inline: auto;
 }
 .epaper__screen img {
     position: absolute;
