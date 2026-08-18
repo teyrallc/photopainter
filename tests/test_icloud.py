@@ -12,6 +12,7 @@ No network: urlopen is replaced with canned answers.
     python3 tests/test_icloud.py     # also runs standalone
 """
 
+import base64
 import email.message
 import io
 import json
@@ -79,6 +80,12 @@ class FakeICloud:
         url = request.full_url
         self.calls.append(url)
 
+        # This fake is the *old* API. An album published the old way does not
+        # exist as a shared collection, and 404 there is what sends the reader
+        # back to these endpoints — so the fake has to say so.
+        if "ckdatabasews" in url:
+            return _raise(_http_error(url, 404))
+
         if self.redirect_from and self.redirect_from in url:
             body = json.dumps({"X-Apple-MMe-Host": self.redirect_to}).encode()
             if self.redirect_in_body:
@@ -120,6 +127,88 @@ def _with_upstream(fake, fn):
     finally:
         urllib.request.urlopen = real
         icloud.forget_album()
+
+
+# ── A fake shared-collection (CloudKit) API ──────────────────────────────
+
+CK_TOKEN = "077QFwtYRXaOWWS7Aupj_GDIg"
+CK_ZONE = {"zoneName": "SharedCollection-66DC9D07", "ownerRecordName": "_abc",
+           "zoneType": "REGULAR_CUSTOM_ZONE"}
+
+
+def _master(name, filename, kind="public.jpeg", fingerprint=None, expires=9999999999):
+    """One CPLMaster record, shaped the way CloudKit really returns them."""
+    def resource(tag, size):
+        return {"value": {
+            "fileChecksum": f"{name}-{tag}", "size": size,
+            "downloadURL": (f"https://cvws-h2.icloud-content.com/B/{name}-{tag}/"
+                            "${f}?o=abc&e=" + str(expires))}}
+
+    return {
+        "recordType": "CPLMaster",
+        "recordName": name,
+        "fields": {
+            "filenameEnc": {"value": base64.b64encode(filename.encode()).decode(),
+                            "type": "ENCRYPTED_BYTES"},
+            "resOriginalFileType": {"value": kind, "type": "STRING"},
+            "resOriginalFingerprint": {"value": fingerprint or name, "type": "STRING"},
+            "resOriginalWidth": {"value": 1179, "type": "INT64"},
+            "resOriginalHeight": {"value": 2556, "type": "INT64"},
+            "resOriginalFileSize": {"value": 7447870, "type": "INT64"},
+            "originalCreationDate": {"value": 1786892298000, "type": "TIMESTAMP"},
+            "resOriginalRes": resource("orig", 7447870),
+            "resJPEGThumbRes": resource("thumb", 53303),
+        },
+    }
+
+
+class FakeCloudKit:
+    """Answers records/resolve and records/query, and counts the pages."""
+
+    def __init__(self, records=None, pages=None, require_login=False,
+                 partition="https://p178-ckdatabasews.icloud.com:443",
+                 anonymous=True):
+        self.records = records if records is not None else [
+            _master("REC-1", "IMG_5968.PNG", "public.png"),
+            _master("REC-2", "IMG_5966.JPG"),
+        ]
+        self.pages = pages
+        self.require_login = require_login
+        self.partition = partition
+        self.anonymous = anonymous
+        self.calls = []
+
+    def __call__(self, request, timeout=None):
+        url = request.full_url
+        self.calls.append(url)
+        payload = json.loads(request.data.decode()) if request.data else {}
+
+        if "records/resolve" in url:
+            access = {"token": "ANON-TOKEN", "tokenTTL": 1200000,
+                      "databasePartition": self.partition}
+            return _Response(json.dumps({"results": [{
+                "shortGUID": {"value": CK_TOKEN},
+                "zoneID": CK_ZONE,
+                "requireAppleLogin": self.require_login,
+                "anonymousPublicAccess": access if self.anonymous else None,
+                "share": {"fields": {"cloudkit.title": {"value": "Vignette"}}},
+                "ownerIdentity": {"nameComponents": {"givenName": "WeiEn",
+                                                     "familyName": "Weng"}},
+            }]}).encode())
+
+        if "records/query" in url:
+            assert "publicAccessAuthToken=ANON-TOKEN" in url, url
+            if self.pages is None:
+                return _Response(json.dumps({"records": self.records}).encode())
+            index = 0 if not payload.get("continuationMarker") else \
+                int(payload["continuationMarker"])
+            page = self.pages[index]
+            body = {"records": page}
+            if index + 1 < len(self.pages):
+                body["continuationMarker"] = str(index + 1)
+            return _Response(json.dumps(body).encode())
+
+        raise AssertionError(f"unexpected request: {url}")
 
 
 # ── The link ──────────────────────────────────────────────────────────────
@@ -299,62 +388,148 @@ def test_a_missing_album_says_so():
     except icloud.ICloudError as exc:
         assert exc.status == 404
         assert "album" in str(exc).lower(), exc
-        # 404 from this endpoint means "no public website behind that token",
-        # which is nearly always the Share button's invite link — identical to
-        # look at, and a different thing. Saying "the link may have been
-        # regenerated" sent people to copy the same link again.
-        assert "public website" in str(exc).lower(), exc
 
 
-def test_an_invitation_link_is_named_as_one():
-    """The two links in Photos look identical and are not the same thing.
+def test_a_shared_collection_album_is_read_through_cloudkit():
+    """The album shape Photos hands out today.
 
-    The Share button's link invites people to *join* an album — anyone holding
-    it can accept, so an owner is quite right that it is not private, and it
-    still cannot be read without an Apple Account. Only "Public Website"
-    publishes the JSON this frame reads. Telling somebody their public album is
-    not public is not a message they can act on, so the page itself is asked:
-    Apple titles an invitation "Shared Album invitation".
+    Apple moved shared albums off the sharedstreams API onto CloudKit shared
+    collections. An album published that way answers 404 to every
+    sharedstreams call — which is how an album that opened perfectly well in a
+    browser came to be reported as "not found" by the frame.
     """
-    page = ('<!DOCTYPE html><html><head><title>Shared Album invitation</title>'
-            '<meta property="og:title" content="Shared Album invitation">'
-            '</head><body></body></html>')
+    fake = FakeCloudKit()
+    album = _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
 
-    def served(request, timeout=None):
-        return io.BytesIO(page.encode("utf-8"))
+    assert album["name"] == "Vignette"
+    assert album["owner"] == "WeiEn Weng"
+    assert album["token"] == CK_TOKEN
+    assert album["url"] == f"https://photos.icloud.com/shared/album/{CK_TOKEN}"
+    assert len(album["photos"]) == 2
 
+    photo = album["photos"][0]
+    assert photo["width"] == 1179 and photo["height"] == 2556
+    assert photo["bytes"] == 7447870
+    # The signed URL carries a ${f} placeholder for the filename.
+    assert "${f}" not in photo["url"] and "${f}" not in photo["thumb"]
+    assert photo["url"].startswith("https://cvws-h2.icloud-content.com/")
+    assert photo["thumb"] != photo["url"], "the thumbnail is the full-size file"
+
+    # Resolve first, then query on the partition it named.
+    assert "ckdatabasews.icloud.com/database/1" in fake.calls[0]
+    assert "records/resolve" in fake.calls[0]
+    assert "p178-ckdatabasews.icloud.com" in fake.calls[1]
+
+
+def test_the_real_extension_survives_the_trip():
+    """A PNG named .jpg is a file whose name disagrees with its bytes."""
+    fake = FakeCloudKit(records=[
+        _master("REC-P", "IMG_1.PNG", "public.png"),
+        _master("REC-J", "IMG_2.JPG", "public.jpeg"),
+        _master("REC-H", "IMG_3.HEIC", "public.heic"),
+    ])
+    album = _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
+    names = sorted(icloud.suggested_filename(p) for p in album["photos"])
+    assert [n.rsplit(".", 1)[1] for n in names] == ["heic", "jpg", "png"], names
+
+    # The older API has no filename to go on, so JPEG stays the safe guess.
+    assert icloud.suggested_filename({"guid": "X", "created": ""}).endswith(".jpg")
+
+
+def test_the_same_picture_twice_is_one_photograph():
+    """Adding a photo to an album from two devices makes two records."""
+    fake = FakeCloudKit(records=[
+        _master("REC-1", "IMG_1.JPG", fingerprint="SAME"),
+        _master("REC-2", "IMG_1.JPG", fingerprint="SAME"),
+        _master("REC-3", "IMG_2.JPG", fingerprint="OTHER"),
+    ])
+    album = _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
+    assert len(album["photos"]) == 2, [p["caption"] for p in album["photos"]]
+
+
+def test_video_never_reaches_a_photo_frame():
+    fake = FakeCloudKit(records=[
+        _master("REC-1", "IMG_1.JPG", "public.jpeg"),
+        _master("REC-2", "IMG_2.MOV", "com.apple.quicktime-movie"),
+        _master("REC-3", "IMG_3.MP4", "public.mpeg-4"),
+    ])
+    album = _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
+    assert [p["caption"] for p in album["photos"]] == ["IMG_1.JPG"]
+
+
+def test_every_page_of_a_long_album_is_read():
+    pages = [[_master(f"REC-{i}", f"IMG_{i}.JPG") for i in range(n, n + 3)]
+             for n in (0, 3, 6)]
+    fake = FakeCloudKit(pages=pages)
+    album = _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
+    assert len(album["photos"]) == 9, len(album["photos"])
+    assert sum("records/query" in c for c in fake.calls) == 3
+
+
+def test_an_album_that_needs_an_apple_account_says_so():
+    """Shared with named people rather than published: no anonymous read."""
+    fake = FakeCloudKit(require_login=True)
+    try:
+        _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
+        raise AssertionError("expected an ICloudError")
+    except icloud.ICloudError as exc:
+        assert exc.status == 403
+        assert "apple account" in str(exc).lower(), exc
+        # It must not then go and ask the old API the same question.
+        assert not any("sharedstreams" in c for c in fake.calls)
+
+    # Same when the album resolves but offers no anonymous access at all.
+    fake = FakeCloudKit(anonymous=False)
+    try:
+        _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
+        raise AssertionError("expected an ICloudError")
+    except icloud.ICloudError as exc:
+        assert exc.status == 403
+
+
+def test_a_partition_off_apple_is_refused():
+    """The partition names the host the next request is sent to."""
+    for evil in ("https://evil.example:443", "https://ckdatabasews.icloud.com.evil.test"):
+        fake = FakeCloudKit(partition=evil)
+        try:
+            _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
+            raise AssertionError(f"{evil} should have been refused")
+        except icloud.ICloudError as exc:
+            assert "unexpected host" in str(exc).lower(), exc
+
+
+def test_a_listing_is_not_cached_past_its_download_links():
+    """Those URLs expire in about a quarter of an hour.
+
+    Serving a cached listing after that hands the gallery a page of
+    photographs that every one of them fails to load.
+    """
+    import time as _time
+
+    soon = int(_time.time()) + 90
+    fake = FakeCloudKit(records=[_master("REC-1", "IMG_1.JPG", expires=soon)])
+    album = _with_upstream(fake, lambda: icloud.fetch_album(CK_TOKEN))
+    assert album["photos"][0]["expires"] == soon
+
+    # Cached, but only for as long as the links inside it are good for.
     real = urllib.request.urlopen
-    urllib.request.urlopen = served
+    urllib.request.urlopen = fake
+    icloud.forget_album()
     try:
-        message = icloud.diagnose_link(
-            "https://photos.icloud.com/shared/album/077QFwtYRXaOWWS7Aupj_GDIg")
+        icloud.fetch_album(CK_TOKEN)
+        first = len(fake.calls)
+        icloud.fetch_album(CK_TOKEN)
+        assert len(fake.calls) == first, "went back to iCloud while still fresh"
+
+        entry = icloud._album_cache[CK_TOKEN]
+        assert entry["expires"] <= soon - 60 + 1, (entry["expires"], soon)
+        # Wind the clock past the links' expiry.
+        entry["expires"] = _time.time() - 1
+        icloud.fetch_album(CK_TOKEN)
+        assert len(fake.calls) > first, "served links that had already expired"
     finally:
         urllib.request.urlopen = real
-
-    assert message and "invitation" in message.lower()
-    assert "public website" in message.lower(), "it does not say what to do"
-
-    # A published album's page is titled by its own name, so there is nothing
-    # to correct and the API's own message stands.
-    named = '<html><head><title>Summer 2026 - iCloud</title></head></html>'
-    urllib.request.urlopen = lambda request, timeout=None: io.BytesIO(named.encode())
-    try:
-        assert icloud.diagnose_link("https://www.icloud.com/sharedalbum/#B0x") is None
-    finally:
-        urllib.request.urlopen = real
-
-    # Nothing to ask, or nothing answering: the caller keeps its own message.
-    assert icloud.diagnose_link("") is None
-    assert icloud.diagnose_link("https://example.com/whatever") is None
-
-    def refused(request, timeout=None):
-        raise OSError("network is down")
-
-    urllib.request.urlopen = refused
-    try:
-        assert icloud.diagnose_link("https://photos.icloud.com/shared/album/x") is None
-    finally:
-        urllib.request.urlopen = real
+        icloud.forget_album()
 
 
 def test_the_listing_is_cached_briefly():

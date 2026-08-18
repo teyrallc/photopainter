@@ -726,10 +726,18 @@
                 bar.classList.remove('progress__bar--striped');
                 bar.style.width = '100%';
                 text.textContent = V.t('icloud_imported') + ': ' + data.imported +
+                                   (data.duplicates
+                                       ? ' (' + V.t('icloud_duplicates')
+                                             .replace('{n}', data.duplicates) + ')' : '') +
                                    (data.failed ? ' (' + data.failed + ' ✕)' : '');
+                // "Nothing new" and "I already had all of those" are different
+                // answers, and only one of them means the album was read.
                 V.toast(data.imported
                     ? V.t('icloud_new_photos').replace('{n}', data.imported)
-                    : V.t('icloud_nothing_new'), data.imported ? 'success' : 'info');
+                    : (data.duplicates
+                        ? V.t('icloud_duplicates').replace('{n}', data.duplicates)
+                        : V.t('icloud_nothing_new')),
+                    data.imported ? 'success' : 'info');
                 if (data.imported) setTimeout(function () { window.location.reload(); }, 1200);
                 else restore();
             })

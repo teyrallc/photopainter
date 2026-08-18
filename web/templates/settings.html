@@ -1145,7 +1145,10 @@
             .then(function (d) {
                 V.toast(d.imported
                     ? V.t('icloud_new_photos').replace('{n}', d.imported)
-                    : V.t('icloud_nothing_new'), d.imported ? 'success' : 'info');
+                    : (d.duplicates
+                        ? V.t('icloud_duplicates').replace('{n}', d.duplicates)
+                        : V.t('icloud_nothing_new')),
+                    d.imported ? 'success' : 'info');
                 renderIcloudState(d.status);
             })
             .catch(V.fail)

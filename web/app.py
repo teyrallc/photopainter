@@ -1519,7 +1519,7 @@ def _icloud_import(album, photos, rotation=None, fit_mode=None):
     rotation = config.get("photo_rotation", 0) if rotation is None else rotation
     fit_mode = config.get("photo_fit_mode", "fit") if fit_mode is None else fit_mode
 
-    imported, failed = [], []
+    imported, failed, duplicates = [], [], []
     with _icloud_import_lock:
         icloud_ledger.bind(album["token"])
         for photo in photos:
@@ -1532,6 +1532,30 @@ def _icloud_import(album, photos, rotation=None, fit_mode=None):
             if not icloud.download_asset(photo.get("url"), dest):
                 failed.append({"guid": guid, "error": "Download failed"})
                 continue
+
+            # The album's own record is not the only way a photograph gets
+            # here: the same picture may already have arrived from the phone
+            # shortcut, or from an album connected before this one. The ledger
+            # is keyed on the bytes *as received* — the same convention
+            # process_upload uses, so the two sources share one namespace —
+            # and the guid is still recorded, so the album never downloads it
+            # twice again.
+            digest = digest_file(dest)
+            existing = photo_index.lookup(digest) if digest else None
+            # Never the file just written. reserve_output_name only ever hands
+            # back a name nothing occupies, so a ledger entry naming *this*
+            # file is a stale one that the download has accidentally made look
+            # live again — and treating it as a duplicate deleted the only
+            # copy and imported nothing.
+            if existing == name:
+                photo_index.forget_missing()
+                existing = None
+            if existing:
+                os.remove(dest)
+                icloud_ledger.record(guid, existing)
+                duplicates.append(existing)
+                continue
+
             try:
                 fit_downloaded_image(dest, rotation, fit_mode)
             except Exception as e:  # noqa: BLE001 - one bad photo, not the album
@@ -1540,12 +1564,19 @@ def _icloud_import(album, photos, rotation=None, fit_mode=None):
                     os.remove(dest)
                 failed.append({"guid": guid, "error": "Not a readable image"})
                 continue
+            # The digest from before fitting, which is what was looked up and
+            # what an upload of the same photograph would present. Recording
+            # the fitted bytes instead would have made every lookup miss.
+            if digest:
+                photo_index.remember(digest, name)
             icloud_ledger.record(guid, name)
             imported.append(name)
 
-    if imported:
-        logger.info(f"iCloud: imported {len(imported)} photo(s)")
+    if imported or duplicates:
+        logger.info(f"iCloud: imported {len(imported)} photo(s), "
+                    f"{len(duplicates)} already here")
     return {"imported": len(imported), "failed": len(failed),
+            "duplicates": len(duplicates),
             "names": imported, "errors": failed}
 
 
@@ -1600,20 +1631,14 @@ def api_icloud_connect():
         token = icloud.parse_album_token(link)
         album = icloud.fetch_album(token, refresh=True)
     except icloud.ICloudError as exc:
-        # 404 means the token named no published album. The usual cause is the
-        # Share button's invitation link, which is indistinguishable from the
-        # Public Website one by eye — so ask Apple's own page which it is
-        # rather than telling the owner their public album is not public.
-        if exc.status == 404:
-            better = icloud.diagnose_link(link)
-            if better:
-                exc = icloud.ICloudError(better, status=exc.status)
         config.set("icloud_last_error", str(exc))
         return _icloud_error(exc)
 
     icloud_ledger.bind(token)
     config.update({
-        "icloud_album_url": icloud.album_url(token),
+        # The album says which link shape it actually came from — the two
+        # backends have different canonical URLs.
+        "icloud_album_url": album.get("url") or icloud.album_url(token),
         "icloud_album_token": token,
         "icloud_album_name": album["name"],
         "icloud_connected": True,

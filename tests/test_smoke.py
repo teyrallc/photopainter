@@ -11,6 +11,7 @@ would have been caught by nothing more than asking every route for a response.
 """
 
 import contextlib
+import email.message
 import io
 import json
 import os
@@ -19,6 +20,7 @@ import sys
 import tempfile
 import time
 import types
+import urllib.error
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -735,12 +737,24 @@ def _icloud_upstream(photo_guids=("PHOTO-1", "PHOTO-2")):
     """Serve a two-photo album plus real PNG bytes for the assets."""
     from PIL import Image
 
-    buffer = io.BytesIO()
-    Image.new("RGB", (60, 40), (10, 120, 200)).save(buffer, "PNG")
-    png = buffer.getvalue()
+    # A different picture per guid. Identical bytes are the same photograph as
+    # far as the gallery is concerned — which is the point of the content
+    # ledger, and would make this fixture assert its own dedupe by accident.
+    pngs = {}
+    for index, guid in enumerate(photo_guids):
+        buffer = io.BytesIO()
+        Image.new("RGB", (60, 40), (10 + index * 40, 120, 200)).save(buffer, "PNG")
+        pngs[guid] = buffer.getvalue()
+    png = next(iter(pngs.values()))
 
     def upstream(request, timeout=None):
         url = request.full_url
+        # This album is published the old way, so it is not a shared
+        # collection: the CloudKit resolve has to miss before the reader falls
+        # back to the endpoints below.
+        if "ckdatabasews" in url:
+            raise urllib.error.HTTPError(url, 404, "no such album",
+                                         email.message.Message(), io.BytesIO(b"{}"))
         if url.endswith("/webstream"):
             return _Body(json.dumps({
                 "streamName": "Family",
@@ -750,7 +764,7 @@ def _icloud_upstream(photo_guids=("PHOTO-1", "PHOTO-2")):
                     "dateCreated": "2024-03-15T09:00:00Z",
                     "derivatives": {"2048": {"checksum": f"{guid}-c",
                                              "width": "2048", "height": "1365",
-                                             "fileSize": str(len(png))}},
+                                             "fileSize": str(len(pngs[guid]))}},
                 } for guid in photo_guids],
             }).encode())
         if url.endswith("/webasseturls"):
@@ -759,6 +773,9 @@ def _icloud_upstream(photo_guids=("PHOTO-1", "PHOTO-2")):
                 f"{guid}-c": {"url_location": "cvws.icloud-content.com",
                               "url_path": f"/S/{guid}.jpg"}
                 for guid in wanted}}).encode())
+        for guid, body in pngs.items():
+            if f"/S/{guid}.jpg" in url:
+                return _Body(body)
         return _Body(png)
 
     return upstream
@@ -767,6 +784,10 @@ def _icloud_upstream(photo_guids=("PHOTO-1", "PHOTO-2")):
 def _forget_icloud():
     vapp.icloud.forget_album()
     vapp.icloud_ledger.clear()
+    # The content ledger outlives a test run in OUTPUT_DIR, and it is keyed on
+    # bytes this fixture serves every time — so without this, the second run of
+    # the suite finds its own photographs already imported.
+    vapp.photo_index.forget_missing()
     config.update({"icloud_album_url": "", "icloud_album_token": "",
                    "icloud_album_name": "", "icloud_connected": False})
 
@@ -847,6 +868,89 @@ def test_an_album_connects_imports_once_and_syncs_without_duplicating():
         with fake_upstream(_icloud_upstream()):
             recovered = client.post("/api/icloud/sync", headers=SAME_ORIGIN, json={})
         assert recovered.get_json()["imported"] == 1
+    finally:
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+        _forget_icloud()
+
+
+def test_the_same_photograph_from_two_places_lands_once():
+    """The album is not the only door into the gallery.
+
+    A picture can arrive from the phone shortcut and from a connected album,
+    and it is the same photograph either way. The ledger is keyed on the bytes
+    as received — the same key process_upload uses — so one of them wins and
+    the album still records the guid, which is what stops it downloading the
+    file again on every sync.
+    """
+    client = _paired_client()
+    _forget_icloud()
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+
+    try:
+        upstream = _icloud_upstream(photo_guids=("SHARED-1",))
+        # The exact bytes the album will serve, uploaded first from a phone.
+        from PIL import Image
+        buffer = io.BytesIO()
+        Image.new("RGB", (60, 40), (10, 120, 200)).save(buffer, "PNG")
+        uploaded = client.post(
+            "/api/upload", headers=SAME_ORIGIN,
+            data={"file": (io.BytesIO(buffer.getvalue()), "from-phone.png")},
+            content_type="multipart/form-data")
+        assert uploaded.status_code == 200, uploaded.get_data(as_text=True)
+
+        with fake_upstream(upstream):
+            client.post("/api/icloud/connect", headers=SAME_ORIGIN,
+                        json={"url": f"https://www.icloud.com/sharedalbum/#{ICLOUD_TOKEN}"})
+            result = client.post("/api/icloud/import", headers=SAME_ORIGIN,
+                                 json={"all": True}).get_json()
+
+        assert result["imported"] == 0, result
+        assert result["duplicates"] == 1, result
+        added = set(os.listdir(vapp.OUTPUT_DIR)) - before
+        assert len(added) == 1, added        # the upload, and nothing beside it
+
+        # The guid was still recorded, so syncing again does no work at all.
+        with fake_upstream(upstream):
+            again = client.post("/api/icloud/sync", headers=SAME_ORIGIN,
+                                json={}).get_json()
+        assert again["imported"] == 0 and again["duplicates"] == 0, again
+        assert set(os.listdir(vapp.OUTPUT_DIR)) - before == added
+    finally:
+        for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
+            os.remove(os.path.join(vapp.OUTPUT_DIR, name))
+        _forget_icloud()
+
+
+def test_a_stale_ledger_entry_cannot_swallow_the_import():
+    """The duplicate check must not find the file it has just written.
+
+    reserve_output_name only ever hands back a free name, so a ledger entry
+    naming that same file is stale — its photo was deleted, and the download
+    has accidentally recreated the name. Reading that as "already here"
+    deleted the only copy and imported nothing.
+    """
+    client = _paired_client()
+    _forget_icloud()
+    before = set(os.listdir(vapp.OUTPUT_DIR))
+
+    try:
+        from PIL import Image
+        buffer = io.BytesIO()
+        Image.new("RGB", (60, 40), (10, 120, 200)).save(buffer, "PNG")
+        digest = __import__("hashlib").sha256(buffer.getvalue()).hexdigest()
+        # A ledger left pointing at the name this import is about to choose.
+        vapp.photo_index.remember(digest, "icloud_20240315_SHARED1.jpg")
+
+        with fake_upstream(_icloud_upstream(photo_guids=("SHARED-1",))):
+            client.post("/api/icloud/connect", headers=SAME_ORIGIN,
+                        json={"url": f"https://www.icloud.com/sharedalbum/#{ICLOUD_TOKEN}"})
+            result = client.post("/api/icloud/import", headers=SAME_ORIGIN,
+                                 json={"all": True}).get_json()
+
+        assert result["imported"] == 1, result
+        added = set(os.listdir(vapp.OUTPUT_DIR)) - before
+        assert added == {"icloud_20240315_SHARED1.jpg"}, added
     finally:
         for name in set(os.listdir(vapp.OUTPUT_DIR)) - before:
             os.remove(os.path.join(vapp.OUTPUT_DIR, name))

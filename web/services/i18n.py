@@ -159,11 +159,12 @@ TRANSLATIONS = {
         "icloud_last_sync": "Last sync",
         "icloud_nothing_new": "No new photos",
         "icloud_new_photos": "{n} new photo(s) imported",
+        "icloud_duplicates": "{n} already here",
         "icloud_start_slideshow": "Start the slideshow after importing",
         "icloud_steps_title": "How to get the link",
         "icloud_step1": "In Photos, open the shared album you want on the frame",
-        "icloud_step2": "Tap the album name > People (or Subscribers)",
-        "icloud_step3": "Turn on “Public Website” and copy the link",
+        "icloud_step2": "Tap the share button and copy the album link",
+        "icloud_step3": "On an older album: album name > People > Public Website",
         "icloud_step4": "Paste it here. Anyone with that link can see the album.",
 
         # iPhone Shortcut upload
@@ -548,11 +549,12 @@ TRANSLATIONS = {
         "icloud_last_sync": "上次同步",
         "icloud_nothing_new": "沒有新照片",
         "icloud_new_photos": "已匯入 {n} 張新照片",
+        "icloud_duplicates": "{n} 張已經在相框裡",
         "icloud_start_slideshow": "匯入後開始輪播",
         "icloud_steps_title": "如何取得連結",
         "icloud_step1": "在「照片」App 開啟要放到相框的共享相簿",
-        "icloud_step2": "點相簿名稱 >「使用者」（或「訂閱者」）",
-        "icloud_step3": "開啟「公開網站」，然後複製連結",
+        "icloud_step2": "點分享按鈕，複製相簿連結",
+        "icloud_step3": "舊版相簿：點相簿名稱 >「使用者」> 開啟「公開網站」",
         "icloud_step4": "貼到這裡。拿到這個連結的人都能看到相簿內容。",
 
         # iPhone Shortcut upload
