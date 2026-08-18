@@ -99,7 +99,12 @@
 
         var msg = document.createElement('div');
         msg.className = 'toast__msg';
-        msg.textContent = String(message == null ? '' : message);
+        /* Bounded here, once, because a toast takes whatever it is handed:
+           a device error, a JSON parse failure, a value off the query string.
+           A toast is a sentence — anything longer has stopped being a message
+           and started being a wall, and it covers the page it appeared over. */
+        var body = String(message == null ? '' : message);
+        msg.textContent = body.length > 200 ? body.slice(0, 197) + '…' : body;
         el.appendChild(msg);
 
         var close = document.createElement('button');

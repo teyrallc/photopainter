@@ -36,6 +36,11 @@
                (status ? ' (HTTP ' + status + ')' : '');
     }
 
+    /* Exposed so the one place that cannot use V.api — the Drive listing, which
+       needs its own 401 handling — describes a non-JSON reply the same way
+       rather than surfacing a raw JSON parse error. */
+    V.gatewayMessage = describeGateway;
+
     /**
      * Call the device API and resolve with the parsed JSON body.
      *

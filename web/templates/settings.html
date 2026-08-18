@@ -618,6 +618,7 @@
     var statusIcon = document.getElementById('save-status-icon');
     var statusText = document.getElementById('save-status-text');
     var inFlight = 0;
+    var failures = 0;
     var idleTimer = null;
     var SETTLE_MS = 800;
 
@@ -645,14 +646,26 @@
         }
     }
 
+    /* This line is the only account of what happened, and an account that can
+       be wrong is worse than none. It tracks outcomes rather than a count: a
+       save that succeeds after another one failed used to drive the counter to
+       zero and paint "All changes saved" over the failure — while the field
+       that failed sat there reverted, disagreeing with the tick beside it.
+
+       A failure therefore stands until the user acts again. Acting again is
+       what starts a fresh round, and only a round with nothing outstanding and
+       nothing failed may call itself saved. */
     function commit(promise) {
+        if (inFlight === 0) failures = 0;      // the previous round is settled
         inFlight++;
-        setStatus('saving', V.t('save_saving'));
+        if (!failures) setStatus('saving', V.t('save_saving'));
         return promise.then(function (data) {
-            if (--inFlight === 0) setStatus('saved', V.t('save_saved'));
+            inFlight--;
+            if (inFlight === 0 && !failures) setStatus('saved', V.t('save_saved'));
             return data;
         }, function (err) {
             inFlight--;
+            failures++;
             setStatus('error', V.t('save_failed') + ' — ' + (err.message || err));
             throw err;
         });
@@ -661,17 +674,26 @@
     /** Save this field when it settles; put it back if the device refuses. */
     function autosave(el, send) {
         if (!el) return;
-        var last = el.type === 'checkbox' ? el.checked : el.value;
+        var isCheck = el.type === 'checkbox';
+        var read  = function () { return isCheck ? el.checked : el.value; };
+        var write = function (v) { if (isCheck) el.checked = v; else el.value = v; };
+        var last = read();
         var timer = null;
+        var seq = 0;
 
         function push() {
-            var now = el.type === 'checkbox' ? el.checked : el.value;
+            var now = read();
             if (now === last) return;
             var previous = last;
+            var mine = ++seq;
             last = now;
             commit(send(now)).catch(function () {
-                if (el.type === 'checkbox') el.checked = previous;
-                else el.value = previous;
+                // Only the newest attempt may put the field back. An older one
+                // failing would otherwise throw away an edit made after it —
+                // and if that later edit saved, leave the box permanently
+                // disagreeing with the device.
+                if (mine !== seq) return;
+                write(previous);
                 last = previous;
             });
         }
@@ -717,8 +739,13 @@
         });
 
         input.addEventListener('secret:stored', function () {
-            input.hidden = true;
+            // Emptied and blurred before it is hidden. Hiding an input that
+            // has focus fires blur, and the blur handler reads this value —
+            // so tearing the field down in the other order submitted the key
+            // a second time.
             input.value = '';
+            input.blur();
+            input.hidden = true;
             state.hidden = false;
             badge.className = 'badge badge--success';
             badge.textContent = V.t('secret_set');
@@ -728,12 +755,19 @@
     function autosaveSecret(el, send) {
         if (!el) return;
         var timer = null;
+        var sending = null;      // the value currently on its way to the device
+
         function push() {
             var value = el.value;
             if (!value) return;              // an empty box means "leave it"
+            // The settle timer firing and the blur that follows it are one
+            // intention, not two. Without this the key is posted twice.
+            if (value === sending) return;
+            sending = value;
             commit(send(value))
                 .then(function () { el.dispatchEvent(new CustomEvent('secret:stored')); })
-                .catch(function () {});
+                .catch(function () {})
+                .then(function () { sending = null; });
         }
         el.addEventListener('input', function () {
             clearTimeout(timer);
